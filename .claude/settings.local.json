@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(rm -f src/App.css src/assets/react.svg src/assets/vite.svg src/assets/hero.png public/icons.svg)",
+      "Bash(rmdir src/assets)"
+    ]
+  }
+}

@@ -1,0 +1,222 @@
+import { useState } from 'react'
+import { X } from 'lucide-react'
+import type { AuthProfile } from '@/data/auth'
+import {
+  useMarcarDivergencia,
+  FORMA_PAGAMENTO_LABEL,
+  FORMA_PAGAMENTO_OPTIONS,
+  type FormaPagamento,
+} from '@/data/pagamentos'
+import { toCents, formatBRL } from '@/lib/money'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
+import { Label } from '@/components/ui/label'
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+  DialogDescription,
+} from '@/components/ui/dialog'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+
+const FORMA_PADRAO: FormaPagamento = 'dinheiro'
+const MAX_LINHAS = 4
+
+type Linha = { forma: FormaPagamento; valor: string }
+
+function linhaInicial(valorCents: number): Linha {
+  return { forma: FORMA_PADRAO, valor: (valorCents / 100).toFixed(2).replace('.', ',') }
+}
+
+export function MarcarDivergenciaDialog({
+  entregaId,
+  formaEsperadaAtual,
+  valorCents,
+  profile,
+  open,
+  onOpenChange,
+}: {
+  entregaId: string
+  formaEsperadaAtual: FormaPagamento | null
+  valorCents: number
+  profile: AuthProfile
+  open: boolean
+  onOpenChange: (open: boolean) => void
+}) {
+  const [formaEsperada, setFormaEsperada] = useState<FormaPagamento>(formaEsperadaAtual ?? FORMA_PADRAO)
+  const [linhas, setLinhas] = useState<Linha[]>([linhaInicial(valorCents)])
+  const [justificativa, setJustificativa] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+
+  const marcarDivergencia = useMarcarDivergencia()
+
+  function handleOpenChange(next: boolean) {
+    onOpenChange(next)
+    if (next) {
+      setFormaEsperada(formaEsperadaAtual ?? FORMA_PADRAO)
+      setLinhas([linhaInicial(valorCents)])
+      setJustificativa('')
+      setErro(null)
+    }
+  }
+
+  function addLinha() {
+    setLinhas((prev) => (prev.length >= MAX_LINHAS ? prev : [...prev, { forma: FORMA_PADRAO, valor: '' }]))
+  }
+
+  function removeLinha(index: number) {
+    setLinhas((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)))
+  }
+
+  function updateLinha(index: number, patch: Partial<Linha>) {
+    setLinhas((prev) => prev.map((linha, i) => (i === index ? { ...linha, ...patch } : linha)))
+  }
+
+  const totalRealizadoCents = linhas.reduce((soma, linha) => soma + toCents(linha.valor), 0)
+  const totalBate = totalRealizadoCents === valorCents
+
+  function handleConfirmar() {
+    if (linhas.some((linha) => toCents(linha.valor) <= 0)) {
+      setErro('Toda linha precisa de um valor maior que zero.')
+      return
+    }
+    if (!totalBate) {
+      setErro(
+        `A soma (${formatBRL(totalRealizadoCents)}) não bate com o valor da compra (${formatBRL(valorCents)}).`
+      )
+      return
+    }
+    const ehDivergente = linhas.length > 1 || linhas[0].forma !== formaEsperada
+    if (!ehDivergente) {
+      setErro('Isso bate com o que já era esperado — não é divergência.')
+      return
+    }
+    if (!justificativa.trim()) {
+      setErro('Justificativa é obrigatória.')
+      return
+    }
+
+    marcarDivergencia.mutate(
+      {
+        tenantId: profile.tenantId,
+        entregaId,
+        formaAnterior: formaEsperada,
+        pagamentosRealizados: linhas.map((linha) => ({ forma: linha.forma, valorCents: toCents(linha.valor) })),
+        valorCentsPrevisto: valorCents,
+        justificativa: justificativa.trim(),
+        registradoPor: profile.id,
+        autorNome: profile.nome,
+        criarPrevisto: formaEsperadaAtual === null,
+      },
+      {
+        onSuccess: () => onOpenChange(false),
+        onError: (error) => setErro(error.message),
+      }
+    )
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Notificar divergência de pagamento</DialogTitle>
+          <DialogDescription>
+            {formaEsperadaAtual
+              ? `Era: ${FORMA_PAGAMENTO_LABEL[formaEsperadaAtual]}. Registra como foi pago de verdade — pode ser em mais de uma forma.`
+              : 'Essa entrega não tem forma de pagamento registrada ainda — informa a esperada e como foi pago de verdade.'}
+          </DialogDescription>
+        </DialogHeader>
+
+        {formaEsperadaAtual === null && (
+          <div className="flex flex-col gap-2">
+            <Label>Forma esperada (prevista)</Label>
+            <Select value={formaEsperada} onValueChange={(v) => setFormaEsperada(v as FormaPagamento)}>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {FORMA_PAGAMENTO_OPTIONS.map(([valor, label]) => (
+                  <SelectItem key={valor} value={valor}>
+                    {label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        )}
+
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <Label>Forma(s) realizada(s)</Label>
+            {linhas.length < MAX_LINHAS && (
+              <Button type="button" variant="ghost" size="sm" onClick={addLinha}>
+                + Adicionar forma
+              </Button>
+            )}
+          </div>
+
+          {linhas.map((linha, index) => (
+            <div key={index} className="flex items-center gap-2">
+              <Select value={linha.forma} onValueChange={(v) => updateLinha(index, { forma: v as FormaPagamento })}>
+                <SelectTrigger className="flex-1">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {FORMA_PAGAMENTO_OPTIONS.map(([valor, label]) => (
+                    <SelectItem key={valor} value={valor}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                className="w-24"
+                inputMode="decimal"
+                placeholder="R$"
+                value={linha.valor}
+                onChange={(e) => updateLinha(index, { valor: e.target.value })}
+              />
+              {linhas.length > 1 && (
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon-sm"
+                  aria-label="Remover forma"
+                  onClick={() => removeLinha(index)}
+                >
+                  <X />
+                </Button>
+              )}
+            </div>
+          ))}
+
+          <p className={totalBate ? 'text-xs text-muted-foreground' : 'text-xs text-destructive'}>
+            Total: {formatBRL(totalRealizadoCents)} de {formatBRL(valorCents)} esperado
+            {!totalBate && ' — não bate'}
+          </p>
+        </div>
+
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="justificativa">Justificativa</Label>
+          <Textarea
+            id="justificativa"
+            value={justificativa}
+            onChange={(e) => setJustificativa(e.target.value)}
+            placeholder='Ex: "Cliente pagou metade em pix e metade em dinheiro."'
+          />
+        </div>
+
+        {erro && <p className="text-sm text-destructive">{erro}</p>}
+
+        <DialogFooter>
+          <Button onClick={handleConfirmar} disabled={marcarDivergencia.isPending}>
+            {marcarDivergencia.isPending ? 'Salvando…' : 'Confirmar'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
