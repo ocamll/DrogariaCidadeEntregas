@@ -127,15 +127,18 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       todas as entregas de uma vez. Testado ponta a ponta com um vale
       entregue e outro com insucesso na mesma corrida.
 - [x] Marcar divergência de pagamento — menu "⋮" em todo vale de cliente
-      (não só nos já divergentes). Aceita **mais de uma forma na divergência**
-      (ex: metade pix, metade dinheiro — até 4 linhas, soma tem que bater com
-      o valor da compra), grava um `pagamentos.realizado` por forma + evento
-      `pagamento_alterado` com justificativa. Admin/gerente vê contador no
-      cabeçalho (só o aviso do dia, some do ar quando o dia vira) e aba
-      "Divergências" (registro permanente — vale, cliente, de/pra com
-      valores, justificativa e autor de toda divergência já marcada, sem
-      limite de data). Sem a aba, a justificativa só existia no banco;
-      ninguém em gestão conseguia consultar o "porquê" depois do dia acabar.
+      (não só nos já divergentes), item "Notificar ocorrência" (nome
+      genérico desde que passou a cobrir mais de um tipo — ver bullet de
+      receita/notificações abaixo). Aceita **mais de uma forma na
+      divergência** (ex: metade pix, metade dinheiro — até 4 linhas, soma
+      tem que bater com o valor da compra), grava um `pagamentos.realizado`
+      por forma + evento `pagamento_alterado` com justificativa.
+      Admin/gerente vê contador no cabeçalho — botão "Notificações" (só o
+      aviso do dia, some do ar quando o dia vira) — e aba "Ocorrências"
+      (registro permanente — vale, cliente, resumo, justificativa e autor
+      de toda ocorrência já marcada, sem limite de data). Sem a aba, a
+      justificativa só existia no banco; ninguém em gestão conseguia
+      consultar o "porquê" depois do dia acabar.
 - [x] Relatórios em tela: dia, período, por mototaxista, por agência — aba
       "Relatórios" (admin/gerente), filtro De/Até (atalhos "Hoje"/"Este
       mês"), resumo geral (vales, cliente vs. transferência, valor de
@@ -145,21 +148,86 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       justifica ainda. Sem gráfico e sem PDF (ambos na lista "Fora").
       Testado com "Este mês": números batem, inclusive corrida antiga sem
       agência contando só pro motoboy.
-- [ ] Cadastro de agências, mototaxistas, convênios
-- [~] **Fila offline** (IndexedDB + sync em background + indicador visual) —
-      feito só pro cadastro de entrega (o fluxo de velocidade/zero-mouse,
-      o que mais precisa disso). `criarEntrega` virou `upsert` (não
-      `insert`) e `criarPagamentoPrevisto` aceita id determinístico
-      (mesmo uuid da entrega) — sem isso, reenviar um item da fila depois
-      de falha parcial duplicava o pagamento previsto. Sincroniza sozinho
-      no evento `online` e ao abrir o app; indicador no cabeçalho mostra
-      quantos itens estão pendentes/com erro. Testado de verdade: bloqueei
-      `navigator.onLine`, cadastrei uma entrega (ficou só no IndexedDB,
-      nada foi pro Supabase), religuei, sincronizou sozinha e pegou vale
-      real do banco. **Transferência, corrida/assinatura, divergência e
-      fechamento de corrida continuam só online** — não entraram nessa
-      fila ainda, ficam pra quando/se fizer falta.
-- [ ] Lista simples de documentos de convênio pendentes de retorno
+- [x] **Cadastro de agências, mototaxistas, convênios** — aba "Cadastros"
+      (admin/gerente), sub-abas pra cada entidade. Tabelas já existiam desde
+      o schema inicial (com RLS pronta, escrita restrita a `is_gerente()`) —
+      sessão foi só UI + `src/data/cadastros.ts` em cima do que já existia,
+      sem migration. Não entra na fila offline (tela de admin, uso
+      ocasional, não compete com o teste dos 25 segundos do caixa) — usa
+      `useMutation` direto, mesmo padrão que `entregas`/`corridas` usavam
+      antes da fila existir. "Remover" é toggle de `ativo` (clicável direto
+      na lista, sem abrir o formulário) — nunca `DELETE`, mesmo princípio da
+      regra 4. Motoboy sem agência nunca aparece no dropdown filtrado de
+      "Nova corrida", por isso agência é obrigatória no formulário de
+      motoboy mesmo o schema permitindo null; o formulário busca todas as
+      agências (não só ativas) pra um motoboy já associado a uma agência
+      desativada continuar editável sem "sumir". Testado de verdade: criei
+      agência nova (apareceu no dropdown de Nova corrida), criei motoboy
+      associado a ela (apareceu filtrado certo), editei o motoboy, desativei
+      a agência (sumiu do dropdown, continuou listada em Cadastros como
+      inativa, motoboy associado continuou editável mostrando "(inativa)"),
+      criei convênio com o toggle de `exige_assinatura`.
+- [x] **Fila offline** (IndexedDB + sync em background + indicador visual) —
+      cobre as 5 escritas: cadastro de entrega, transferência entre filiais,
+      corrida com assinatura, marcar divergência de pagamento e fechamento
+      de corrida. Um único store genérico (`filaOperacoes`, Dexie versão 2,
+      com upgrade automático a partir do store antigo `filaEntregas`) com
+      `tipo` discriminando o payload; `enfileirarOperacao`/
+      `processarFilaOperacoes` em `src/data/filaOffline.ts` despacham pra
+      cada função de escrita e invalidam as query keys certas por tipo.
+      Cada escrita reenviável pela fila carrega os ids que precisa
+      determinísticos (gerados no componente, antes de enfileirar, nunca
+      dentro da função de escrita) — é isso que torna reenvio depois de
+      falha parcial um no-op, nunca duplicata. `entregas`/`corridas` têm
+      policy de UPDATE no RLS, então usam `upsert`; `pagamentos`/
+      `assinaturas` não têm (de propósito, pra não permitir alterar
+      registro já gravado), então usam `insert` + trata erro `23505`
+      (chave duplicada) como sucesso — ver `isDuplicateKeyError` em
+      `src/lib/supabase.ts`. `eventos.id` é gerado pelo banco (não dá pra
+      usar id determinístico nem upsert sem abrir uma policy de UPDATE, que
+      quebraria o append-only da regra 6) — migration
+      `20260809190000_eventos_idempotency_key.sql` adiciona
+      `idempotency_key uuid` + índice único parcial, e o insert do evento
+      de divergência faz um `select` por essa chave antes de inserir.
+      Testado de verdade: os 4 fluxos novos, um de cada vez, com
+      `navigator.onLine` bloqueado (ficou só no IndexedDB, nada foi pro
+      Supabase), religado (sincronizou sozinho, sem duplicata) — e o
+      mecanismo de dedupe de `eventos` confirmado direto no banco (segunda
+      inserção com a mesma chave voltou `23505`, só uma linha ficou
+      gravada). Cadastro de entrega (fluxo já existente) testado de novo
+      depois da migração do Dexie pra v2, sem regressão.
+- [x] **Receita, documentos pendentes e notificações unificadas** —
+      encadeando o cadastro de convênio com a custódia de papel. Cadastro
+      de entrega ganhou dois campos fora do fluxo rápido de Enter: select
+      de convênio (só aparece se forma de pagamento = "Convênio", grava
+      `convenio_id` + `status_documental='pendente'`) e checkbox "Precisa
+      de receita" (`tem_receita boolean` — **só existência/custódia do
+      papel, nenhum dado de medicamento ou princípio ativo, confirmado com
+      o usuário por causa da regra 9**). Enter na forma de pagamento
+      continua salvando direto quando não é convênio e o checkbox não foi
+      tocado — o teste dos 25s não regrediu. Aba "Documentos" (visível pra
+      qualquer usuário, não só gerência — quem recebe o papel de volta é o
+      caixa do balcão) lista pendências de convênio e de receita com botão
+      de marcar recebido/devolvida, mutation direta sem fila offline
+      (`src/data/documentos.ts`). Retorno de corrida: motivo "outro" do
+      insucesso ganhou textarea obrigatória, grava em `entregas.observacoes`
+      (coluna que já existia, nunca usada antes) e evento
+      `insucesso_detalhado`. "Notificar ocorrência" (menu do vale) virou um
+      seletor de duas opções — Divergência de pagamento / Falta de receita
+      (a segunda só aparece se o vale tem receita marcada) — a de receita
+      entra na fila offline igual a de pagamento (`falta_receita` em
+      `TipoOperacaoFila`). Botão do cabeçalho e aba de histórico
+      generalizados pra cobrir os 3 tipos de evento
+      (`src/data/notificacoes.ts` agrega tudo). Idempotência de eventos
+      reaproveita o mesmo padrão de `idempotency_key` + `select`-antes-de-
+      inserir, agora extraído pra `src/data/eventos.ts` (usado por
+      divergência, falta de receita e insucesso detalhado). Migration
+      `20260809210000_receita_custodia.sql` (só 3 colunas nullable/default
+      em `entregas`, nada em RLS). Testado de ponta a ponta: entrega criada
+      com convênio + receita marcada, apareceu nas duas listas de
+      pendência, marquei as duas como recebidas, motivo "outro" com texto
+      apareceu em Notificações e na aba Ocorrências, "Falta de receita"
+      testada pelo seletor do menu.
 - [ ] Log de eventos
 
 ### Fora — não construir, não sugerir, não "já que estou aqui"
@@ -236,8 +304,9 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
 7. ~~Relatórios~~ — feito. Aba com filtro de período, resumo geral, tabela
    por motoboy e tabela por agência. Só números e tabela — sem gráfico, sem
    PDF, agregação client-side.
-8. ~~Fila offline~~ — feito, escopo reduzido: só cadastro de entrega.
-   Ver nota na lista "Dentro" sobre o que ficou de fora e por quê.
+8. ~~Fila offline~~ — feito. Cobre as 5 escritas do app (entrega,
+   transferência, corrida/assinatura, divergência, fechamento de corrida).
+   Ver nota na lista "Dentro" pro detalhe de como cada uma ficou idempotente.
 
 ---
 

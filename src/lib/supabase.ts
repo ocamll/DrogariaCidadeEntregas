@@ -10,3 +10,11 @@ if (!supabaseUrl || !supabaseAnonKey) {
 }
 
 export const supabase = createClient(supabaseUrl, supabaseAnonKey)
+
+// pagamentos e assinaturas não têm policy de UPDATE (de propósito — impedir
+// alteração de registro já gravado), então reenvio idempotente da fila
+// offline não pode usar upsert nessas tabelas. Em vez disso: insert com id
+// determinístico, e trata "já existe" (23505) como sucesso, não erro.
+export function isDuplicateKeyError(error: { code?: string } | null | undefined): boolean {
+  return error?.code === '23505'
+}

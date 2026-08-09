@@ -1,8 +1,9 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
 import type { AuthProfile } from '@/data/auth'
 import type { NovaEntrega } from '@/data/entregas'
-import { enfileirarEntrega } from '@/data/filaOffline'
+import { enfileirarOperacao } from '@/data/filaOffline'
 import { FORMA_PAGAMENTO_OPTIONS, type FormaPagamento } from '@/data/pagamentos'
+import { useConveniosCadastro } from '@/data/cadastros'
 import { uuidv7 } from '@/lib/uuid'
 import { toCents } from '@/lib/money'
 import { Button } from '@/components/ui/button'
@@ -50,14 +51,20 @@ function CadastroEntregaForm({
   const [valorCompra, setValorCompra] = useState('')
   const [valorEntrega, setValorEntrega] = useState('')
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>('dinheiro')
+  const [convenioId, setConvenioId] = useState('')
+  const [temReceita, setTemReceita] = useState(false)
   const [erroValidacao, setErroValidacao] = useState<string | null>(null)
   const [status, setStatus] = useState<Status>(null)
+
+  const { data: convenios } = useConveniosCadastro()
+  const conveniosAtivos = (convenios ?? []).filter((c) => c.ativo)
 
   const nomeRef = useRef<HTMLInputElement>(null)
   const enderecoRef = useRef<HTMLInputElement>(null)
   const valorCompraRef = useRef<HTMLInputElement>(null)
   const valorEntregaRef = useRef<HTMLInputElement>(null)
   const formaRef = useRef<HTMLSelectElement>(null)
+  const convenioRef = useRef<HTMLSelectElement>(null)
 
   const hoje = new Date().toLocaleDateString('pt-BR')
 
@@ -77,6 +84,8 @@ function CadastroEntregaForm({
     setValorCompra('')
     setValorEntrega('')
     setFormaPagamento('dinheiro')
+    setConvenioId('')
+    setTemReceita(false)
     nomeRef.current?.focus()
   }
 
@@ -87,6 +96,10 @@ function CadastroEntregaForm({
 
     if (!nomeTrim || !enderecoTrim || !valorCompraTrim) {
       setErroValidacao('Preenche nome, endereço e valor da compra antes de salvar.')
+      return
+    }
+    if (formaPagamento === 'convenio' && !convenioId) {
+      setErroValidacao('Escolhe o convênio.')
       return
     }
     setErroValidacao(null)
@@ -102,19 +115,35 @@ function CadastroEntregaForm({
       valorEntregaCents: toCents(valorEntrega),
       formaPagamento,
       ocorridoEmLocal: new Date().toISOString(),
+      convenioId: formaPagamento === 'convenio' ? convenioId : null,
+      temReceita,
     }
 
     // grava na fila local primeiro (sempre funciona, mesmo sem rede) e já
     // libera a tela pro próximo cliente — sincroniza em segundo plano. O
     // número do vale só existe depois de sincronizar (é o banco que gera),
     // por isso não aparece aqui; confere na lista "Hoje" depois.
-    void enfileirarEntrega(payload)
+    void enfileirarOperacao('entrega', payload.id, payload)
     setStatus({ kind: 'ok', texto: `Entrega de ${payload.clienteNome} salva — sincronizando…` })
 
     resetForm()
   }
 
+  // Forma "convênio" precisa dizer qual — Enter aqui vai pro select de
+  // convênio em vez de salvar direto. Qualquer outra forma salva na hora,
+  // igual sempre foi (o checkbox de receita fica fora dessa cadeia de
+  // propósito, ver campo abaixo).
   function handleFormaKeyDown(e: KeyboardEvent<HTMLSelectElement>) {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    if (formaPagamento === 'convenio') {
+      convenioRef.current?.focus()
+      return
+    }
+    handleSalvar()
+  }
+
+  function handleConvenioKeyDown(e: KeyboardEvent<HTMLSelectElement>) {
     if (e.key !== 'Enter') return
     e.preventDefault()
     handleSalvar()
@@ -192,6 +221,38 @@ function CadastroEntregaForm({
                 ))}
               </select>
             </div>
+
+            {formaPagamento === 'convenio' && (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="convenio">Convênio</Label>
+                <select
+                  id="convenio"
+                  ref={convenioRef}
+                  className={SELECT_CLASSNAME}
+                  value={convenioId}
+                  onChange={(e) => setConvenioId(e.target.value)}
+                  onKeyDown={handleConvenioKeyDown}
+                >
+                  <option value="" disabled>
+                    Selecione…
+                  </option>
+                  {conveniosAtivos.map((c) => (
+                    <option key={c.id} value={c.id}>
+                      {c.nome}
+                    </option>
+                  ))}
+                </select>
+              </div>
+            )}
+
+            <label className="flex items-center gap-2 text-sm text-muted-foreground">
+              <input
+                type="checkbox"
+                checked={temReceita}
+                onChange={(e) => setTemReceita(e.target.checked)}
+              />
+              Precisa de receita
+            </label>
 
             {erroValidacao && <p className="text-sm text-destructive">{erroValidacao}</p>}
 

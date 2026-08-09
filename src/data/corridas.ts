@@ -1,7 +1,7 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
-import { uuidv7 } from '@/lib/uuid'
+import { useQuery } from '@tanstack/react-query'
+import { supabase, isDuplicateKeyError } from '@/lib/supabase'
 import { sha256Hex } from '@/lib/hash'
+import { inserirEventoIdempotente } from '@/data/eventos'
 
 export type Agencia = { id: string; nome: string }
 
@@ -85,6 +85,10 @@ export function useEntregasPendentesSemCorrida() {
 
 export type NovaCorridaComAssinatura = {
   corridaId: string
+  // gerado uma única vez por quem monta o payload (antes de enfileirar) —
+  // assinaturas não tem policy de UPDATE, então o insert abaixo depende de
+  // um id determinístico pra poder tratar reenvio como no-op.
+  assinaturaId: string
   tenantId: string
   lojaId: string
   agenciaId: string | null
@@ -96,13 +100,15 @@ export type NovaCorridaComAssinatura = {
 }
 
 // Três escritas sequenciais (corrida, depois as entregas em lote, depois a
-// assinatura) — mesma ressalva das outras telas: sem transação, sem fila
-// offline ainda. A imutabilidade de valor/cliente/vale só passa a valer
-// DEPOIS que a assinatura existir — o trigger no banco cuida disso sozinho.
+// assinatura) — sem transação, então cada uma precisa sobreviver a reenvio
+// da fila offline por conta própria. corridas tem policy de UPDATE (upsert
+// funciona); assinaturas não (insert + trata 23505 como já aplicado). A
+// imutabilidade de valor/cliente/vale só passa a valer DEPOIS que a
+// assinatura existir — o trigger no banco cuida disso sozinho.
 export async function criarCorridaComAssinatura(
   input: NovaCorridaComAssinatura
 ): Promise<{ numeroVales: string[] }> {
-  const { error: corridaError } = await supabase.from('corridas').insert({
+  const { error: corridaError } = await supabase.from('corridas').upsert({
     id: input.corridaId,
     tenant_id: input.tenantId,
     loja_id: input.lojaId,
@@ -133,29 +139,17 @@ export async function criarCorridaComAssinatura(
   const hashSha256 = await sha256Hex(canonico)
 
   const { error: assinaturaError } = await supabase.from('assinaturas').insert({
-    id: uuidv7(),
+    id: input.assinaturaId,
     tenant_id: input.tenantId,
     corrida_id: input.corridaId,
     strokes: input.strokes,
     hash_sha256: hashSha256,
     user_agent: navigator.userAgent,
   })
-  if (assinaturaError) throw assinaturaError
+  if (assinaturaError && !isDuplicateKeyError(assinaturaError)) throw assinaturaError
 
   const rows = entregasAtualizadas as unknown as Array<{ numero_vale: string }>
   return { numeroVales: rows.map((r) => r.numero_vale) }
-}
-
-export function useCriarCorridaComAssinatura() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: criarCorridaComAssinatura,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['entregas-hoje'] })
-      queryClient.invalidateQueries({ queryKey: ['entregas-pendentes-sem-corrida'] })
-      queryClient.invalidateQueries({ queryKey: ['entregas-historico'] })
-    },
-  })
 }
 
 export type InsucessoMotivo = 'ausente' | 'endereco_errado' | 'recusou' | 'outro'
@@ -234,12 +228,22 @@ export function useCorridasAbertas() {
 
 export type FecharCorridaInput = {
   corridaId: string
+  tenantId: string
   retornoPor: string
+  autorNome: string
   retornoEm: string
   entregas: Array<{
     entregaId: string
+    numeroVale: string
     statusEntrega: 'entregue' | 'insucesso'
     insucessoMotivo: InsucessoMotivo | null
+    // só quando motivo === 'outro' — reaproveita entregas.observacoes
+    // (coluna já existia, nunca usada em lugar nenhum antes disso).
+    insucessoDetalhe: string | null
+    // gerado no componente, só quando tem detalhe — mesmo padrão de
+    // idempotência dos outros eventos (fecharCorrida passa pela fila
+    // offline, pode reenviar depois de falha parcial).
+    eventoIdempotencyKey: string | null
   }>
 }
 
@@ -252,9 +256,25 @@ export async function fecharCorrida(input: FecharCorridaInput) {
       .update({
         status_entrega: entrega.statusEntrega,
         insucesso_motivo: entrega.insucessoMotivo,
+        observacoes: entrega.insucessoDetalhe,
       })
       .eq('id', entrega.entregaId)
     if (error) throw error
+
+    if (entrega.insucessoDetalhe && entrega.eventoIdempotencyKey) {
+      await inserirEventoIdempotente({
+        tenantId: input.tenantId,
+        entregaId: entrega.entregaId,
+        tipo: 'insucesso_detalhado',
+        idempotencyKey: entrega.eventoIdempotencyKey,
+        payload: {
+          numero_vale: entrega.numeroVale,
+          motivo_detalhe: entrega.insucessoDetalhe,
+          autor_nome: input.autorNome,
+        },
+        registradoPor: input.retornoPor,
+      })
+    }
   }
 
   const { error: corridaError } = await supabase
@@ -268,14 +288,3 @@ export async function fecharCorrida(input: FecharCorridaInput) {
   if (corridaError) throw corridaError
 }
 
-export function useFecharCorrida() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: fecharCorrida,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['entregas-hoje'] })
-      queryClient.invalidateQueries({ queryKey: ['entregas-historico'] })
-      queryClient.invalidateQueries({ queryKey: ['corridas-abertas'] })
-    },
-  })
-}

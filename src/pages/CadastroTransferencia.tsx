@@ -1,6 +1,7 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
 import type { AuthProfile } from '@/data/auth'
-import { useCriarTransferencia } from '@/data/entregas'
+import type { NovaTransferencia } from '@/data/entregas'
+import { enfileirarOperacao } from '@/data/filaOffline'
 import { useLojas } from '@/data/lojas'
 import { uuidv7 } from '@/lib/uuid'
 import { Button } from '@/components/ui/button'
@@ -50,7 +51,6 @@ function CadastroTransferenciaForm({
   const [erroValidacao, setErroValidacao] = useState<string | null>(null)
 
   const selectRef = useRef<HTMLSelectElement>(null)
-  const criarTransferencia = useCriarTransferencia()
   const hoje = new Date().toLocaleDateString('pt-BR')
 
   function resetForm() {
@@ -67,7 +67,7 @@ function CadastroTransferenciaForm({
     }
     setErroValidacao(null)
 
-    const payload = {
+    const payload: NovaTransferencia = {
       id,
       tenantId: profile.tenantId,
       lojaId,
@@ -78,16 +78,12 @@ function CadastroTransferenciaForm({
       ocorridoEmLocal: new Date().toISOString(),
     }
 
-    criarTransferencia.mutate(payload, {
-      onSuccess: (resultado) => {
-        setStatus({
-          kind: 'ok',
-          texto: `Transferência salva: ${payload.lojaOrigemNome} para ${payload.lojaDestinoNome} (vale ${resultado.numeroVale})`,
-        })
-      },
-      onError: (error) => {
-        setStatus({ kind: 'error', texto: `Não salvou a transferência: ${error.message}` })
-      },
+    // grava local e libera a tela na hora (mesmo padrão do cadastro de
+    // entrega) — o número do vale só existe depois de sincronizar.
+    void enfileirarOperacao('transferencia', payload.id, payload)
+    setStatus({
+      kind: 'ok',
+      texto: `Transferência de ${payload.lojaOrigemNome} para ${payload.lojaDestinoNome} salva — sincronizando…`,
     })
 
     resetForm()

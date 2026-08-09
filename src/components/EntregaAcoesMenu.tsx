@@ -9,25 +9,31 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu'
-import { MarcarDivergenciaDialog } from '@/components/MarcarDivergenciaDialog'
+import { NotificarOcorrenciaDialog } from '@/components/NotificarOcorrenciaDialog'
 
 export function EntregaAcoesMenu({
   entregaId,
   tipo,
   formaEsperadaAtual,
   valorCents,
+  temReceita,
   profile,
 }: {
   entregaId: string
   tipo: 'cliente' | 'transferencia'
   formaEsperadaAtual: FormaPagamento | null
   valorCents: number
+  temReceita: boolean
   profile: AuthProfile
 }) {
-  const [divergenciaAberta, setDivergenciaAberta] = useState(false)
+  const [ocorrenciaAberta, setOcorrenciaAberta] = useState(false)
 
-  // transferência não tem pagamento — não faz sentido "divergência" nela.
-  if (tipo === 'transferencia') return null
+  // transferência não tem pagamento — divergência não faz sentido nela.
+  // Sem receita marcada, também não tem o que notificar de "falta de
+  // receita". Se nenhum dos dois se aplica, não tem ação nenhuma pra
+  // oferecer aqui.
+  const podeNotificar = tipo !== 'transferencia' || temReceita
+  if (!podeNotificar) return null
 
   return (
     <>
@@ -38,19 +44,21 @@ export function EntregaAcoesMenu({
           </Button>
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end">
-          <DropdownMenuItem onSelect={() => setDivergenciaAberta(true)}>
-            Notificar divergência de pagamento
+          <DropdownMenuItem onSelect={() => setOcorrenciaAberta(true)}>
+            Notificar ocorrência
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>
 
-      <MarcarDivergenciaDialog
+      <NotificarOcorrenciaDialog
         entregaId={entregaId}
+        tipo={tipo}
         formaEsperadaAtual={formaEsperadaAtual}
         valorCents={valorCents}
+        temReceita={temReceita}
         profile={profile}
-        open={divergenciaAberta}
-        onOpenChange={setDivergenciaAberta}
+        open={ocorrenciaAberta}
+        onOpenChange={setOcorrenciaAberta}
       />
     </>
   )

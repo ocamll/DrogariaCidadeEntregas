@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { criarPagamentoPrevisto, type FormaPagamento } from '@/data/pagamentos'
 import { toCents } from '@/lib/money'
@@ -15,6 +15,8 @@ export type NovaEntrega = {
   valorEntregaCents: number
   formaPagamento: FormaPagamento
   ocorridoEmLocal: string
+  convenioId: string | null
+  temReceita: boolean
 }
 
 // numero_vale não vem do caixa — o banco gera (ver migration
@@ -39,6 +41,9 @@ export async function criarEntrega(input: NovaEntrega): Promise<{ numeroVale: st
       valor_compra_cents: input.valorCompraCents,
       valor_entrega_cents: input.valorEntregaCents,
       ocorrido_em_local: input.ocorridoEmLocal,
+      convenio_id: input.convenioId,
+      status_documental: input.convenioId ? 'pendente' : 'nao_aplica',
+      tem_receita: input.temReceita,
     })
     .select('numero_vale')
     .single()
@@ -58,16 +63,6 @@ export async function criarEntrega(input: NovaEntrega): Promise<{ numeroVale: st
   return { numeroVale: row.numero_vale }
 }
 
-export function useCriarEntrega() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: criarEntrega,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['entregas-hoje'] })
-    },
-  })
-}
-
 export type NovaTransferencia = {
   id: string
   tenantId: string
@@ -82,10 +77,14 @@ export type NovaTransferencia = {
 // Mesmo vale/sequência da entrega de cliente, só que sem cliente nem
 // valor — ver migration transferencia_entre_filiais. Não cria pagamento
 // nenhum (não é venda).
+//
+// upsert (não insert): mesmo motivo do criarEntrega — a fila offline pode
+// reenviar pelo mesmo id depois de uma falha parcial, e isso precisa virar
+// no-op, não erro de chave duplicada.
 export async function criarTransferencia(input: NovaTransferencia): Promise<{ numeroVale: string }> {
   const { data, error } = await supabase
     .from('entregas')
-    .insert({
+    .upsert({
       id: input.id,
       tenant_id: input.tenantId,
       loja_id: input.lojaId,
@@ -104,16 +103,6 @@ export async function criarTransferencia(input: NovaTransferencia): Promise<{ nu
   return { numeroVale: row.numero_vale }
 }
 
-export function useCriarTransferencia() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: criarTransferencia,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['entregas-hoje'] })
-    },
-  })
-}
-
 export type EntregaRecente = {
   id: string
   numeroVale: string
@@ -126,10 +115,12 @@ export type EntregaRecente = {
   ocorridoEmLocal: string
   formaPrevista: FormaPagamento | null
   formasRealizadas: FormaPagamento[]
+  temReceita: boolean
+  receitaRecebidaEm: string | null
 }
 
 const ENTREGA_RECENTE_SELECT =
-  'id, numero_vale, tipo, cliente_nome, cliente_endereco, valor_compra_cents, valor_entrega_cents, status_entrega, ocorrido_em_local, pagamentos(forma, momento)'
+  'id, numero_vale, tipo, cliente_nome, cliente_endereco, valor_compra_cents, valor_entrega_cents, status_entrega, ocorrido_em_local, tem_receita, receita_recebida_em, pagamentos(forma, momento)'
 
 type EntregaRecenteRow = {
   id: string
@@ -141,6 +132,8 @@ type EntregaRecenteRow = {
   valor_entrega_cents: number
   status_entrega: string
   ocorrido_em_local: string
+  tem_receita: boolean
+  receita_recebida_em: string | null
   pagamentos: Array<{ forma: FormaPagamento; momento: 'previsto' | 'realizado' }>
 }
 
@@ -157,6 +150,8 @@ function mapEntregaRecente(row: EntregaRecenteRow): EntregaRecente {
     ocorridoEmLocal: row.ocorrido_em_local,
     formaPrevista: row.pagamentos.find((p) => p.momento === 'previsto')?.forma ?? null,
     formasRealizadas: row.pagamentos.filter((p) => p.momento === 'realizado').map((p) => p.forma),
+    temReceita: row.tem_receita,
+    receitaRecebidaEm: row.receita_recebida_em,
   }
 }
 

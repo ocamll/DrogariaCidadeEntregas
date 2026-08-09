@@ -5,8 +5,9 @@ import {
   useAgencias,
   useMototaxistas,
   useEntregasPendentesSemCorrida,
-  useCriarCorridaComAssinatura,
+  type NovaCorridaComAssinatura,
 } from '@/data/corridas'
+import { enfileirarOperacao } from '@/data/filaOffline'
 import { uuidv7 } from '@/lib/uuid'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -72,8 +73,6 @@ function NovaCorridaForm({
     }
   }, [])
 
-  const criarCorrida = useCriarCorridaComAssinatura()
-
   function toggleEntrega(id: string) {
     setSelecionadas((prev) => {
       const next = new Set(prev)
@@ -118,8 +117,9 @@ function NovaCorridaForm({
     }
     setErro(null)
 
-    const payload = {
+    const payload: NovaCorridaComAssinatura = {
       corridaId: uuidv7(),
+      assinaturaId: uuidv7(),
       tenantId: profile.tenantId,
       lojaId,
       agenciaId,
@@ -130,18 +130,13 @@ function NovaCorridaForm({
       ocorridoEmLocal: new Date().toISOString(),
     }
 
-    criarCorrida.mutate(payload, {
-      onSuccess: (resultado) => {
-        setStatus({
-          kind: 'ok',
-          texto: `Corrida criada: ${resultado.numeroVales.join(', ')}`,
-        })
-        limparFormulario()
-      },
-      onError: (error) => {
-        setStatus({ kind: 'error', texto: `Não criou a corrida: ${error.message}` })
-      },
-    })
+    // grava local e libera a tela na hora (mesmo padrão do cadastro de
+    // entrega) — os números dos vales já existem (foram gerados na criação
+    // da entrega), mas a confirmação da corrida em si só é definitiva depois
+    // de sincronizar.
+    void enfileirarOperacao('corrida', payload.corridaId, payload)
+    setStatus({ kind: 'ok', texto: 'Corrida registrada — sincronizando…' })
+    limparFormulario()
   }
 
   return (
@@ -248,8 +243,8 @@ function NovaCorridaForm({
 
             {erro && <p className="text-sm text-destructive">{erro}</p>}
 
-            <Button type="button" onClick={handleConfirmar} disabled={criarCorrida.isPending}>
-              {criarCorrida.isPending ? 'Salvando…' : 'Confirmar saída'}
+            <Button type="button" onClick={handleConfirmar}>
+              Confirmar saída
             </Button>
 
             {status && (

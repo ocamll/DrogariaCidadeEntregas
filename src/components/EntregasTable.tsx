@@ -95,6 +95,7 @@ export function EntregasTable({
                   tipo={entrega.tipo}
                   formaEsperadaAtual={entrega.formaPrevista}
                   valorCents={entrega.valorCompraCents}
+                  temReceita={entrega.temReceita}
                   profile={profile}
                 />
               </TableCell>

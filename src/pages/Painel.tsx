@@ -2,8 +2,10 @@ import { useState } from 'react'
 import type { AuthProfile } from '@/data/auth'
 import { ListaEntregas } from '@/pages/ListaEntregas'
 import { HistoricoEntregas } from '@/pages/HistoricoEntregas'
-import { DivergenciasEntregas } from '@/pages/DivergenciasEntregas'
+import { DocumentosPendentes } from '@/pages/DocumentosPendentes'
+import { Ocorrencias } from '@/pages/Ocorrencias'
 import { Relatorios } from '@/pages/Relatorios'
+import { Cadastros } from '@/pages/Cadastros'
 import { CadastroEntrega } from '@/pages/CadastroEntrega'
 import { CadastroTransferencia } from '@/pages/CadastroTransferencia'
 import { NovaCorrida } from '@/pages/NovaCorrida'
@@ -58,8 +60,10 @@ export function Painel({ profile }: { profile: AuthProfile }) {
             <TabsList>
               <TabsTrigger value="hoje">Hoje</TabsTrigger>
               <TabsTrigger value="historico">Histórico</TabsTrigger>
-              {isAdmin && <TabsTrigger value="divergencias">Divergências</TabsTrigger>}
+              <TabsTrigger value="documentos">Documentos</TabsTrigger>
+              {isAdmin && <TabsTrigger value="ocorrencias">Ocorrências</TabsTrigger>}
               {isAdmin && <TabsTrigger value="relatorios">Relatórios</TabsTrigger>}
+              {isAdmin && <TabsTrigger value="cadastros">Cadastros</TabsTrigger>}
             </TabsList>
             <TabsContent value="hoje" className="pt-3">
               <ListaEntregas profile={profile} />
@@ -67,14 +71,22 @@ export function Painel({ profile }: { profile: AuthProfile }) {
             <TabsContent value="historico" className="pt-3">
               <HistoricoEntregas profile={profile} />
             </TabsContent>
+            <TabsContent value="documentos" className="pt-3">
+              <DocumentosPendentes profile={profile} />
+            </TabsContent>
             {isAdmin && (
-              <TabsContent value="divergencias" className="pt-3">
-                <DivergenciasEntregas />
+              <TabsContent value="ocorrencias" className="pt-3">
+                <Ocorrencias />
               </TabsContent>
             )}
             {isAdmin && (
               <TabsContent value="relatorios" className="pt-3">
                 <Relatorios />
+              </TabsContent>
+            )}
+            {isAdmin && (
+              <TabsContent value="cadastros" className="pt-3">
+                <Cadastros profile={profile} />
               </TabsContent>
             )}
           </Tabs>

@@ -1,39 +1,91 @@
 import { useEffect } from 'react'
 import { useLiveQuery } from 'dexie-react-hooks'
-import { db, type ItemFilaEntrega } from '@/lib/db'
+import { db, type ItemFilaOperacao, type PayloadPorTipo, type TipoOperacaoFila } from '@/lib/db'
 import { queryClient } from '@/lib/queryClient'
-import { criarEntrega, type NovaEntrega } from '@/data/entregas'
+import { criarEntrega, criarTransferencia } from '@/data/entregas'
+import { criarCorridaComAssinatura, fecharCorrida } from '@/data/corridas'
+import { marcarDivergencia } from '@/data/pagamentos'
+import { notificarFaltaReceita } from '@/data/documentos'
+
+// Query keys invalidadas por tipo de operação, depois de sincronizar com
+// sucesso — mesmas listas que cada tela já invalidava quando escrevia direto
+// (ver histórico de src/data/entregas.ts, corridas.ts, pagamentos.ts).
+const QUERY_KEYS_POR_TIPO: Record<TipoOperacaoFila, string[]> = {
+  entrega: ['entregas-hoje'],
+  transferencia: ['entregas-hoje'],
+  corrida: ['entregas-hoje', 'entregas-pendentes-sem-corrida', 'entregas-historico'],
+  divergencia: ['entregas-hoje', 'entregas-historico', 'notificacoes-hoje', 'notificacoes-todas'],
+  fechamento_corrida: [
+    'entregas-hoje',
+    'entregas-historico',
+    'corridas-abertas',
+    'notificacoes-hoje',
+    'notificacoes-todas',
+  ],
+  falta_receita: ['notificacoes-hoje', 'notificacoes-todas'],
+}
+
+async function executarOperacao(item: ItemFilaOperacao): Promise<void> {
+  switch (item.tipo) {
+    case 'entrega':
+      await criarEntrega(item.payload)
+      return
+    case 'transferencia':
+      await criarTransferencia(item.payload)
+      return
+    case 'corrida':
+      await criarCorridaComAssinatura(item.payload)
+      return
+    case 'divergencia':
+      await marcarDivergencia(item.payload)
+      return
+    case 'fechamento_corrida':
+      await fecharCorrida(item.payload)
+      return
+    case 'falta_receita':
+      await notificarFaltaReceita(item.payload)
+      return
+  }
+}
 
 // Grava local primeiro (sempre funciona, mesmo sem rede), tenta enviar em
-// seguida. UUID v7 já vem gerado no cliente (regra 5) — reenvio é upsert,
-// nunca duplicata, então retry é seguro mesmo em falha parcial.
-export async function enfileirarEntrega(payload: NovaEntrega) {
-  await db.filaEntregas.put({
-    id: payload.id,
+// seguida. Todo id relevante já vem determinístico dentro do payload (gerado
+// por quem chama, regra 5 do CLAUDE.md) — reenvio é sempre seguro, nunca
+// duplicata, mesmo depois de falha parcial.
+export async function enfileirarOperacao<T extends TipoOperacaoFila>(
+  tipo: T,
+  id: string,
+  payload: PayloadPorTipo[T]
+) {
+  await db.filaOperacoes.put({
+    id,
+    tipo,
     payload,
     status: 'pendente',
     criadoEm: new Date().toISOString(),
     tentativas: 0,
-  })
-  void processarFilaEntregas()
+  } as ItemFilaOperacao)
+  void processarFilaOperacoes()
 }
 
 let processando = false
 
-export async function processarFilaEntregas() {
+export async function processarFilaOperacoes() {
   if (processando) return
   if (typeof navigator !== 'undefined' && !navigator.onLine) return
 
   processando = true
   try {
-    const pendentes = await db.filaEntregas.toArray()
+    const pendentes = await db.filaOperacoes.toArray()
     for (const item of pendentes) {
       try {
-        await criarEntrega(item.payload)
-        await db.filaEntregas.delete(item.id)
-        queryClient.invalidateQueries({ queryKey: ['entregas-hoje'] })
+        await executarOperacao(item)
+        await db.filaOperacoes.delete(item.id)
+        for (const chave of QUERY_KEYS_POR_TIPO[item.tipo]) {
+          queryClient.invalidateQueries({ queryKey: [chave] })
+        }
       } catch (error) {
-        await db.filaEntregas.update(item.id, {
+        await db.filaOperacoes.update(item.id, {
           status: 'erro',
           tentativas: item.tentativas + 1,
           erro: error instanceof Error ? error.message : String(error),
@@ -45,16 +97,16 @@ export async function processarFilaEntregas() {
   }
 }
 
-export function useFilaEntregasPendentes(): ItemFilaEntrega[] {
-  return useLiveQuery(() => db.filaEntregas.toArray(), [], [])
+export function useFilaOperacoesPendentes(): ItemFilaOperacao[] {
+  return useLiveQuery(() => db.filaOperacoes.toArray(), [], [])
 }
 
 // Dispara sync ao voltar internet e uma vez ao abrir o app — sem isso a
-// fila só esvazia na próxima vez que alguém cadastrar uma entrega nova.
+// fila só esvazia na próxima vez que alguém enfileirar algo novo.
 export function useSincronizarFilaOffline() {
   useEffect(() => {
-    void processarFilaEntregas()
-    window.addEventListener('online', processarFilaEntregas)
-    return () => window.removeEventListener('online', processarFilaEntregas)
+    void processarFilaOperacoes()
+    window.addEventListener('online', processarFilaOperacoes)
+    return () => window.removeEventListener('online', processarFilaOperacoes)
   }, [])
 }

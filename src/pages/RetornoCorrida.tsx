@@ -2,14 +2,17 @@ import { useState } from 'react'
 import type { AuthProfile } from '@/data/auth'
 import {
   useCorridasAbertas,
-  useFecharCorrida,
   INSUCESSO_MOTIVO_OPTIONS,
   type CorridaAberta,
+  type FecharCorridaInput,
   type InsucessoMotivo,
 } from '@/data/corridas'
+import { enfileirarOperacao } from '@/data/filaOffline'
+import { uuidv7 } from '@/lib/uuid'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
+import { Textarea } from '@/components/ui/textarea'
 
 type Status = { kind: 'ok'; texto: string } | { kind: 'error'; texto: string } | null
 
@@ -90,7 +93,11 @@ export function RetornoCorrida({ profile, onVoltar }: { profile: AuthProfile; on
   )
 }
 
-type ResultadoEntrega = { status: 'entregue' | 'insucesso'; motivo: InsucessoMotivo | null }
+type ResultadoEntrega = {
+  status: 'entregue' | 'insucesso'
+  motivo: InsucessoMotivo | null
+  detalhe: string
+}
 
 function FecharCorridaForm({
   corrida,
@@ -104,21 +111,32 @@ function FecharCorridaForm({
   onFechada: (texto: string) => void
 }) {
   const [resultados, setResultados] = useState<Record<string, ResultadoEntrega>>(() =>
-    Object.fromEntries(corrida.entregas.map((e) => [e.id, { status: 'entregue', motivo: null }]))
+    Object.fromEntries(
+      corrida.entregas.map((e) => [e.id, { status: 'entregue', motivo: null, detalhe: '' }])
+    )
   )
   const [erro, setErro] = useState<string | null>(null)
-
-  const fecharCorrida = useFecharCorrida()
 
   function setResultadoStatus(entregaId: string, statusEntrega: 'entregue' | 'insucesso') {
     setResultados((prev) => ({
       ...prev,
-      [entregaId]: { status: statusEntrega, motivo: statusEntrega === 'entregue' ? null : prev[entregaId].motivo },
+      [entregaId]: {
+        status: statusEntrega,
+        motivo: statusEntrega === 'entregue' ? null : prev[entregaId].motivo,
+        detalhe: statusEntrega === 'entregue' ? '' : prev[entregaId].detalhe,
+      },
     }))
   }
 
   function setResultadoMotivo(entregaId: string, motivo: InsucessoMotivo) {
-    setResultados((prev) => ({ ...prev, [entregaId]: { ...prev[entregaId], motivo } }))
+    setResultados((prev) => ({
+      ...prev,
+      [entregaId]: { ...prev[entregaId], motivo, detalhe: motivo === 'outro' ? prev[entregaId].detalhe : '' },
+    }))
+  }
+
+  function setResultadoDetalhe(entregaId: string, detalhe: string) {
+    setResultados((prev) => ({ ...prev, [entregaId]: { ...prev[entregaId], detalhe } }))
   }
 
   function handleConfirmar() {
@@ -128,25 +146,37 @@ function FecharCorridaForm({
         setErro(`Vale ${entrega.numeroVale}: escolhe o motivo do insucesso.`)
         return
       }
+      if (resultado.status === 'insucesso' && resultado.motivo === 'outro' && !resultado.detalhe.trim()) {
+        setErro(`Vale ${entrega.numeroVale}: escreve o motivo do insucesso.`)
+        return
+      }
     }
     setErro(null)
 
-    fecharCorrida.mutate(
-      {
-        corridaId: corrida.id,
-        retornoPor: profile.id,
-        retornoEm: new Date().toISOString(),
-        entregas: corrida.entregas.map((e) => ({
+    const payload: FecharCorridaInput = {
+      corridaId: corrida.id,
+      tenantId: profile.tenantId,
+      retornoPor: profile.id,
+      autorNome: profile.nome,
+      retornoEm: new Date().toISOString(),
+      entregas: corrida.entregas.map((e) => {
+        const resultado = resultados[e.id]
+        const detalhe = resultado.motivo === 'outro' ? resultado.detalhe.trim() : ''
+        return {
           entregaId: e.id,
-          statusEntrega: resultados[e.id].status,
-          insucessoMotivo: resultados[e.id].motivo,
-        })),
-      },
-      {
-        onSuccess: () => onFechada(`Corrida de ${corrida.mototaxistaNome} fechada.`),
-        onError: (error) => setErro(error.message),
-      }
-    )
+          numeroVale: e.numeroVale,
+          statusEntrega: resultado.status,
+          insucessoMotivo: resultado.motivo,
+          insucessoDetalhe: detalhe || null,
+          eventoIdempotencyKey: detalhe ? uuidv7() : null,
+        }
+      }),
+    }
+
+    // grava local e volta pra lista na hora (mesmo padrão do cadastro de
+    // entrega) — sincroniza em segundo plano.
+    void enfileirarOperacao('fechamento_corrida', payload.corridaId, payload)
+    onFechada(`Corrida de ${corrida.mototaxistaNome} fechada — sincronizando…`)
   }
 
   return (
@@ -202,14 +232,28 @@ function FecharCorridaForm({
                       </select>
                     )}
                   </div>
+
+                  {resultado.status === 'insucesso' && resultado.motivo === 'outro' && (
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor={`detalhe-${entrega.id}`} className="text-xs">
+                        Motivo do insucesso
+                      </Label>
+                      <Textarea
+                        id={`detalhe-${entrega.id}`}
+                        value={resultado.detalhe}
+                        onChange={(e) => setResultadoDetalhe(entrega.id, e.target.value)}
+                        placeholder="O que aconteceu?"
+                      />
+                    </div>
+                  )}
                 </div>
               )
             })}
 
             {erro && <p className="text-sm text-destructive">{erro}</p>}
 
-            <Button type="button" onClick={handleConfirmar} disabled={fecharCorrida.isPending}>
-              {fecharCorrida.isPending ? 'Salvando…' : 'Confirmar retorno e fechar corrida'}
+            <Button type="button" onClick={handleConfirmar}>
+              Confirmar retorno e fechar corrida
             </Button>
           </div>
         </CardContent>
