@@ -8,6 +8,7 @@ import {
 } from '@/data/entregas'
 import { useLojas } from '@/data/lojas'
 import { EntregasTable } from '@/components/EntregasTable'
+import { CampoMoeda } from '@/components/CampoMoeda'
 import { Paginacao, ResumoPagina } from '@/components/Paginacao'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -80,12 +81,13 @@ export function HistoricoEntregas({ profile }: { profile: AuthProfile }) {
           />
         </div>
         <div className="flex flex-col gap-1">
-          <Label htmlFor="f-valor">Valor da compra (R$)</Label>
-          <Input
+          <Label htmlFor="f-valor">Valor da compra</Label>
+          {/* mesma máscara do cadastro — o caixa busca digitando igual
+              lançou, sem ter que lembrar de outro formato aqui. */}
+          <CampoMoeda
             id="f-valor"
-            inputMode="decimal"
-            value={form.valorCompra}
-            onChange={(e) => setForm({ ...form, valorCompra: e.target.value })}
+            digitos={form.valorCompra}
+            onDigitos={(valorCompra) => setForm({ ...form, valorCompra })}
             onKeyDown={onEnter}
           />
         </div>

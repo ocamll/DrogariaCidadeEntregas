@@ -328,6 +328,50 @@ HMR do momento em que o hook já devolvia objeto e a tela ainda esperava
 array. Aba nova: zero erros. É o mesmo fenômeno já anotado mais abaixo,
 e a técnica da aba limpa resolveu de novo.
 
+## 12. Máscara de moeda — mata a ambiguidade do separador na raiz
+
+Eu tinha anotado o `toCents('1.234')` como gap aceitável (só quebra com
+ponto de milhar sem centavos, jeito que ninguém digita). O usuário
+inverteu o enquadramento: em vez de discutir *quando* o parser adivinha
+certo, tirar do caixa a possibilidade de confundir "," com "." — o campo
+formata sozinho enquanto ele digita.
+
+Máscara de centavos, igual maquininha de cartão: só dígitos, preenchendo
+da direita. `1` `2` `3` `4` `5` `6` → `0,01` → `0,12` → `1,23` → `12,34`
+→ `123,45` → `1.234,56`. Como separador nunca é digitado, não existe
+mais o que interpretar — o bug some por construção, não por heurística
+melhor.
+
+- `src/components/CampoMoeda.tsx` novo. O estado do pai guarda a **string
+  de dígitos crua** ('' vazio, '123456' pra R$ 1.234,56), não o texto
+  formatado — sem fonte de verdade duplicada nem desformatar pra salvar.
+  Campo vazio mostra vazio, não "0,00" (transferência tem valor 0
+  legítimo; o caixa precisa distinguir "não preenchi" de "é de graça").
+- `centsFromDigits` / `formatCentsInput` em `money.ts`. **`toCents` foi
+  deletado** — ficou sem nenhum uso e era justamente o que tinha o caso
+  ambíguo. Prefixo "R$" fica fora do valor editável, pra não atrapalhar
+  cursor.
+- Aplicado nos 3 lugares que digitam dinheiro: cadastro de entrega,
+  divergência de pagamento e o filtro de valor do histórico. Esse último
+  não estava no pedido, mas deixar a busca com formato diferente do
+  lançamento seria a mesma confusão de volta.
+- CLAUDE.md atualizado: a convenção citava `toCents` pelo nome, e ganhou
+  a regra "campo de dinheiro é sempre `<CampoMoeda>`, nunca `<Input>`
+  cru".
+
+**Sobre o teste dos 25 segundos:** não regride, e na maioria dos casos
+melhora. Valor com centavos economiza uma tecla (`12399` em vez de
+`123,99`); valor redondo custa duas a mais (`2500` em vez de `25`).
+Compra de farmácia quase nunca é redonda — nos próprios dados de teste
+tem R$ 123,99 e R$ 132,90.
+
+Testado no navegador digitando dígito a dígito: progressão exata acima,
+"," / "." / letras ignorados, backspace natural (`12.345,67` →
+`1.234,56` → `123,45`), apagar tudo volta pro vazio. E o round-trip
+completo: digitei `1.234,56`, o banco gravou `valor_compra_cents =
+123456` (com o `pagamentos.previsto` batendo) e a lista exibiu
+`R$ 1.234,56`. Justamente o valor que o parser antigo erraria.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -343,8 +387,9 @@ e a técnica da aba limpa resolveu de novo.
    observacoes, custódia (item 9 acima)
 8. `69e3c06` — histórico paginado + filtro de filial (item 10 acima)
 9. `d72231f` — NOTAS.md com auditoria e paginação
-10. aba "Hoje" paginada + `Paginacao` extraído (item 11 acima) — último
-    commit desta sessão, hash pelo `git log`
+10. `ca07dfd` — aba "Hoje" paginada + `Paginacao` extraído (item 11)
+11. máscara de moeda + remoção do `toCents` (item 12) — último commit
+    desta sessão, hash pelo `git log`
 
 ## Migrations aplicadas nesta sessão
 
@@ -391,16 +436,8 @@ o que já era classificado como "fora do MVP atual, mas anotado":
 - ~~`max-rows` deste projeto desconhecido~~ — deixou de importar (item
   11). O número em si continua não conferido (fica no dashboard em
   Settings → API → Max rows) mas nenhuma query depende mais dele.
-- **Regra 1 vs. `toCents('1.234')`.** O parser trata o último separador
-  como decimal, então "1.234" (mil duzentos e trinta e quatro digitado
-  com ponto de milhar) vira R$ 1,23 em vez de R$ 1.234,00. **Só quebra
-  nessa combinação exata**: ponto de milhar *sem* os centavos.
-  "1.234,56" acerta (o último separador é a vírgula), "1234" acerta,
-  "1234,56" acerta. Discutido com o usuário em 2026-08-10 e mantido como
-  está por ser um jeito de digitar que ninguém usa no balcão — mas fica
-  anotado porque quando erra, erra por 1000x, em silêncio, num campo de
-  dinheiro, e a entrega vira imutável depois da assinatura (regra 7:
-  correção é evento novo, não `UPDATE`).
+- ~~Regra 1 vs. `toCents('1.234')`~~ — resolvido no item 12
+  (2026-08-10), pela raiz: `toCents` deixou de existir.
 
 ## Nota pra próxima sessão sobre testes de UI no navegador
 
@@ -486,6 +523,10 @@ no banco:
 - `V-000018` (Teste Realtime Paginado) — criado pelo console durante o
   teste do item 11, pra disparar um evento de Realtime com a lista
   paginada aberta. Entrega comum da Matriz, R$ 15,00.
+- `V-000019` (Teste Mascara Moeda) — R$ 1.234,56 de compra e R$ 8,50 de
+  entrega, digitados pela máscara nova (item 12). O valor foi escolhido
+  de propósito: é exatamente o que o parser antigo erraria se digitado
+  como "1.234".
 
 Se quiser começar "limpo" pra operação real, isso teria que ser removido
 manualmente via SQL Editor — o app não tem (e não deveria ter) um jeito de

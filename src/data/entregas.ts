@@ -2,7 +2,7 @@ import { useEffect } from 'react'
 import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { criarPagamentoPrevisto, type FormaPagamento } from '@/data/pagamentos'
-import { toCents } from '@/lib/money'
+import { centsFromDigits } from '@/lib/money'
 
 export type NovaEntrega = {
   id: string
@@ -254,7 +254,7 @@ async function buscarHistoricoEntregas(
   if (filtros.clienteNome.trim()) query = query.ilike('cliente_nome', `%${filtros.clienteNome.trim()}%`)
   if (filtros.clienteEndereco.trim())
     query = query.ilike('cliente_endereco', `%${filtros.clienteEndereco.trim()}%`)
-  if (filtros.valorCompra.trim()) query = query.eq('valor_compra_cents', toCents(filtros.valorCompra))
+  if (filtros.valorCompra) query = query.eq('valor_compra_cents', centsFromDigits(filtros.valorCompra))
   if (filtros.lojaId) query = query.eq('loja_id', filtros.lojaId)
   // intervalo — "De" sozinho é "a partir de", "Até" sozinho é "até", os dois
   // juntos fecham o período (ex: mês inteiro).

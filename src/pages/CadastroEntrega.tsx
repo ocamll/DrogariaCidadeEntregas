@@ -5,7 +5,8 @@ import { enfileirarOperacao } from '@/data/filaOffline'
 import { FORMA_PAGAMENTO_OPTIONS, type FormaPagamento } from '@/data/pagamentos'
 import { useConveniosCadastro } from '@/data/cadastros'
 import { uuidv7 } from '@/lib/uuid'
-import { toCents } from '@/lib/money'
+import { centsFromDigits } from '@/lib/money'
+import { CampoMoeda } from '@/components/CampoMoeda'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -48,6 +49,7 @@ function CadastroEntregaForm({
   const [id, setId] = useState(() => uuidv7())
   const [nome, setNome] = useState('')
   const [endereco, setEndereco] = useState('')
+  // dígitos crus da máscara de centavos ('' = vazio, '12345' = R$ 123,45)
   const [valorCompra, setValorCompra] = useState('')
   const [valorEntrega, setValorEntrega] = useState('')
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>('dinheiro')
@@ -92,9 +94,9 @@ function CadastroEntregaForm({
   function handleSalvar() {
     const nomeTrim = nome.trim()
     const enderecoTrim = endereco.trim()
-    const valorCompraTrim = valorCompra.trim()
+    const valorCompraCents = centsFromDigits(valorCompra)
 
-    if (!nomeTrim || !enderecoTrim || !valorCompraTrim) {
+    if (!nomeTrim || !enderecoTrim || valorCompraCents <= 0) {
       setErroValidacao('Preenche nome, endereço e valor da compra antes de salvar.')
       return
     }
@@ -111,8 +113,8 @@ function CadastroEntregaForm({
       criadoPor: profile.id,
       clienteNome: nomeTrim,
       clienteEndereco: enderecoTrim,
-      valorCompraCents: toCents(valorCompraTrim),
-      valorEntregaCents: toCents(valorEntrega),
+      valorCompraCents,
+      valorEntregaCents: centsFromDigits(valorEntrega),
       formaPagamento,
       ocorridoEmLocal: new Date().toISOString(),
       convenioId: formaPagamento === 'convenio' ? convenioId : null,
@@ -183,24 +185,22 @@ function CadastroEntregaForm({
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="valor-compra">Valor da compra (R$)</Label>
-              <Input
+              <Label htmlFor="valor-compra">Valor da compra</Label>
+              <CampoMoeda
                 id="valor-compra"
                 ref={valorCompraRef}
-                inputMode="decimal"
-                value={valorCompra}
-                onChange={(e) => setValorCompra(e.target.value)}
+                digitos={valorCompra}
+                onDigitos={setValorCompra}
                 onKeyDown={advanceOnEnter(valorEntregaRef)}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="valor-entrega">Valor da entrega (R$)</Label>
-              <Input
+              <Label htmlFor="valor-entrega">Valor da entrega</Label>
+              <CampoMoeda
                 id="valor-entrega"
                 ref={valorEntregaRef}
-                inputMode="decimal"
-                value={valorEntrega}
-                onChange={(e) => setValorEntrega(e.target.value)}
+                digitos={valorEntrega}
+                onDigitos={setValorEntrega}
                 onKeyDown={advanceOnEnter(formaRef)}
               />
             </div>

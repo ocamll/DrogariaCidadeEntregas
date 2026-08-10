@@ -386,8 +386,14 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
 - Migrations em `supabase/migrations/`. **Nunca alterar schema pelo dashboard.**
 - `src/components/` (UI), `src/pages/` (telas), `src/data/` (acesso a dados),
   `src/lib/` (utilitários)
-- Valores monetários: helpers `toCents(str)` e `formatBRL(cents)` em `src/lib/money.ts`.
+- Valores monetários: helpers em `src/lib/money.ts` — `centsFromDigits(digitos)`,
+  `formatCentsInput(cents)` (máscara de digitação) e `formatBRL(cents)` (exibição).
   Nenhum outro lugar do código faz conversão.
+- **Campo de dinheiro é sempre `<CampoMoeda>`**, nunca `<Input>` cru. O caixa digita
+  só dígitos e eles preenchem da direita (centavos primeiro), igual maquininha de
+  cartão: `1` `2` `3` `4` `5` → `0,01` → `0,12` → `1,23` → `12,34` → `123,45`. Ele
+  nunca digita `,` nem `.`, então não existe como confundir os dois. O estado do
+  componente pai guarda a string de dígitos crua, não o texto formatado.
 - **Sem router.** Não está na stack. Navegação é troca de estado local (`useState<View>`)
   dentro de `Painel.tsx`, com `onVoltar` como prop pra cada tela voltar pra lista. Isso
   aguenta bem o tanto de telas que o MVP tem hoje — se crescer muito mais, reconsiderar

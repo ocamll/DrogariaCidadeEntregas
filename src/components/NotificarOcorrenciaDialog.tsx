@@ -10,9 +10,9 @@ import {
 import type { NotificarFaltaReceitaInput } from '@/data/documentos'
 import { enfileirarOperacao } from '@/data/filaOffline'
 import { uuidv7 } from '@/lib/uuid'
-import { toCents, formatBRL } from '@/lib/money'
+import { centsFromDigits, formatBRL } from '@/lib/money'
+import { CampoMoeda } from '@/components/CampoMoeda'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import {
@@ -30,10 +30,12 @@ const MAX_LINHAS = 4
 
 type Opcao = 'pagamento' | 'receita'
 
+// `valor` são os dígitos crus da máscara de centavos, igual no cadastro
+// de entrega — nunca texto livre com "," ou ".".
 type Linha = { forma: FormaPagamento; valor: string }
 
 function linhaInicial(valorCents: number): Linha {
-  return { forma: FORMA_PADRAO, valor: (valorCents / 100).toFixed(2).replace('.', ',') }
+  return { forma: FORMA_PADRAO, valor: String(valorCents) }
 }
 
 export function NotificarOcorrenciaDialog({
@@ -137,11 +139,11 @@ function DivergenciaPagamentoForm({
     setLinhas((prev) => prev.map((linha, i) => (i === index ? { ...linha, ...patch } : linha)))
   }
 
-  const totalRealizadoCents = linhas.reduce((soma, linha) => soma + toCents(linha.valor), 0)
+  const totalRealizadoCents = linhas.reduce((soma, linha) => soma + centsFromDigits(linha.valor), 0)
   const totalBate = totalRealizadoCents === valorCents
 
   function handleConfirmar() {
-    if (linhas.some((linha) => toCents(linha.valor) <= 0)) {
+    if (linhas.some((linha) => centsFromDigits(linha.valor) <= 0)) {
       setErro('Toda linha precisa de um valor maior que zero.')
       return
     }
@@ -169,7 +171,7 @@ function DivergenciaPagamentoForm({
       pagamentosRealizados: linhas.map((linha) => ({
         id: uuidv7(),
         forma: linha.forma,
-        valorCents: toCents(linha.valor),
+        valorCents: centsFromDigits(linha.valor),
       })),
       valorCentsPrevisto: valorCents,
       justificativa: justificativa.trim(),
@@ -236,12 +238,10 @@ function DivergenciaPagamentoForm({
                 ))}
               </SelectContent>
             </Select>
-            <Input
-              className="w-24"
-              inputMode="decimal"
-              placeholder="R$"
-              value={linha.valor}
-              onChange={(e) => updateLinha(index, { valor: e.target.value })}
+            <CampoMoeda
+              className="w-28"
+              digitos={linha.valor}
+              onDigitos={(valor) => updateLinha(index, { valor })}
             />
             {linhas.length > 1 && (
               <Button
