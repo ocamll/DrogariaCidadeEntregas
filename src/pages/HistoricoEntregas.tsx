@@ -8,89 +8,13 @@ import {
 } from '@/data/entregas'
 import { useLojas } from '@/data/lojas'
 import { EntregasTable } from '@/components/EntregasTable'
+import { Paginacao, ResumoPagina } from '@/components/Paginacao'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
 
 const SELECT_CLASSNAME =
   'h-9 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
-
-// Quantos números de página mostrar em volta da atual. Com 3 meses de
-// vales a lista de páginas passa de 100 — mostrar todas viraria uma
-// parede de botões, então é uma janela deslizante com atalho pra
-// primeira e pra última.
-const JANELA_PAGINAS = 2
-
-function paginasVisiveis(atual: number, total: number): number[] {
-  const inicio = Math.max(1, atual - JANELA_PAGINAS)
-  const fim = Math.min(total, atual + JANELA_PAGINAS)
-  const paginas: number[] = []
-  for (let p = inicio; p <= fim; p++) paginas.push(p)
-  return paginas
-}
-
-function Paginacao({
-  pagina,
-  totalPaginas,
-  onIr,
-}: {
-  pagina: number
-  totalPaginas: number
-  onIr: (p: number) => void
-}) {
-  if (totalPaginas <= 1) return null
-
-  const paginas = paginasVisiveis(pagina, totalPaginas)
-
-  return (
-    <div className="flex flex-wrap items-center gap-1">
-      <Button variant="outline" size="sm" disabled={pagina === 1} onClick={() => onIr(pagina - 1)}>
-        Anterior
-      </Button>
-
-      {paginas[0] > 1 && (
-        <>
-          <Button variant="outline" size="sm" onClick={() => onIr(1)}>
-            1
-          </Button>
-          {paginas[0] > 2 && <span className="px-1 text-sm text-muted-foreground">…</span>}
-        </>
-      )}
-
-      {paginas.map((p) => (
-        <Button
-          key={p}
-          variant={p === pagina ? 'default' : 'outline'}
-          size="sm"
-          onClick={() => onIr(p)}
-          aria-current={p === pagina ? 'page' : undefined}
-        >
-          {p}
-        </Button>
-      ))}
-
-      {paginas[paginas.length - 1] < totalPaginas && (
-        <>
-          {paginas[paginas.length - 1] < totalPaginas - 1 && (
-            <span className="px-1 text-sm text-muted-foreground">…</span>
-          )}
-          <Button variant="outline" size="sm" onClick={() => onIr(totalPaginas)}>
-            {totalPaginas}
-          </Button>
-        </>
-      )}
-
-      <Button
-        variant="outline"
-        size="sm"
-        disabled={pagina === totalPaginas}
-        onClick={() => onIr(pagina + 1)}
-      >
-        Próxima
-      </Button>
-    </div>
-  )
-}
 
 export function HistoricoEntregas({ profile }: { profile: AuthProfile }) {
   const [form, setForm] = useState<FiltrosHistorico>(FILTROS_HISTORICO_VAZIOS)
@@ -124,8 +48,6 @@ export function HistoricoEntregas({ profile }: { profile: AuthProfile }) {
 
   const total = data?.total ?? 0
   const totalPaginas = data?.totalPaginas ?? 1
-  const primeiroDaPagina = (pagina - 1) * TAMANHO_PAGINA_HISTORICO + 1
-  const ultimoDaPagina = Math.min(pagina * TAMANHO_PAGINA_HISTORICO, total)
 
   return (
     <div className="flex flex-col gap-4">
@@ -218,12 +140,12 @@ export function HistoricoEntregas({ profile }: { profile: AuthProfile }) {
       {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
       {!isLoading && !isError && (
         <>
-          {total > 0 && (
-            <p className="text-sm text-muted-foreground">
-              Mostrando {primeiroDaPagina}–{ultimoDaPagina} de {total} vale{total > 1 ? 's' : ''}
-              {isFetching && ' · atualizando…'}
-            </p>
-          )}
+          <ResumoPagina
+            pagina={pagina}
+            tamanhoPagina={TAMANHO_PAGINA_HISTORICO}
+            total={total}
+            atualizando={isFetching}
+          />
           <EntregasTable entregas={data?.entregas ?? []} profile={profile} mostrarData />
           <Paginacao pagina={pagina} totalPaginas={totalPaginas} onIr={setPagina} />
         </>

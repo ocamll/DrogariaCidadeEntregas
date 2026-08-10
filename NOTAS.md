@@ -290,6 +290,44 @@ página 3 com "11–15 de 19" e linhas certas — inclusive um vale de
 filtrou 2 de 19, batendo com `count` direto no banco, e resetou pra
 página 1. Restaurado pra 50 e reconferido depois.
 
+## 11. Aba "Hoje" paginada — fecha o último gap de truncamento
+
+`buscarEntregasDeHoje` era o que sobrava sem teto e ordenado
+descendente: pro caixa nunca chegaria perto (um dia, uma loja), mas
+admin/gerente enxergam as 17 filiais juntas e num dia movimentado o
+corte silencioso derrubaria justamente os vales da manhã.
+
+Antes de mexer, conferi as outras queries sem limite (documentos de
+convênio, receitas pendentes, corridas abertas, entregas pendentes sem
+corrida) — **todas ordenam ascendente**, mais antigo primeiro. Se
+truncarem, perdem o mais novo, que é a direção benigna numa fila de
+trabalho: você limpa pelo topo e os novos sobem. Por isso não paginei
+nenhuma delas. Só "Hoje" tinha o problema de verdade.
+
+Componente `src/components/Paginacao.tsx` extraído (o do item 10 morava
+dentro de `HistoricoEntregas.tsx`), agora com `Paginacao` +
+`ResumoPagina` usados pelas duas telas. Página de 100 em "Hoje" (é tela
+de trabalho — o caixa quer o dia inteiro sem clicar) contra 50 no
+histórico. O `ResumoPagina` só aparece quando passa de uma página, pra
+não poluir o caso normal de 20 vales no dia.
+
+Com isso o `max-rows` do PostgREST deixou de importar em qualquer lugar
+que crescesse sem limite — não porque alguém descobriu o número, mas
+porque nenhuma query depende mais dele.
+
+Testado baixando `TAMANHO_PAGINA_HOJE` pra 2: 4 vales em 2 páginas.
+**Realtime confirmado junto da paginação** — estando na página 2 ("3–3
+de 3"), inseri um vale novo e a página aberta se atualizou sozinha pra
+"3–4 de 4" com as linhas certas, sem reload. Isso funciona porque a
+invalidação usa `['entregas-hoje']`, que casa por prefixo com
+`['entregas-hoje', pagina]` no TanStack Query. Restaurado pra 100.
+
+Detalhe de teste que quase virou falso alarme: o console da aba onde eu
+estava editando acusava `entregas.map is not a function` — resíduo de
+HMR do momento em que o hook já devolvia objeto e a tela ainda esperava
+array. Aba nova: zero erros. É o mesmo fenômeno já anotado mais abaixo,
+e a técnica da aba limpa resolveu de novo.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -304,6 +342,9 @@ página 1. Restaurado pra 50 e reconferido depois.
 7. `01eb28b` — gaps da auditoria: RLS por loja, paginação do relatório,
    observacoes, custódia (item 9 acima)
 8. `69e3c06` — histórico paginado + filtro de filial (item 10 acima)
+9. `d72231f` — NOTAS.md com auditoria e paginação
+10. aba "Hoje" paginada + `Paginacao` extraído (item 11 acima) — último
+    commit desta sessão, hash pelo `git log`
 
 ## Migrations aplicadas nesta sessão
 
@@ -336,7 +377,6 @@ o que já era classificado como "fora do MVP atual, mas anotado":
 - [ ] Painel do admin criar/gerenciar usuários — trava é precisar da
       primeira Edge Function do projeto (`service_role` nunca pode rodar
       no navegador). Ver "Ideias futuras" no CLAUDE.md.
-- [ ] Paginar a aba "Hoje" igual o histórico (ver "Gaps conhecidos").
 
 ## Gaps conhecidos, não resolvidos
 
@@ -347,22 +387,20 @@ o que já era classificado como "fora do MVP atual, mas anotado":
   de propósito no item 8 (2026-08-10): a transição pode vir de um
   UPDATE em lote (fechamento de corrida) sem relógio de dispositivo
   confiável por linha. Não dá pra preencher sem inventar valor.
-- **Aba "Hoje" continua sem paginação.** Pro caixa não importa (um dia,
-  uma loja), mas o admin vê as 17 filiais juntas — um dia movimentado
-  pode passar do `max-rows` e truncar em silêncio, mesmo problema que o
-  histórico tinha antes do item 10. Levantado e não feito, decisão do
-  usuário sobre quando.
-- **Ninguém sabe o `max-rows` deste projeto.** Não dá pra descobrir pela
-  API do cliente; está no dashboard em Settings → API → Max rows. Todo
-  raciocínio sobre teto nos itens 9 e 10 assumiu o default comum (1000)
-  como pior caso — as correções são robustas a qualquer valor, mas vale
-  confirmar o número um dia.
+- ~~Aba "Hoje" sem paginação~~ — resolvido no item 11 (2026-08-10).
+- ~~`max-rows` deste projeto desconhecido~~ — deixou de importar (item
+  11). O número em si continua não conferido (fica no dashboard em
+  Settings → API → Max rows) mas nenhuma query depende mais dele.
 - **Regra 1 vs. `toCents('1.234')`.** O parser trata o último separador
   como decimal, então "1.234" (mil duzentos e trinta e quatro digitado
-  com ponto de milhar) vira R$ 1,23 em vez de R$ 1.234,00. Entrada
-  genuinamente ambígua e o caixa normalmente digita "1234" ou "1234,00",
-  então não mexi — mas é uma armadilha real se alguém treinar o time a
-  usar ponto de milhar.
+  com ponto de milhar) vira R$ 1,23 em vez de R$ 1.234,00. **Só quebra
+  nessa combinação exata**: ponto de milhar *sem* os centavos.
+  "1.234,56" acerta (o último separador é a vírgula), "1234" acerta,
+  "1234,56" acerta. Discutido com o usuário em 2026-08-10 e mantido como
+  está por ser um jeito de digitar que ninguém usa no balcão — mas fica
+  anotado porque quando erra, erra por 1000x, em silêncio, num campo de
+  dinheiro, e a entrega vira imutável depois da assinatura (regra 7:
+  correção é evento novo, não `UPDATE`).
 
 ## Nota pra próxima sessão sobre testes de UI no navegador
 
@@ -445,6 +483,9 @@ no banco:
   vale de cliente da Filial 02. É ele que prova o lado permissivo da RLS
   nova (o caixa lê o próprio pagamento); se for apagado algum dia, o
   teste de RLS perde o caso positivo.
+- `V-000018` (Teste Realtime Paginado) — criado pelo console durante o
+  teste do item 11, pra disparar um evento de Realtime com a lista
+  paginada aberta. Entrega comum da Matriz, R$ 15,00.
 
 Se quiser começar "limpo" pra operação real, isso teria que ser removido
 manualmente via SQL Editor — o app não tem (e não deveria ter) um jeito de

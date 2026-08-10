@@ -156,24 +156,42 @@ function mapEntregaRecente(row: EntregaRecenteRow): EntregaRecente {
   }
 }
 
-async function buscarEntregasDeHoje(): Promise<EntregaRecente[]> {
+// Paginada pelo mesmo motivo do histórico: a ordenação é descendente, e
+// pro caixa isso nunca chega perto de teto nenhum (um dia, uma loja) —
+// mas admin/gerente enxergam as 17 filiais juntas, e num dia movimentado
+// o corte silencioso do max-rows derrubaria justamente os vales da
+// manhã. Página maior que a do histórico porque aqui é a tela de
+// trabalho: o caixa quer ver o dia inteiro sem clicar.
+export const TAMANHO_PAGINA_HOJE = 100
+
+async function buscarEntregasDeHoje(pagina: number): Promise<PaginaEntregas> {
   const inicioDoDia = new Date()
   inicioDoDia.setHours(0, 0, 0, 0)
+  const de = (pagina - 1) * TAMANHO_PAGINA_HOJE
 
-  const { data, error } = await supabase
+  const { data, error, count } = await supabase
     .from('entregas')
-    .select(ENTREGA_RECENTE_SELECT)
+    .select(ENTREGA_RECENTE_SELECT, { count: 'exact' })
     .gte('ocorrido_em_local', inicioDoDia.toISOString())
     .order('registrado_em', { ascending: false })
+    .order('id', { ascending: false })
+    .range(de, de + TAMANHO_PAGINA_HOJE - 1)
 
   if (error) throw error
-  return (data as unknown as EntregaRecenteRow[]).map(mapEntregaRecente)
+
+  const total = count ?? 0
+  return {
+    entregas: (data as unknown as EntregaRecenteRow[]).map(mapEntregaRecente),
+    total,
+    totalPaginas: Math.max(1, Math.ceil(total / TAMANHO_PAGINA_HOJE)),
+  }
 }
 
-export function useEntregasDeHoje() {
+export function useEntregasDeHoje(pagina: number) {
   return useQuery({
-    queryKey: ['entregas-hoje'],
-    queryFn: buscarEntregasDeHoje,
+    queryKey: ['entregas-hoje', pagina],
+    queryFn: () => buscarEntregasDeHoje(pagina),
+    placeholderData: keepPreviousData,
   })
 }
 
@@ -210,7 +228,8 @@ export const FILTROS_HISTORICO_VAZIOS: FiltrosHistorico = {
 // menos por vez (a tabela não virtualiza e monta um dropdown por linha).
 export const TAMANHO_PAGINA_HISTORICO = 50
 
-export type PaginaHistorico = {
+// Mesma forma pras duas listas paginadas (Hoje e Histórico).
+export type PaginaEntregas = {
   entregas: EntregaRecente[]
   total: number
   totalPaginas: number
@@ -219,7 +238,7 @@ export type PaginaHistorico = {
 async function buscarHistoricoEntregas(
   filtros: FiltrosHistorico,
   pagina: number
-): Promise<PaginaHistorico> {
+): Promise<PaginaEntregas> {
   const de = (pagina - 1) * TAMANHO_PAGINA_HISTORICO
 
   // count: 'exact' junto do range — é o total que alimenta "X vales" e o
