@@ -3,6 +3,7 @@ import { useAuth, signOut, type AuthProfile } from '@/data/auth'
 import { useSincronizarFilaOffline } from '@/data/filaOffline'
 import { Button } from '@/components/ui/button'
 import { Notificacoes } from '@/components/Notificacoes'
+import { RegistroAuditoria } from '@/components/RegistroAuditoria'
 import { FilaOfflineIndicador } from '@/components/FilaOfflineIndicador'
 import logo from '@/assets/logo.png'
 
@@ -34,7 +35,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
         <div className="flex items-center gap-2">
           <FilaOfflineIndicador />
           {(profile.papel === 'admin' || profile.papel === 'gerente') && (
-            <Notificacoes profile={profile} />
+            <>
+              <RegistroAuditoria />
+              <Notificacoes profile={profile} />
+            </>
           )}
           <Button
             variant="outline"

@@ -4,22 +4,29 @@ Registro de trabalho, não é documentação permanente do projeto (isso é o
 CLAUDE.md). Decisões duráveis desta sessão já foram incorporadas lá; aqui
 fica o que é mais "estado da sessão" — útil pra retomar, mas não é regra.
 
-## Quarta parte da sessão: seta "mostrar vales" no relatório por motoboy
+## Quarta parte da sessão: relatório virou hierarquia agência → motoboy → vales
 
-Usuário notou uma diferença entre a soma dos vales "por motoboy" e o total
-"por agência" (investigado e explicado antes desta parte: corrida antiga do
-Pedro Souza sem `agencia_id`, já documentado no CLAUDE.md). Pedido: uma
-seta em cada linha de motoboy que expande a lista de vales daquele
-período, pra dar pra investigar esse tipo de coisa sem precisar abrir o
-banco. `src/data/relatorios.ts` ganhou `RelatorioVale`/`RelatorioGrupo.vales`
-(populado na mesma query que já buscava as entregas, sem round-trip novo,
-só adicionando `numero_vale`/`cliente_nome`/`ocorrido_em_local` no
-`select` e um `.order()`). `Relatorios.tsx`: `GrupoTable` ganhou dois props
-opcionais (`expandidos`/`onToggle`) só usados na tabela "Por motoboy" — a
-de agência continua igual, sem seta. Testado: expandi os dois motoboys ao
-mesmo tempo (independentes), os vales batem exatamente com os totais da
-linha (inclusive os V-1001/V-1002 da corrida sem agência aparecendo na
-lista do Pedro Souza).
+Começou como só uma seta "mostrar vales" na tabela "Por motoboy" (pra
+investigar a diferença que o usuário notou entre a soma por motoboy e o
+total por agência — corrida antiga do Pedro Souza sem `agencia_id`, já
+documentado no CLAUDE.md). No mesmo fio, o usuário pediu pra ir além:
+pensando em escala (muitos motoboys por poucas agências), faz mais sentido
+motoboy morar DENTRO da agência do que as duas tabelas soltas lado a lado.
+Reestruturado pra 3 níveis, cada um com sua seta: Agência → Motoboy →
+Vale. `RelatorioGrupo`/`RelatorioAgencia` novos em `src/data/relatorios.ts`
+— agregação em duas camadas de `Map` (agência → motoboy), populada na
+mesma query já existente. Corrida sem agência virou grupo
+"(sem agência)" em vez de sumir da soma (assim o total "por agência" bate
+com a soma dos motoboys sempre, não só quando todo mundo tem agência).
+`Relatorios.tsx`: `GrupoTable` (motoboy→vales) ficou sempre-expansível
+(não mais opcional, já que agora só é usada aninhada); `AgenciaTable` novo
+por cima dela. Estado de expansão do motoboy usa chave composta
+`agência::motoboy` — sem isso, o mesmo motoboy aparecendo em duas agências
+(caso real: Pedro Souza em "Ágil Motos" e em "(sem agência)") abriria as
+duas juntas ao clicar uma. Testado: expandi as duas agências e 3 motoboys
+ao mesmo tempo, cada seta independente, números batem em todo nível
+(inclusive Pedro Souza com os vales certos separados entre as duas
+agências que ele "pertence").
 
 ## O que foi feito
 
@@ -140,13 +147,38 @@ apareceu em Ocorrências.
 7. `20260809190000_eventos_idempotency_key.sql`
 8. `20260809210000_receita_custodia.sql` (`tem_receita`,
    `receita_recebida_em`, `receita_recebida_por` em `entregas`)
+9. `20260809220000_eventos_user_fk.sql` (FK `eventos.user_id` →
+   `profiles.id`, pro Registro de Auditoria)
 
-Ambas confirmadas rodando pelo usuário antes dos testes. Nenhuma migration
+Todas confirmadas rodando pelo usuário antes dos testes. Nenhuma migration
 pendente no momento em que esta sessão terminou.
+
+## Quinta parte da sessão: Registro de Auditoria (log de eventos)
+
+Última pendência do MVP original. Pedido específico: mostrar o quê
+aconteceu, quem fez, quando, separável por filial (usuário avisou que na
+operação real são 17 filiais, não só as 2 de teste — não criei as outras
+agora, só confirmei que o código não muda com mais filiais, é
+`useLojas()` dinâmico). Vira botão de cabeçalho (não aba do Painel) à
+esquerda de "Notificações", por pedido explícito. Detalhe técnico
+completo já está no CLAUDE.md — só registro aqui o que vale saber pra
+retomar:
+
+- Migration `20260809220000_eventos_user_fk.sql` — antes de rodar,
+  verifiquei direto no banco que nenhum `user_id` gravado ficaria órfão
+  (49 eventos com user_id, 2 distintos, zero órfãos) antes de pedir pro
+  usuário confirmar.
+- Bug real achado no teste (não sabia disso até testar): `entregas` tem
+  duas FKs pra `lojas`, o embed do Supabase sem hint dá `PGRST201`
+  (ambiguidade). Se algum dia mexer em outro embed `entregas → lojas`
+  nesse projeto, lembrar de usar `lojas!entregas_loja_id_fkey(...)`
+  (ou `!entregas_loja_destino_id_fkey`, dependendo de qual dos dois quer).
+- `src/data/auditoria.ts` é separado de `notificacoes.ts` de propósito
+  (duplica um pouco de texto-por-tipo em vez de compartilhar) — decisão
+  consciente pra não arriscar regressão numa feature já testada.
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
-- [ ] Log de eventos — tela pra navegar o que já é gravado em `eventos`
 - [ ] Painel do admin criar/gerenciar usuários (ver "Ideias futuras" no
       CLAUDE.md — trava é precisar de Edge Function com `service_role`)
 

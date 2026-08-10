@@ -1,6 +1,6 @@
 import { Fragment, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { useRelatorio, type FiltroPeriodo, type RelatorioGrupo } from '@/data/relatorios'
+import { useRelatorio, type FiltroPeriodo, type RelatorioAgencia, type RelatorioGrupo } from '@/data/relatorios'
 import { formatBRL } from '@/lib/money'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -31,16 +31,32 @@ function localDateStr(d: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
+// chave composta agência+motoboy — um motoboy pode aparecer em mais de uma
+// agência no período; expandir ele numa não pode abrir ele nas outras.
+function chaveMotoboy(agenciaChave: string, motoboyChave: string): string {
+  return `${agenciaChave}::${motoboyChave}`
+}
+
 export function Relatorios() {
   const hoje = localDateStr(new Date())
   const [form, setForm] = useState<FiltroPeriodo>({ dataInicio: hoje, dataFim: hoje })
   const [filtro, setFiltro] = useState<FiltroPeriodo>({ dataInicio: hoje, dataFim: hoje })
-  const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
+  const [agenciasAbertas, setAgenciasAbertas] = useState<Set<string>>(new Set())
+  const [motoboysAbertos, setMotoboysAbertos] = useState<Set<string>>(new Set())
 
   const { data, isLoading, isError, error } = useRelatorio(filtro)
 
-  function toggleExpandido(chave: string) {
-    setExpandidos((prev) => {
+  function toggleAgencia(chave: string) {
+    setAgenciasAbertas((prev) => {
+      const next = new Set(prev)
+      if (next.has(chave)) next.delete(chave)
+      else next.add(chave)
+      return next
+    })
+  }
+
+  function toggleMotoboy(chave: string) {
+    setMotoboysAbertos((prev) => {
       const next = new Set(prev)
       if (next.has(chave)) next.delete(chave)
       else next.add(chave)
@@ -128,28 +144,15 @@ export function Relatorios() {
 
           <Card>
             <CardHeader>
-              <CardTitle>Por motoboy</CardTitle>
-            </CardHeader>
-            <CardContent>
-              <GrupoTable
-                grupos={data.porMototaxista}
-                nomeColuna="Motoboy"
-                vazio="Nenhuma corrida com motoboy no período."
-                expandidos={expandidos}
-                onToggle={toggleExpandido}
-              />
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
               <CardTitle>Por agência</CardTitle>
             </CardHeader>
             <CardContent>
-              <GrupoTable
-                grupos={data.porAgencia}
-                nomeColuna="Agência"
-                vazio="Nenhuma corrida com agência no período."
+              <AgenciaTable
+                agencias={data.porAgencia}
+                agenciasAbertas={agenciasAbertas}
+                onToggleAgencia={toggleAgencia}
+                motoboysAbertos={motoboysAbertos}
+                onToggleMotoboy={toggleMotoboy}
               />
             </CardContent>
           </Card>
@@ -168,6 +171,86 @@ function StatTile({ label, valor }: { label: string; valor: string }) {
   )
 }
 
+function AgenciaTable({
+  agencias,
+  agenciasAbertas,
+  onToggleAgencia,
+  motoboysAbertos,
+  onToggleMotoboy,
+}: {
+  agencias: RelatorioAgencia[]
+  agenciasAbertas: Set<string>
+  onToggleAgencia: (chave: string) => void
+  motoboysAbertos: Set<string>
+  onToggleMotoboy: (chave: string) => void
+}) {
+  if (agencias.length === 0) {
+    return <p className="text-sm text-muted-foreground">Nenhuma corrida com agência no período.</p>
+  }
+
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead />
+          <TableHead>Agência</TableHead>
+          <TableHead>Vales</TableHead>
+          <TableHead>Entregues</TableHead>
+          <TableHead>Insucessos</TableHead>
+          <TableHead>Valor de entrega</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {agencias.map((agencia) => {
+          const aberta = agenciasAbertas.has(agencia.chave)
+          // recorta do conjunto geral só as chaves de motoboy que pertencem
+          // a essa agência, pra passar pra GrupoTable como se fosse o dela
+          // sozinha (ela só entende chave de motoboy, não a composta).
+          const prefixo = `${agencia.chave}::`
+          const abertosNessaAgencia = new Set(
+            [...motoboysAbertos].filter((c) => c.startsWith(prefixo)).map((c) => c.slice(prefixo.length))
+          )
+
+          return (
+            <Fragment key={agencia.chave}>
+              <TableRow>
+                <TableCell>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={aberta ? 'Esconder motoboys' : 'Mostrar motoboys'}
+                    onClick={() => onToggleAgencia(agencia.chave)}
+                  >
+                    {aberta ? <ChevronDown /> : <ChevronRight />}
+                  </Button>
+                </TableCell>
+                <TableCell>{agencia.nome}</TableCell>
+                <TableCell>{agencia.totalVales}</TableCell>
+                <TableCell>{agencia.entregues}</TableCell>
+                <TableCell>{agencia.insucessos}</TableCell>
+                <TableCell>{formatBRL(agencia.valorEntregaCents)}</TableCell>
+              </TableRow>
+              {aberta && (
+                <TableRow>
+                  <TableCell colSpan={6} className="bg-muted/30 p-3">
+                    <GrupoTable
+                      grupos={agencia.porMototaxista}
+                      nomeColuna="Motoboy"
+                      vazio="Nenhum motoboy nessa agência no período."
+                      expandidos={abertosNessaAgencia}
+                      onToggle={(motoboyChave) => onToggleMotoboy(chaveMotoboy(agencia.chave, motoboyChave))}
+                    />
+                  </TableCell>
+                </TableRow>
+              )}
+            </Fragment>
+          )
+        })}
+      </TableBody>
+    </Table>
+  )
+}
+
 function GrupoTable({
   grupos,
   nomeColuna,
@@ -178,22 +261,18 @@ function GrupoTable({
   grupos: RelatorioGrupo[]
   nomeColuna: string
   vazio: string
-  // opcional — só a tabela "Por motoboy" usa isso hoje. Sem esses dois
-  // props, a tabela fica exatamente como antes (sem seta, sem expandir).
-  expandidos?: Set<string>
-  onToggle?: (chave: string) => void
+  expandidos: Set<string>
+  onToggle: (chave: string) => void
 }) {
   if (grupos.length === 0) {
     return <p className="text-sm text-muted-foreground">{vazio}</p>
   }
 
-  const expansivel = !!onToggle
-
   return (
     <Table>
       <TableHeader>
         <TableRow>
-          {expansivel && <TableHead />}
+          <TableHead />
           <TableHead>{nomeColuna}</TableHead>
           <TableHead>Vales</TableHead>
           <TableHead>Entregues</TableHead>
@@ -203,31 +282,29 @@ function GrupoTable({
       </TableHeader>
       <TableBody>
         {grupos.map((grupo) => {
-          const aberto = expandidos?.has(grupo.chave) ?? false
+          const aberto = expandidos.has(grupo.chave)
           return (
             <Fragment key={grupo.chave}>
               <TableRow>
-                {expansivel && (
-                  <TableCell>
-                    <Button
-                      variant="ghost"
-                      size="icon-sm"
-                      aria-label={aberto ? 'Esconder vales' : 'Mostrar vales'}
-                      onClick={() => onToggle!(grupo.chave)}
-                    >
-                      {aberto ? <ChevronDown /> : <ChevronRight />}
-                    </Button>
-                  </TableCell>
-                )}
+                <TableCell>
+                  <Button
+                    variant="ghost"
+                    size="icon-sm"
+                    aria-label={aberto ? 'Esconder vales' : 'Mostrar vales'}
+                    onClick={() => onToggle(grupo.chave)}
+                  >
+                    {aberto ? <ChevronDown /> : <ChevronRight />}
+                  </Button>
+                </TableCell>
                 <TableCell>{grupo.nome}</TableCell>
                 <TableCell>{grupo.totalVales}</TableCell>
                 <TableCell>{grupo.entregues}</TableCell>
                 <TableCell>{grupo.insucessos}</TableCell>
                 <TableCell>{formatBRL(grupo.valorEntregaCents)}</TableCell>
               </TableRow>
-              {expansivel && aberto && (
+              {aberto && (
                 <TableRow>
-                  <TableCell colSpan={6} className="bg-muted/30 p-3">
+                  <TableCell colSpan={6} className="bg-background p-3">
                     <ValesGrupoTable vales={grupo.vales} />
                   </TableCell>
                 </TableRow>

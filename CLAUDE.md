@@ -139,22 +139,30 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       de toda ocorrência já marcada, sem limite de data). Sem a aba, a
       justificativa só existia no banco; ninguém em gestão conseguia
       consultar o "porquê" depois do dia acabar.
-- [x] Relatórios em tela: dia, período, por mototaxista, por agência — aba
-      "Relatórios" (admin/gerente), filtro De/Até (atalhos "Hoje"/"Este
-      mês"), resumo geral (vales, cliente vs. transferência, valor de
-      compra/entrega, contagem por status) + tabela por motoboy + tabela
-      por agência (vales, entregues, insucessos, valor de entrega).
-      Agregação client-side, sem view/RPC nova — volume do MVP não
-      justifica ainda. Sem gráfico e sem PDF (ambos na lista "Fora").
-      Testado com "Este mês": números batem, inclusive corrida antiga sem
-      agência contando só pro motoboy. Linha de motoboy tem seta
-      "mostrar/esconder vales" (`ChevronRight`/`ChevronDown`) que expande
-      a lista completa dos vales daquele motoboy no período (vale,
-      cliente, status, valor de entrega, data) — útil justamente pra
-      investigar diferenças como a de cima, sem precisar consultar o
-      banco. `RelatorioGrupo` ganhou campo `vales[]`, populado na mesma
-      query já existente (sem round-trip extra); a tabela "Por agência"
-      usa o mesmo componente mas sem a seta (prop opcional).
+- [x] Relatórios em tela: dia, período, por agência → por mototaxista →
+      vales — aba "Relatórios" (admin/gerente), filtro De/Até (atalhos
+      "Hoje"/"Este mês"), resumo geral (vales, cliente vs. transferência,
+      valor de compra/entrega, contagem por status) + tabela "Por agência"
+      hierárquica em 3 níveis, cada um com sua seta (`ChevronRight`/
+      `ChevronDown`): agência (vales, entregues, insucessos, valor de
+      entrega) → expande e mostra os motoboys daquela agência com as
+      mesmas colunas → cada motoboy expande e mostra a lista de vales
+      (vale, cliente, status, valor de entrega, data). Motoboy que rodou
+      pra mais de uma agência no período aparece uma vez em cada uma, só
+      com os vales daquela agência (chave composta `agência::motoboy` no
+      estado de expansão, pra abrir uma instância não abrir a outra por
+      engano). Corrida sem agência (caso antigo, de antes do formulário
+      exigir escolher a agência primeiro) ganha um grupo próprio
+      "(sem agência)" em vez de sumir da soma — assim o total "por
+      agência" sempre bate com a soma dos motoboys, motivo original de ter
+      criado essa hierarquia (usuário notou a diferença entre os dois
+      totais numa sessão anterior). Agregação client-side em duas camadas
+      de `Map` (agência → motoboy → vales[]), sem view/RPC nova — volume
+      do MVP não justifica ainda. Sem gráfico e sem PDF (ambos na lista
+      "Fora"). Testado com "Este mês": expandi os 3 níveis simultaneamente
+      em várias combinações (duas agências, o mesmo motoboy em duas
+      agências diferentes), cada seta abre/fecha independente das outras,
+      números batem em cada nível.
 - [x] **Cadastro de agências, mototaxistas, convênios** — aba "Cadastros"
       (admin/gerente), sub-abas pra cada entidade. Tabelas já existiam desde
       o schema inicial (com RLS pronta, escrita restrita a `is_gerente()`) —
@@ -235,7 +243,43 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       pendência, marquei as duas como recebidas, motivo "outro" com texto
       apareceu em Notificações e na aba Ocorrências, "Falta de receita"
       testada pelo seletor do menu.
-- [ ] Log de eventos
+- [x] **Log de eventos como Registro de Auditoria** — botão de cabeçalho
+      "Registro de auditoria" (`src/components/RegistroAuditoria.tsx`), à
+      esquerda de "Notificações", mesmo gate admin/gerente, mas dialog bem
+      mais largo (`sm:max-w-4xl`) por causa da tabela com filtros. Mostra
+      **os 5 tipos** já gravados em `eventos` — não só os 3 que já tinham
+      superfície em "Notificações"/"Ocorrências" (`pagamento_alterado`,
+      `falta_receita`, `insucesso_detalhado`), mas também os 2 que o
+      trigger `fn_log_entrega` grava sozinho desde o schema inicial e
+      nunca tiveram tela nenhuma (`entrega_criada`, `status_alterado`) —
+      esse último calcula qual dos 3 eixos de status mudou (entrega/
+      financeiro/documental) e mostra "de → para" só do(s) que mudou(ram).
+      Tipo desconhecido (ex.: linha de teste manual) cai num fallback
+      genérico em vez de quebrar a tela. `src/data/auditoria.ts` é
+      propositalmente separado de `notificacoes.ts` (esse é curadoria de 3
+      tipos "que precisam de atenção"; auditoria é o cru, os 5) — duplica
+      ~15 linhas de texto-por-tipo em vez de compartilhar, pra não mexer
+      num arquivo já testado em produção. "Quem realizou" vem sempre de
+      `profiles` via join (não do `payload`), o que exigiu migration
+      `20260809220000_eventos_user_fk.sql` — `eventos.user_id` nunca teve
+      FK antes (por isso o padrão anterior salvava `autor_nome` como
+      snapshot no payload); conferido antes de aplicar que nenhum
+      `user_id` gravado ficaria órfão (49 eventos, 2 usuários distintos,
+      zero órfãos). Filtro De/Até (mesmo padrão de Relatórios) + select de
+      filial via `useLojas()` (já escala pra quantas filiais existirem —
+      hoje só Matriz/Filial 02 nos dados de teste, mas o combo real da
+      farmácia tem 17; não precisou criar as outras agora) — filial
+      filtra client-side sobre o período já carregado, sem round-trip
+      extra. Query com bug real encontrado e corrigido durante o teste:
+      `entregas` tem duas FKs pra `lojas` (`loja_id` de origem e
+      `loja_destino_id` de transferência), então o embed
+      `entregas(lojas(nome))` sem hint dá erro de ambiguidade do PostgREST
+      (`PGRST201`) — resolvido com `lojas!entregas_loja_id_fkey(nome)`.
+      Testado de ponta a ponta: os 5 tipos aparecendo com resumo correto,
+      autor resolvido nos 2 tipos novos (que antes só tinham `user_id`
+      cru), filtro de filial isolando corretamente Matriz de Filial 02
+      (inclusive o vale de transferência aparecendo na filial de origem,
+      não na de destino).
 
 ### Fora — não construir, não sugerir, não "já que estou aqui"
 

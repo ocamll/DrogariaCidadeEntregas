@@ -23,6 +23,21 @@ export type RelatorioGrupo = {
   vales: RelatorioVale[]
 }
 
+// Agência é o nível de cima; motoboy mora dentro dela agora (uma agência
+// tem N motoboys, cada motoboy tem N vales) — não faz mais sentido mostrar
+// as duas listas soltas lado a lado. Um motoboy que fez corridas pra mais
+// de uma agência no período aparece uma vez em cada uma, só com os vales
+// daquela agência (não duplica o total geral, cada vale conta uma vez só).
+export type RelatorioAgencia = {
+  chave: string
+  nome: string
+  totalVales: number
+  entregues: number
+  insucessos: number
+  valorEntregaCents: number
+  porMototaxista: RelatorioGrupo[]
+}
+
 export type Relatorio = {
   totalVales: number
   totalClientes: number
@@ -30,8 +45,7 @@ export type Relatorio = {
   valorCompraCents: number
   valorEntregaCents: number
   porStatus: Record<string, number>
-  porMototaxista: RelatorioGrupo[]
-  porAgencia: RelatorioGrupo[]
+  porAgencia: RelatorioAgencia[]
 }
 
 type EntregaRelatorioRow = {
@@ -70,6 +84,43 @@ function acumularGrupo(mapa: Map<string, RelatorioGrupo>, id: string, nome: stri
   mapa.set(id, atual)
 }
 
+// corrida sem agência ainda existe no dado real (corrida antiga, de antes
+// do formulário exigir escolher a agência primeiro) — em vez de sumir da
+// contagem, ganha um grupo "(sem agência)" próprio, pra continuar dando
+// pra investigar esse tipo de caso na tela em vez de só no banco.
+const SEM_AGENCIA_CHAVE = 'sem-agencia'
+const SEM_AGENCIA_NOME = '(sem agência)'
+
+type AgenciaAcumulador = RelatorioAgencia & { motoboys: Map<string, RelatorioGrupo> }
+
+function acumularAgencia(
+  mapa: Map<string, AgenciaAcumulador>,
+  agenciaId: string,
+  agenciaNome: string,
+  mototaxistaId: string,
+  mototaxistaNome: string,
+  row: EntregaRelatorioRow
+) {
+  const atual =
+    mapa.get(agenciaId) ??
+    {
+      chave: agenciaId,
+      nome: agenciaNome,
+      totalVales: 0,
+      entregues: 0,
+      insucessos: 0,
+      valorEntregaCents: 0,
+      porMototaxista: [],
+      motoboys: new Map<string, RelatorioGrupo>(),
+    }
+  atual.totalVales += 1
+  if (row.status_entrega === 'entregue') atual.entregues += 1
+  if (row.status_entrega === 'insucesso') atual.insucessos += 1
+  atual.valorEntregaCents += row.valor_entrega_cents
+  acumularGrupo(atual.motoboys, mototaxistaId, mototaxistaNome, row)
+  mapa.set(agenciaId, atual)
+}
+
 // Agregação client-side (sem view/RPC nova) — volume do MVP não justifica
 // isso ainda. Entregas sem corrida (ainda pendentes) não entram nos
 // agrupamentos por motoboy/agência, só no resumo geral.
@@ -91,8 +142,7 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
   const rows = data as unknown as EntregaRelatorioRow[]
 
   const porStatus: Record<string, number> = {}
-  const porMototaxista = new Map<string, RelatorioGrupo>()
-  const porAgencia = new Map<string, RelatorioGrupo>()
+  const porAgencia = new Map<string, AgenciaAcumulador>()
   let valorCompraCents = 0
   let valorEntregaCents = 0
   let totalClientes = 0
@@ -106,10 +156,16 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
     else totalTransferencias += 1
 
     if (row.corridas?.mototaxista_id) {
-      acumularGrupo(porMototaxista, row.corridas.mototaxista_id, row.corridas.mototaxistas?.nome ?? '—', row)
-    }
-    if (row.corridas?.agencia_id) {
-      acumularGrupo(porAgencia, row.corridas.agencia_id, row.corridas.agencias?.nome ?? '—', row)
+      const agenciaId = row.corridas.agencia_id ?? SEM_AGENCIA_CHAVE
+      const agenciaNome = row.corridas.agencia_id ? (row.corridas.agencias?.nome ?? '—') : SEM_AGENCIA_NOME
+      acumularAgencia(
+        porAgencia,
+        agenciaId,
+        agenciaNome,
+        row.corridas.mototaxista_id,
+        row.corridas.mototaxistas?.nome ?? '—',
+        row
+      )
     }
   }
 
@@ -120,8 +176,17 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
     valorCompraCents,
     valorEntregaCents,
     porStatus,
-    porMototaxista: [...porMototaxista.values()].sort((a, b) => b.totalVales - a.totalVales),
-    porAgencia: [...porAgencia.values()].sort((a, b) => b.totalVales - a.totalVales),
+    porAgencia: [...porAgencia.values()]
+      .map((agencia) => ({
+        chave: agencia.chave,
+        nome: agencia.nome,
+        totalVales: agencia.totalVales,
+        entregues: agencia.entregues,
+        insucessos: agencia.insucessos,
+        valorEntregaCents: agencia.valorEntregaCents,
+        porMototaxista: [...agencia.motoboys.values()].sort((a, b) => b.totalVales - a.totalVales),
+      }))
+      .sort((a, b) => b.totalVales - a.totalVales),
   }
 }
 
