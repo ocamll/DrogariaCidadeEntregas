@@ -44,7 +44,13 @@ function DocumentosConvenio({ profile }: { profile: AuthProfile }) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => marcarRecebido.mutate({ entregaId: doc.id, recebidoPor: profile.id })}
+                onClick={() =>
+                  marcarRecebido.mutate({
+                    entregaId: doc.id,
+                    recebidoPor: profile.id,
+                    ocorridoEmLocal: new Date().toISOString(),
+                  })
+                }
               >
                 Marcar recebido
               </Button>
@@ -86,7 +92,13 @@ function ReceitasPendentes({ profile }: { profile: AuthProfile }) {
               <Button
                 variant="outline"
                 size="sm"
-                onClick={() => marcarRecebida.mutate({ entregaId: receita.id, recebidoPor: profile.id })}
+                onClick={() =>
+                  marcarRecebida.mutate({
+                    entregaId: receita.id,
+                    recebidoPor: profile.id,
+                    ocorridoEmLocal: new Date().toISOString(),
+                  })
+                }
               >
                 Marcar devolvida
               </Button>

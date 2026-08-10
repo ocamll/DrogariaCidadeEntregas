@@ -49,12 +49,19 @@ export function useDocumentosConvenioPendentes() {
   })
 }
 
-async function marcarDocumentoConvenioRecebido(input: { entregaId: string; recebidoPor: string }) {
+// documento_recebido_em (relógio do servidor) é carimbado pela trigger
+// fn_entrega_registrar_custodia assim que o `_local` chega — o cliente
+// manda só o próprio relógio, nunca o horário "oficial" (regra 8).
+async function marcarDocumentoConvenioRecebido(input: {
+  entregaId: string
+  recebidoPor: string
+  ocorridoEmLocal: string
+}) {
   const { error } = await supabase
     .from('entregas')
     .update({
       status_documental: 'recebido',
-      documento_recebido_em: new Date().toISOString(),
+      documento_recebido_em_local: input.ocorridoEmLocal,
       documento_recebido_por: input.recebidoPor,
     })
     .eq('id', input.entregaId)
@@ -106,11 +113,17 @@ export function useReceitasPendentes() {
   return useQuery({ queryKey: ['receitas-pendentes'], queryFn: buscarReceitasPendentes })
 }
 
-async function marcarReceitaRecebida(input: { entregaId: string; recebidoPor: string }) {
+// Mesma dupla de relógios do convênio acima: receita_recebida_em vem da
+// trigger, o cliente só carimba o `_local`.
+async function marcarReceitaRecebida(input: {
+  entregaId: string
+  recebidoPor: string
+  ocorridoEmLocal: string
+}) {
   const { error } = await supabase
     .from('entregas')
     .update({
-      receita_recebida_em: new Date().toISOString(),
+      receita_recebida_em_local: input.ocorridoEmLocal,
       receita_recebida_por: input.recebidoPor,
     })
     .eq('id', input.entregaId)

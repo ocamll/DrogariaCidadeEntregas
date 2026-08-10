@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { buscarPaginado } from '@/lib/paginacao'
 
 export type FiltroPeriodo = { dataInicio: string; dataFim: string }
 
@@ -129,17 +130,23 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
   const fim = new Date(`${filtro.dataFim}T00:00:00`)
   fim.setDate(fim.getDate() + 1)
 
-  const { data, error } = await supabase
-    .from('entregas')
-    .select(
-      'id, numero_vale, cliente_nome, tipo, valor_compra_cents, valor_entrega_cents, status_entrega, ocorrido_em_local, corridas(mototaxista_id, agencia_id, mototaxistas(nome), agencias(nome))'
-    )
-    .gte('ocorrido_em_local', inicio.toISOString())
-    .lt('ocorrido_em_local', fim.toISOString())
-    .order('ocorrido_em_local', { ascending: false })
-
-  if (error) throw error
-  const rows = data as unknown as EntregaRelatorioRow[]
+  // Paginado, não um select solto: aqui o resultado vira soma de dinheiro,
+  // e um truncamento silencioso no teto do PostgREST daria total menor que
+  // a realidade sem nenhum aviso. `id` entra na ordenação como desempate
+  // pra paginação ser estável (vales com o mesmo ocorrido_em_local não
+  // podem trocar de página entre um request e outro).
+  const rows = (await buscarPaginado((de, ate) =>
+    supabase
+      .from('entregas')
+      .select(
+        'id, numero_vale, cliente_nome, tipo, valor_compra_cents, valor_entrega_cents, status_entrega, ocorrido_em_local, corridas(mototaxista_id, agencia_id, mototaxistas(nome), agencias(nome))'
+      )
+      .gte('ocorrido_em_local', inicio.toISOString())
+      .lt('ocorrido_em_local', fim.toISOString())
+      .order('ocorrido_em_local', { ascending: false })
+      .order('id', { ascending: false })
+      .range(de, ate)
+  )) as unknown as EntregaRelatorioRow[]
 
   const porStatus: Record<string, number> = {}
   const porAgencia = new Map<string, AgenciaAcumulador>()

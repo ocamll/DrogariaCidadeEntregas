@@ -259,7 +259,10 @@ export async function fecharCorrida(input: FecharCorridaInput) {
       .update({
         status_entrega: entrega.statusEntrega,
         insucesso_motivo: entrega.insucessoMotivo,
-        observacoes: entrega.insucessoDetalhe,
+        // só toca observacoes quando há detalhe de verdade — mandar o
+        // null do caso "entregue" apagaria qualquer observação que a
+        // entrega já tivesse.
+        ...(entrega.insucessoDetalhe ? { observacoes: entrega.insucessoDetalhe } : {}),
       })
       .eq('id', entrega.entregaId)
     if (error) throw error
