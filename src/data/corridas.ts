@@ -231,7 +231,10 @@ export type FecharCorridaInput = {
   tenantId: string
   retornoPor: string
   autorNome: string
-  retornoEm: string
+  // relógio do dispositivo, capturado antes de enfileirar — retorno_em
+  // (relógio do servidor) é preenchido pelo trigger fn_corrida_registrar_retorno
+  // no instante em que o UPDATE é de fato aplicado (dois relógios, regra 8).
+  retornoEmLocal: string
   entregas: Array<{
     entregaId: string
     numeroVale: string
@@ -273,6 +276,7 @@ export async function fecharCorrida(input: FecharCorridaInput) {
           autor_nome: input.autorNome,
         },
         registradoPor: input.retornoPor,
+        ocorridoEmLocal: input.retornoEmLocal,
       })
     }
   }
@@ -281,7 +285,7 @@ export async function fecharCorrida(input: FecharCorridaInput) {
     .from('corridas')
     .update({
       status: 'fechada',
-      retorno_em: input.retornoEm,
+      retorno_em_local: input.retornoEmLocal,
       retorno_por: input.retornoPor,
     })
     .eq('id', input.corridaId)

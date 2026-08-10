@@ -158,7 +158,7 @@ function FecharCorridaForm({
       tenantId: profile.tenantId,
       retornoPor: profile.id,
       autorNome: profile.nome,
-      retornoEm: new Date().toISOString(),
+      retornoEmLocal: new Date().toISOString(),
       entregas: corrida.entregas.map((e) => {
         const resultado = resultados[e.id]
         const detalhe = resultado.motivo === 'outro' ? resultado.detalhe.trim() : ''

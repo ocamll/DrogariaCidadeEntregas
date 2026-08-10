@@ -13,6 +13,10 @@ export async function inserirEventoIdempotente(input: {
   payload: Record<string, unknown>
   registradoPor: string
   idempotencyKey: string
+  // relógio do dispositivo, capturado por quem chama antes de enfileirar
+  // (dois relógios, regra 8) — sem isso, ocorrido_em só reflete o momento
+  // em que a fila offline sincronizou, não o momento real da ação.
+  ocorridoEmLocal?: string
 }): Promise<void> {
   const { data, error: selectError } = await supabase
     .from('eventos')
@@ -30,6 +34,7 @@ export async function inserirEventoIdempotente(input: {
     payload: input.payload,
     idempotency_key: input.idempotencyKey,
     user_id: input.registradoPor,
+    ocorrido_em_local: input.ocorridoEmLocal ?? null,
   })
   if (error) throw error
 }

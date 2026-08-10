@@ -134,6 +134,8 @@ export type NotificarFaltaReceitaInput = {
   registradoPor: string
   autorNome: string
   eventoIdempotencyKey: string
+  // relógio do dispositivo, capturado no dialog antes de enfileirar.
+  ocorridoEmLocal: string
 }
 
 // Mesma dialog/botão que "divergência de pagamento" — por isso passa pela
@@ -152,5 +154,6 @@ export async function notificarFaltaReceita(input: NotificarFaltaReceitaInput) {
       autor_nome: input.autorNome,
     },
     registradoPor: input.registradoPor,
+    ocorridoEmLocal: input.ocorridoEmLocal,
   })
 }

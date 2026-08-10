@@ -58,6 +58,7 @@ export async function criarEntrega(input: NovaEntrega): Promise<{ numeroVale: st
     forma: input.formaPagamento,
     valorCents: input.valorCompraCents,
     registradoPor: input.criadoPor,
+    registradoEmLocal: input.ocorridoEmLocal,
   })
 
   return { numeroVale: row.numero_vale }

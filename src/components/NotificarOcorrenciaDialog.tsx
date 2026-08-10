@@ -177,6 +177,7 @@ function DivergenciaPagamentoForm({
       autorNome: profile.nome,
       criarPrevisto: formaEsperadaAtual === null,
       eventoIdempotencyKey: uuidv7(),
+      registradoEmLocal: new Date().toISOString(),
     }
 
     // grava local e fecha o dialog na hora (mesmo padrão do cadastro de
@@ -307,6 +308,7 @@ function FaltaReceitaForm({
       registradoPor: profile.id,
       autorNome: profile.nome,
       eventoIdempotencyKey: uuidv7(),
+      ocorridoEmLocal: new Date().toISOString(),
     }
 
     void enfileirarOperacao('falta_receita', operacaoId, payload)

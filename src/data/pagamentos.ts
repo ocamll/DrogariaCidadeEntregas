@@ -32,6 +32,10 @@ export async function criarPagamentoPrevisto(input: {
   forma: FormaPagamento
   valorCents: number
   registradoPor: string
+  // relógio do dispositivo, capturado por quem chama antes de enfileirar —
+  // mesmo instante de ocorrido_em_local da entrega/divergência que gerou
+  // este pagamento (dois relógios, regra 8).
+  registradoEmLocal: string
   // id determinístico (default: mesmo uuid da entrega, relação é 1:1),
   // gerado por quem chama — nunca aqui dentro. pagamentos não tem policy de
   // UPDATE (correção é registro novo, não alteração do previsto), então um
@@ -47,6 +51,7 @@ export async function criarPagamentoPrevisto(input: {
     forma: input.forma,
     valor_cents: input.valorCents,
     registrado_por: input.registradoPor,
+    registrado_em_local: input.registradoEmLocal,
   })
   if (error && !isDuplicateKeyError(error)) throw error
 }
@@ -71,6 +76,10 @@ export type MarcarDivergenciaInput = {
   // enfileirar) — é isso que torna o insert do evento seguro pra reenviar
   // depois de uma falha parcial, sem duplicar log.
   eventoIdempotencyKey: string
+  // relógio do dispositivo, capturado no dialog antes de enfileirar —
+  // usado nos pagamentos.realizado, no previsto retroativo (quando
+  // criarPrevisto) e no evento pagamento_alterado, todos a mesma ação.
+  registradoEmLocal: string
 }
 
 // Cliente pode fechar a conta em mais de uma forma na porta (ex: metade
@@ -88,6 +97,7 @@ export async function marcarDivergencia(input: MarcarDivergenciaInput) {
       forma: input.formaAnterior,
       valorCents: input.valorCentsPrevisto,
       registradoPor: input.registradoPor,
+      registradoEmLocal: input.registradoEmLocal,
     })
   }
 
@@ -101,6 +111,7 @@ export async function marcarDivergencia(input: MarcarDivergenciaInput) {
       valor_cents: pagamento.valorCents,
       observacao: input.justificativa,
       registrado_por: input.registradoPor,
+      registrado_em_local: input.registradoEmLocal,
     })
     if (error && !isDuplicateKeyError(error)) throw error
   }
@@ -117,6 +128,7 @@ export async function marcarDivergencia(input: MarcarDivergenciaInput) {
       autor_nome: input.autorNome,
     },
     registradoPor: input.registradoPor,
+    ocorridoEmLocal: input.registradoEmLocal,
   })
 }
 
