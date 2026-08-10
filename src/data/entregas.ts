@@ -1,5 +1,5 @@
 import { useEffect } from 'react'
-import { useQuery, useQueryClient } from '@tanstack/react-query'
+import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { criarPagamentoPrevisto, type FormaPagamento } from '@/data/pagamentos'
 import { toCents } from '@/lib/money'
@@ -184,6 +184,12 @@ export type FiltrosHistorico = {
   valorCompra: string
   dataInicio: string
   dataFim: string
+  // '' = todas as filiais. Só admin/gerente escolhe: pra caixa a RLS já
+  // restringe à própria loja, então um select aqui não mudaria nada.
+  // Filtra por loja_id (origem), mesma semântica do Registro de
+  // Auditoria — vale de transferência aparece na filial que o criou,
+  // não na de destino.
+  lojaId: string
 }
 
 export const FILTROS_HISTORICO_VAZIOS: FiltrosHistorico = {
@@ -193,36 +199,44 @@ export const FILTROS_HISTORICO_VAZIOS: FiltrosHistorico = {
   valorCompra: '',
   dataInicio: '',
   dataFim: '',
+  lojaId: '',
 }
 
-// Sem filtro nenhum: navegação livre, limita a 200 pra não carregar o
-// banco inteiro à toa. Com qualquer filtro ativo: a busca é o que a
-// farmácia usa pra achar um vale específico (mesmo de anos atrás), então
-// não pode ter teto artificial — vai até LIMITE_BUSCA_FILTRADA, bem acima
-// do que uma busca específica jamais deveria retornar.
-const LIMITE_NAVEGACAO_LIVRE = 200
-const LIMITE_BUSCA_FILTRADA = 5000
+// Uma página por vez, com o total real vindo do banco. Antes isso era um
+// `limit` (200 sem filtro, 5000 com filtro) e o resultado vinha truncado
+// em silêncio: a farmácia precisa achar um vale de 3 meses atrás, e o
+// corte por `registrado_em desc` derrubava justamente os mais antigos —
+// exatamente os procurados. Paginando não há teto nenhum, e ainda carrega
+// menos por vez (a tabela não virtualiza e monta um dropdown por linha).
+export const TAMANHO_PAGINA_HISTORICO = 50
 
-async function buscarHistoricoEntregas(filtros: FiltrosHistorico): Promise<EntregaRecente[]> {
-  const temFiltro =
-    !!filtros.numeroVale.trim() ||
-    !!filtros.clienteNome.trim() ||
-    !!filtros.clienteEndereco.trim() ||
-    !!filtros.valorCompra.trim() ||
-    !!filtros.dataInicio ||
-    !!filtros.dataFim
+export type PaginaHistorico = {
+  entregas: EntregaRecente[]
+  total: number
+  totalPaginas: number
+}
 
+async function buscarHistoricoEntregas(
+  filtros: FiltrosHistorico,
+  pagina: number
+): Promise<PaginaHistorico> {
+  const de = (pagina - 1) * TAMANHO_PAGINA_HISTORICO
+
+  // count: 'exact' junto do range — é o total que alimenta "X vales" e o
+  // número de páginas. Sem ele não dá pra saber se existe página seguinte.
   let query = supabase
     .from('entregas')
-    .select(ENTREGA_RECENTE_SELECT)
+    .select(ENTREGA_RECENTE_SELECT, { count: 'exact' })
     .order('registrado_em', { ascending: false })
-    .limit(temFiltro ? LIMITE_BUSCA_FILTRADA : LIMITE_NAVEGACAO_LIVRE)
+    .order('id', { ascending: false })
+    .range(de, de + TAMANHO_PAGINA_HISTORICO - 1)
 
   if (filtros.numeroVale.trim()) query = query.ilike('numero_vale', `%${filtros.numeroVale.trim()}%`)
   if (filtros.clienteNome.trim()) query = query.ilike('cliente_nome', `%${filtros.clienteNome.trim()}%`)
   if (filtros.clienteEndereco.trim())
     query = query.ilike('cliente_endereco', `%${filtros.clienteEndereco.trim()}%`)
   if (filtros.valorCompra.trim()) query = query.eq('valor_compra_cents', toCents(filtros.valorCompra))
+  if (filtros.lojaId) query = query.eq('loja_id', filtros.lojaId)
   // intervalo — "De" sozinho é "a partir de", "Até" sozinho é "até", os dois
   // juntos fecham o período (ex: mês inteiro).
   if (filtros.dataInicio) {
@@ -234,15 +248,24 @@ async function buscarHistoricoEntregas(filtros: FiltrosHistorico): Promise<Entre
     query = query.lt('ocorrido_em_local', fim.toISOString())
   }
 
-  const { data, error } = await query
+  const { data, error, count } = await query
   if (error) throw error
-  return (data as unknown as EntregaRecenteRow[]).map(mapEntregaRecente)
+
+  const total = count ?? 0
+  return {
+    entregas: (data as unknown as EntregaRecenteRow[]).map(mapEntregaRecente),
+    total,
+    totalPaginas: Math.max(1, Math.ceil(total / TAMANHO_PAGINA_HISTORICO)),
+  }
 }
 
-export function useHistoricoEntregas(filtros: FiltrosHistorico) {
+export function useHistoricoEntregas(filtros: FiltrosHistorico, pagina: number) {
   return useQuery({
-    queryKey: ['entregas-historico', filtros],
-    queryFn: () => buscarHistoricoEntregas(filtros),
+    queryKey: ['entregas-historico', filtros, pagina],
+    queryFn: () => buscarHistoricoEntregas(filtros, pagina),
+    // mantém a página anterior na tela enquanto a próxima carrega — sem
+    // isso a tabela pisca vazia a cada clique de página.
+    placeholderData: keepPreviousData,
   })
 }
 
