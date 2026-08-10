@@ -1,6 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { buscarComTeto, type ListaComTeto } from '@/lib/paginacao'
 import { inserirEventoIdempotente } from '@/data/eventos'
+
+// Pendência de papel é a única lista do app que cresce por inércia: ela
+// só encolhe quando alguém marca como recebido. Se a farmácia deixar
+// acumular, aqui é onde aparece primeiro — por isso tem teto explícito
+// (nosso, não o do servidor) e avisa na tela quando tem mais.
+const LIMITE_PENDENCIAS = 300
 
 // Custódia de papel — convênio (documento que a agência/convênio exige de
 // volta) e receita (controlada, precisa retornar com o motoboy). As duas
@@ -25,21 +32,28 @@ type DocumentoConvenioPendenteRow = {
   convenios: { nome: string } | null
 }
 
-async function buscarDocumentosConvenioPendentes(): Promise<DocumentoConvenioPendente[]> {
-  const { data, error } = await supabase
-    .from('entregas')
-    .select('id, numero_vale, cliente_nome, ocorrido_em_local, convenios(nome)')
-    .eq('status_documental', 'pendente')
-    .order('ocorrido_em_local', { ascending: true })
+async function buscarDocumentosConvenioPendentes(): Promise<
+  ListaComTeto<DocumentoConvenioPendente>
+> {
+  const { itens, temMais } = await buscarComTeto(LIMITE_PENDENCIAS, (limite) =>
+    supabase
+      .from('entregas')
+      .select('id, numero_vale, cliente_nome, ocorrido_em_local, convenios(nome)')
+      .eq('status_documental', 'pendente')
+      .order('ocorrido_em_local', { ascending: true })
+      .limit(limite)
+  )
 
-  if (error) throw error
-  return (data as unknown as DocumentoConvenioPendenteRow[]).map((row) => ({
-    id: row.id,
-    numeroVale: row.numero_vale,
-    clienteNome: row.cliente_nome,
-    convenioNome: row.convenios?.nome ?? null,
-    ocorridoEmLocal: row.ocorrido_em_local,
-  }))
+  return {
+    temMais,
+    itens: (itens as unknown as DocumentoConvenioPendenteRow[]).map((row) => ({
+      id: row.id,
+      numeroVale: row.numero_vale,
+      clienteNome: row.cliente_nome,
+      convenioNome: row.convenios?.nome ?? null,
+      ocorridoEmLocal: row.ocorrido_em_local,
+    })),
+  }
 }
 
 export function useDocumentosConvenioPendentes() {
@@ -92,21 +106,26 @@ type ReceitaPendenteRow = {
   ocorrido_em_local: string
 }
 
-async function buscarReceitasPendentes(): Promise<ReceitaPendente[]> {
-  const { data, error } = await supabase
-    .from('entregas')
-    .select('id, numero_vale, cliente_nome, ocorrido_em_local')
-    .eq('tem_receita', true)
-    .is('receita_recebida_em', null)
-    .order('ocorrido_em_local', { ascending: true })
+async function buscarReceitasPendentes(): Promise<ListaComTeto<ReceitaPendente>> {
+  const { itens, temMais } = await buscarComTeto(LIMITE_PENDENCIAS, (limite) =>
+    supabase
+      .from('entregas')
+      .select('id, numero_vale, cliente_nome, ocorrido_em_local')
+      .eq('tem_receita', true)
+      .is('receita_recebida_em', null)
+      .order('ocorrido_em_local', { ascending: true })
+      .limit(limite)
+  )
 
-  if (error) throw error
-  return (data as unknown as ReceitaPendenteRow[]).map((row) => ({
-    id: row.id,
-    numeroVale: row.numero_vale,
-    clienteNome: row.cliente_nome,
-    ocorridoEmLocal: row.ocorrido_em_local,
-  }))
+  return {
+    temMais,
+    itens: (itens as unknown as ReceitaPendenteRow[]).map((row) => ({
+      id: row.id,
+      numeroVale: row.numero_vale,
+      clienteNome: row.cliente_nome,
+      ocorridoEmLocal: row.ocorrido_em_local,
+    })),
+  }
 }
 
 export function useReceitasPendentes() {

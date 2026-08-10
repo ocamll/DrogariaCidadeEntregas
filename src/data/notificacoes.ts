@@ -103,6 +103,10 @@ function mapNotificacao(row: EventoNotificacaoRow): Notificacao {
 const TIPOS_NOTIFICACAO: TipoNotificacao[] = ['pagamento_alterado', 'falta_receita', 'insucesso_detalhado']
 const NOTIFICACAO_SELECT = 'id, tipo, entrega_id, payload, ocorrido_em, entregas(numero_vale, cliente_nome)'
 
+// Teto nosso, não o `max-rows` do servidor. Vale pras duas consultas
+// abaixo: o aviso do dia e o registro permanente da aba "Ocorrências".
+const LIMITE_NOTIFICACOES = 200
+
 async function buscarNotificacoesHoje(): Promise<Notificacao[]> {
   const inicioDoDia = new Date()
   inicioDoDia.setHours(0, 0, 0, 0)
@@ -113,6 +117,7 @@ async function buscarNotificacoesHoje(): Promise<Notificacao[]> {
     .in('tipo', TIPOS_NOTIFICACAO)
     .gte('ocorrido_em', inicioDoDia.toISOString())
     .order('ocorrido_em', { ascending: false })
+    .limit(LIMITE_NOTIFICACOES)
 
   if (error) throw error
   return (data as unknown as EventoNotificacaoRow[]).map(mapNotificacao)
@@ -121,8 +126,6 @@ async function buscarNotificacoesHoje(): Promise<Notificacao[]> {
 export function useNotificacoesHoje() {
   return useQuery({ queryKey: ['notificacoes-hoje'], queryFn: buscarNotificacoesHoje })
 }
-
-const LIMITE_NOTIFICACOES = 200
 
 // Sem filtro de data — registro permanente do "porquê" de cada ocorrência,
 // pra gestão poder consultar depois. A notificação do cabeçalho é só o

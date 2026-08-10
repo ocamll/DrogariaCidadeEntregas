@@ -8,6 +8,12 @@ import { supabase } from '@/lib/supabase'
 // `id` fica a cargo do banco (default gen_random_uuid()), mesmo padrão de
 // `lojas`/`tenants`/`profiles`.
 
+// Teto explícito (nosso, não o `max-rows` do servidor) pras listas de
+// cadastro. São limitadas pela realidade — a farmácia tem 17 filiais e
+// dezenas de motoboys, não milhares —, mas query sem limite nenhum passa
+// a depender de um número que ninguém escolheu e que muda no dashboard.
+const LIMITE_CADASTRO = 500
+
 // =====================================================================
 // Agências
 // =====================================================================
@@ -26,6 +32,7 @@ async function buscarAgenciasCadastro(): Promise<AgenciaCadastro[]> {
     .select('id, nome, cnpj, contato, ativo')
     .order('ativo', { ascending: false })
     .order('nome')
+    .limit(LIMITE_CADASTRO)
 
   if (error) throw error
   return data as unknown as AgenciaCadastro[]
@@ -119,6 +126,7 @@ async function buscarMototaxistasCadastro(): Promise<MototaxistaCadastro[]> {
     .select('id, nome, agencia_id, cpf, telefone, ativo')
     .order('ativo', { ascending: false })
     .order('nome')
+    .limit(LIMITE_CADASTRO)
 
   if (error) throw error
   return (data as unknown as MototaxistaCadastroRow[]).map((row) => ({
@@ -222,6 +230,7 @@ async function buscarConveniosCadastro(): Promise<ConvenioCadastro[]> {
     .select('id, nome, cnpj, exige_assinatura, ativo')
     .order('ativo', { ascending: false })
     .order('nome')
+    .limit(LIMITE_CADASTRO)
 
   if (error) throw error
   return (data as unknown as ConvenioCadastroRow[]).map((row) => ({

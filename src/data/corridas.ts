@@ -3,6 +3,14 @@ import { supabase, isDuplicateKeyError } from '@/lib/supabase'
 import { sha256Hex } from '@/lib/hash'
 import { inserirEventoIdempotente } from '@/data/eventos'
 
+// Tetos explícitos (nossos, não o `max-rows` do servidor). Dropdown de
+// cadastro é limitado pela realidade; as duas listas operacionais
+// (pendentes sem corrida, corridas abertas) deveriam viver perto do
+// zero — se encostarem nesses números, o problema não é a query, é que
+// tem coisa parada há muito tempo.
+const LIMITE_DROPDOWN = 500
+const LIMITE_OPERACIONAL = 500
+
 export type Agencia = { id: string; nome: string }
 
 async function buscarAgencias(): Promise<Agencia[]> {
@@ -11,6 +19,7 @@ async function buscarAgencias(): Promise<Agencia[]> {
     .select('id, nome')
     .eq('ativo', true)
     .order('nome')
+    .limit(LIMITE_DROPDOWN)
 
   if (error) throw error
   return data as unknown as Agencia[]
@@ -28,6 +37,7 @@ async function buscarMototaxistas(): Promise<Mototaxista[]> {
     .select('id, nome, agencia_id')
     .eq('ativo', true)
     .order('nome')
+    .limit(LIMITE_DROPDOWN)
 
   if (error) throw error
 
@@ -56,6 +66,7 @@ async function buscarEntregasPendentesSemCorrida(): Promise<EntregaPendente[]> {
     .eq('status_entrega', 'pendente')
     .is('corrida_id', null)
     .order('registrado_em', { ascending: true })
+    .limit(LIMITE_OPERACIONAL)
 
   if (error) throw error
 
@@ -115,8 +126,10 @@ export async function criarCorridaComAssinatura(
     agencia_id: input.agenciaId,
     mototaxista_id: input.mototaxistaId,
     status: 'aberta',
-    saida_em: input.ocorridoEmLocal,
     saida_por: input.criadoPor,
+    // só o relógio do dispositivo — saida_em (relógio do servidor) é
+    // carimbado pela trigger fn_corrida_registrar_saida, que preserva o
+    // valor original se a fila offline reenviar isso depois.
     saida_em_local: input.ocorridoEmLocal,
   })
   if (corridaError) throw corridaError
@@ -190,6 +203,7 @@ async function buscarCorridasAbertas(): Promise<CorridaAberta[]> {
     )
     .eq('status', 'aberta')
     .order('saida_em', { ascending: true })
+    .limit(LIMITE_OPERACIONAL)
 
   if (error) throw error
 

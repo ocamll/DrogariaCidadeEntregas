@@ -12,17 +12,31 @@ function formatarData(iso: string): string {
   return new Date(iso).toLocaleDateString('pt-BR')
 }
 
+// A lista tem teto — se bateu nele, diz na cara em vez de deixar o caixa
+// achar que acabou. Aparece só quando realmente há mais pendência.
+function AvisoTemMais({ mostrar }: { mostrar: boolean }) {
+  if (!mostrar) return null
+  return (
+    <p className="text-sm text-destructive">
+      Há mais pendências do que cabe nesta lista — vai limpando as mais antigas (que aparecem
+      primeiro) que o resto aparece.
+    </p>
+  )
+}
+
 function DocumentosConvenio({ profile }: { profile: AuthProfile }) {
   const { data, isLoading, isError, error } = useDocumentosConvenioPendentes()
   const marcarRecebido = useMarcarDocumentoConvenioRecebido()
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Carregando…</p>
   if (isError) return <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>
-  if (!data || data.length === 0) {
+  if (!data || data.itens.length === 0) {
     return <p className="text-sm text-muted-foreground">Nenhum documento de convênio pendente.</p>
   }
 
   return (
+    <>
+    <AvisoTemMais mostrar={data.temMais} />
     <Table>
       <TableHeader>
         <TableRow>
@@ -34,7 +48,7 @@ function DocumentosConvenio({ profile }: { profile: AuthProfile }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {data.map((doc) => (
+        {data.itens.map((doc) => (
           <TableRow key={doc.id}>
             <TableCell>{doc.numeroVale}</TableCell>
             <TableCell>{doc.clienteNome}</TableCell>
@@ -59,6 +73,7 @@ function DocumentosConvenio({ profile }: { profile: AuthProfile }) {
         ))}
       </TableBody>
     </Table>
+    </>
   )
 }
 
@@ -68,11 +83,13 @@ function ReceitasPendentes({ profile }: { profile: AuthProfile }) {
 
   if (isLoading) return <p className="text-sm text-muted-foreground">Carregando…</p>
   if (isError) return <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>
-  if (!data || data.length === 0) {
+  if (!data || data.itens.length === 0) {
     return <p className="text-sm text-muted-foreground">Nenhuma receita pendente de devolução.</p>
   }
 
   return (
+    <>
+    <AvisoTemMais mostrar={data.temMais} />
     <Table>
       <TableHeader>
         <TableRow>
@@ -83,7 +100,7 @@ function ReceitasPendentes({ profile }: { profile: AuthProfile }) {
         </TableRow>
       </TableHeader>
       <TableBody>
-        {data.map((receita) => (
+        {data.itens.map((receita) => (
           <TableRow key={receita.id}>
             <TableCell>{receita.numeroVale}</TableCell>
             <TableCell>{receita.clienteNome}</TableCell>
@@ -107,6 +124,7 @@ function ReceitasPendentes({ profile }: { profile: AuthProfile }) {
         ))}
       </TableBody>
     </Table>
+    </>
   )
 }
 
