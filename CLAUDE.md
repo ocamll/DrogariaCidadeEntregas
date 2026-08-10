@@ -12,6 +12,14 @@ esperando no balcão. Velocidade de digitação é o requisito número um.
 
 Usuário secundário: mototaxista, que só encosta num tablet para assinar.
 
+A farmácia real tem **17 filiais** (hoje só 2 existem como dado de teste:
+Matriz e Filial 02) — o sistema já suporta múltiplas lojas de ponta a
+ponta (entregas escopadas por `loja_id`, transferência entre filiais,
+relatórios e Registro de Auditoria filtráveis por filial). Só a
+**criação** de loja nova continua manual via SQL, decisão consciente (ver
+"Ideias futuras" abaixo) — não confundir isso com "não suporta
+multi-loja".
+
 ---
 
 ## Stack
@@ -287,7 +295,10 @@ Onboarding de tenant, tela de cadastro de farmácia, cobrança, subdomínio, por
 agência, geração de PDF, integração com Trier, leitura de QR de NF-e, app nativo,
 notificação WhatsApp, GPS, tarifário por bairro, dashboard com gráfico, conciliação
 de cartão por NSU, PIN de mototaxista, encadeamento de hash, tela de fechamento
-mensal, exportação automática para Drive, multi-loja.
+mensal, exportação automática para Drive, tela de cadastro de loja/filial nova
+pela UI (continua manual via SQL, filial é rara — **não confundir com suporte
+a múltiplas lojas, que já existe** de ponta a ponta; a farmácia real tem 17
+filiais).
 
 Se algum destes parecer necessário, **pare e pergunte antes de implementar.**
 

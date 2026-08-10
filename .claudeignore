@@ -1,0 +1,10 @@
+node_modules
+dist
+build
+.vite
+*.lock
+package-lock.json
+supabase/.branches
+supabase/.temp
+coverage
+*.log
