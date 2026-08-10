@@ -212,6 +212,84 @@ Verificado no fim que o burst de HMR tinha parado sozinho (~19min sem
 recorrência, olhando o log do servidor Vite, não só o console
 acumulado do browser).
 
+## 9. Auditoria do app — varredura atrás de gaps, sem alvo prévio
+
+Pedido aberto ("procura gaps atuais e resolve"), então varri o código
+contra as 9 regras invioláveis e o schema, em vez de ir num alvo já
+conhecido. Achei 3 no código + 1 que dependia de decisão.
+
+**RLS de `pagamentos` e `assinaturas` era tenant-wide** — o mais sério, e
+exatamente a mesma classe do buraco de `eventos` do item 7, que passou
+despercebido lá porque eu só olhei `eventos`. `entregas` e `corridas`
+sempre escoparam o caixa à própria loja; essas duas ficaram só com
+`tenant_id` desde o schema inicial. Um caixa da Filial 02 lia por query
+direta o valor e a forma de pagamento de toda entrega da Matriz, a
+justificativa de cada divergência (`pagamentos.observacao`) e os traços
+de assinatura do tenant inteiro. Nenhuma das duas tem `loja_id` próprio,
+então o escopo vem da entrega/corrida dona, via helpers
+`pode_ver_entrega`/`pode_ver_corrida` SECURITY DEFINER (mesmo motivo de
+`current_tenant_id()`: ler a tabela de dentro da policy sem disparar
+recursão de RLS).
+
+**Relatório somava dinheiro sobre `select` sem `limit` nem `range`** —
+era a única query do app sem teto (as outras têm limite explícito).
+Passando do `max-rows` do PostgREST os totais viriam silenciosamente
+menores, sem erro: o cenário da regra 1. Novo `src/lib/paginacao.ts`
+pagina por `range()` **avançando pelo tamanho do lote realmente
+recebido**, não pelo pedido — assim funciona mesmo se o teto do servidor
+for menor que a página.
+
+**`fecharCorrida` zerava `observacoes`** — escrevia
+`observacoes: insucessoDetalhe` incondicionalmente, e pra vale marcado
+Entregue isso é `null`. Latente (nada mais escreve a coluna hoje), mas é
+perda silenciosa de dado.
+
+**Custódia de papel gravava um relógio só** (`documento_recebido_em`,
+`receita_recebida_em` vindo do navegador). Levei pro usuário porque
+tinha dois caminhos: trocar pelo `now()` do servidor (mais simples, mas
+tecnicamente ainda um relógio) ou colunas `_local` + trigger como no
+resto do projeto. Ele escolheu o consistente. Diferente dos casos do
+item 8, esses não passam pela fila offline — o risco não é sync atrasado
+e sim o relógio do PC estar errado em termos absolutos, sem como
+perceber depois.
+
+**Testado com conta de caixa real** (`caixateste@drogcidade.sg`, Filial
+02) — foi o que fechou a prova nos dois sentidos: antes enxergava todos
+os pagamentos do tenant, depois zero de outra loja e zero assinaturas;
+e criando uma entrega nova (V-000017) ele volta a ver o pagamento dela,
+inclusive pelo embed que a tela "Hoje" usa. Ou seja, apertou o que devia
+sem apertar o que não devia. Trigger de custódia confirmada gravando os
+dois relógios com 275ms de diferença.
+
+## 10. Histórico paginado e filtro de filial
+
+Usuário perguntou o que o `limit(5000)` do histórico implicava. A
+resposta virou trabalho: o teto real é `min(5000, max-rows)`, a
+ordenação é `registrado_em desc` (então o corte derruba justamente os
+**mais antigos**, que é o que a busca existe pra achar), e é silencioso.
+Ele foi direto ao ponto: não pode ter teto, a farmácia procura vale de 3
+meses atrás.
+
+Paginação server-side de verdade — `range()` + `count: 'exact'`, 50 por
+página, páginas numeradas com janela deslizante (`1 … 5 6 7 … 84`) pra
+lista não virar parede de botões. Sem teto nenhum, e carregando **menos**
+por vez: a tabela não virtualiza e monta um dropdown Radix por linha,
+então 5000 linhas travariam o PC do caixa antes de o dado ser o
+problema. `keepPreviousData` pra não piscar entre páginas; filtro novo
+sempre volta pra página 1.
+
+Filtro de filial no histórico, só pra admin/gerente (pro caixa a RLS já
+prende à própria loja). Server-side junto da paginação — client-side
+filtraria só os 50 da página atual, pior que não ter. Filtra por
+`loja_id` (origem), mesma semântica do Registro de Auditoria.
+
+Testado baixando `TAMANHO_PAGINA_HISTORICO` pra 5 temporariamente (com
+19 vales e página de 50 não dava pra ver paginação nenhuma): 4 páginas,
+página 3 com "11–15 de 19" e linhas certas — inclusive um vale de
+07/08/**25**, um ano atrás, que é o caso que o teto quebrava. Filial 02
+filtrou 2 de 19, batendo com `count` direto no banco, e resetou pra
+página 1. Restaurado pra 50 e reconferido depois.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -222,6 +300,10 @@ acumulado do browser).
    Auditoria (fim do item 5 + item 6)
 5. `6ab8dd8` — dois relógios em corridas/pagamentos/eventos + RLS de
    eventos restrita (itens 7 e 8 acima)
+6. `5a6e1d7` — NOTAS.md com a continuação de 2026-08-10
+7. `01eb28b` — gaps da auditoria: RLS por loja, paginação do relatório,
+   observacoes, custódia (item 9 acima)
+8. `69e3c06` — histórico paginado + filtro de filial (item 10 acima)
 
 ## Migrations aplicadas nesta sessão
 
@@ -237,6 +319,11 @@ acumulado do browser).
     (`registrado_em_local`)
 13. `20260810120100_eventos_dois_relogios.sql` (`ocorrido_em_local` +
     backfill em `fn_log_entrega`)
+14. `20260810140000_rls_pagamentos_assinaturas_por_loja.sql` (helpers
+    `pode_ver_entrega`/`pode_ver_corrida` + 4 policies reescritas)
+15. `20260810150000_custodia_dois_relogios.sql`
+    (`documento_recebido_em_local`, `receita_recebida_em_local` +
+    trigger `fn_entrega_registrar_custodia`)
 
 Todas confirmadas rodando pelo usuário antes dos testes. Nenhuma migration
 pendente no momento em que esta sessão terminou.
@@ -249,6 +336,7 @@ o que já era classificado como "fora do MVP atual, mas anotado":
 - [ ] Painel do admin criar/gerenciar usuários — trava é precisar da
       primeira Edge Function do projeto (`service_role` nunca pode rodar
       no navegador). Ver "Ideias futuras" no CLAUDE.md.
+- [ ] Paginar a aba "Hoje" igual o histórico (ver "Gaps conhecidos").
 
 ## Gaps conhecidos, não resolvidos
 
@@ -259,6 +347,22 @@ o que já era classificado como "fora do MVP atual, mas anotado":
   de propósito no item 8 (2026-08-10): a transição pode vir de um
   UPDATE em lote (fechamento de corrida) sem relógio de dispositivo
   confiável por linha. Não dá pra preencher sem inventar valor.
+- **Aba "Hoje" continua sem paginação.** Pro caixa não importa (um dia,
+  uma loja), mas o admin vê as 17 filiais juntas — um dia movimentado
+  pode passar do `max-rows` e truncar em silêncio, mesmo problema que o
+  histórico tinha antes do item 10. Levantado e não feito, decisão do
+  usuário sobre quando.
+- **Ninguém sabe o `max-rows` deste projeto.** Não dá pra descobrir pela
+  API do cliente; está no dashboard em Settings → API → Max rows. Todo
+  raciocínio sobre teto nos itens 9 e 10 assumiu o default comum (1000)
+  como pior caso — as correções são robustas a qualquer valor, mas vale
+  confirmar o número um dia.
+- **Regra 1 vs. `toCents('1.234')`.** O parser trata o último separador
+  como decimal, então "1.234" (mil duzentos e trinta e quatro digitado
+  com ponto de milhar) vira R$ 1,23 em vez de R$ 1.234,00. Entrada
+  genuinamente ambígua e o caixa normalmente digita "1234" ou "1234,00",
+  então não mexi — mas é uma armadilha real se alguém treinar o time a
+  usar ponto de milhar.
 
 ## Nota pra próxima sessão sobre testes de UI no navegador
 
@@ -288,9 +392,12 @@ no `javascript_tool`).
 ## Coisas úteis pra retomar o trabalho
 
 **Credenciais de teste:** Admin `adminteste@drogcidade.sg` / senha `2026`.
-Lojas "Matriz" e "Filial 02" (mais 15 filiais reais que ainda não têm
-registro no banco — ver seção 6 acima). Agência "Ágil Motos", motoboys
-João Silva e Pedro Souza.
+Caixa `caixateste@drogcidade.sg` / senha `2026` (perfil "Camilo", papel
+`caixa`, **Filial 02**) — indispensável pra testar RLS, porque com admin
+todo teste de restrição passa por engano (ele enxerga tudo do tenant de
+qualquer jeito). Lojas "Matriz" e "Filial 02" (mais 15 filiais reais que
+ainda não têm registro no banco — ver seção 6 acima). Agência "Ágil
+Motos", motoboys João Silva e Pedro Souza.
 
 **Node.js nesta máquina:** instalado em `C:\Program Files\nodejs`, **não
 está no PATH** desta sessão/terminal. `npm`/`node` só funcionam com
@@ -330,7 +437,14 @@ no banco:
   divergência (Dinheiro → Pix) com `registrado_em_local`/
   `ocorrido_em_local` preenchidos, confirmado direto no banco.
 - `V-000016` (Teste Falta Receita) — testou "Precisa de receita" +
-  "Falta de receita" pelo seletor, mesmo tipo de verificação.
+  "Falta de receita" pelo seletor, mesmo tipo de verificação. Depois
+  serviu de teste da trigger de custódia: receita marcada como devolvida,
+  com `receita_recebida_em_local` (dispositivo) e `receita_recebida_em`
+  (servidor) gravados 275ms um do outro.
+- `V-000017` (Teste RLS Caixa) — **criado pela conta de caixa**, único
+  vale de cliente da Filial 02. É ele que prova o lado permissivo da RLS
+  nova (o caixa lê o próprio pagamento); se for apagado algum dia, o
+  teste de RLS perde o caso positivo.
 
 Se quiser começar "limpo" pra operação real, isso teria que ser removido
 manualmente via SQL Editor — o app não tem (e não deveria ter) um jeito de
