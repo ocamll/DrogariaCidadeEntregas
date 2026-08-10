@@ -372,6 +372,17 @@ completo: digitei `1.234,56`, o banco gravou `valor_compra_cents =
 123456` (com o `pagamentos.previsto` batendo) e a lista exibiu
 `R$ 1.234,56`. Justamente o valor que o parser antigo erraria.
 
+**O campo nasceu alinhado à direita e o usuário mandou corrigir** — o
+número agora cresce da esquerda, logo depois do "R$", no sentido da
+leitura e onde ele está olhando.
+
+**Transferência não tem campo de valor** — checado a pedido do usuário:
+a tela tem um campo só, o select de filial de destino (vale de
+transferência não tem valor de venda, por design). Nada de máscara pra
+aplicar lá. Testei o fluxo mesmo assim pra garantir que não regrediu:
+V-000020 gravado com valores 0 e nenhum `pagamentos` criado, como
+esperado.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -527,6 +538,8 @@ no banco:
   entrega, digitados pela máscara nova (item 12). O valor foi escolhido
   de propósito: é exatamente o que o parser antigo erraria se digitado
   como "1.234".
+- `V-000020` (Transferência Matriz → Filial 02) — teste de regressão do
+  fluxo de transferência depois da máscara (item 12).
 
 Se quiser começar "limpo" pra operação real, isso teria que ser removido
 manualmente via SQL Editor — o app não tem (e não deveria ter) um jeito de

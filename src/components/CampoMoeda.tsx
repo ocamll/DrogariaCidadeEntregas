@@ -39,7 +39,9 @@ export function CampoMoeda({
         // sem vírgula/ponto, que aqui não têm uso nenhum.
         inputMode="numeric"
         autoFocus={autoFocus}
-        className={cn('pl-9 text-right tabular-nums', className)}
+        // alinhado à esquerda, logo depois do "R$" — o número cresce no
+        // sentido da leitura, e o cursor fica onde o caixa está olhando.
+        className={cn('pl-9 tabular-nums', className)}
         value={texto}
         // Só os dígitos do que veio importam. Backspace funciona sozinho:
         // apagar um caractere de "1.234,56" deixa "1.234,5", cujos dígitos
