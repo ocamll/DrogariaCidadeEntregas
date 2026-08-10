@@ -1,4 +1,4 @@
-# Notas da sessão — 2026-08-09
+# Notas da sessão — 2026-08-09 e 2026-08-10
 
 Registro de trabalho, não é documentação permanente do projeto (isso é o
 CLAUDE.md). Decisões duráveis desta sessão já foram incorporadas lá; aqui
@@ -139,6 +139,79 @@ tipos novos (antes só tinham `user_id` cru), filtro de filial isolando
 Matriz de Filial 02 corretamente (inclusive vale de transferência
 aparecendo na filial de origem, não na de destino).
 
+## 7. Continuação em 2026-08-10: fechando os 2 gaps conhecidos
+
+Retomei do NOTAS.md com o MVP já 100%. Perguntei o que fazer a seguir
+(painel de usuários vs. gaps conhecidos) — usuário escolheu os gaps.
+
+**Dois relógios em `corridas.retorno_em`:** só existia o valor mandado
+pelo cliente (`new Date()` do navegador), sem par de servidor — ao
+contrário de `saida_em`/`saida_em_local`. `retorno_em_local` passou a
+guardar o relógio do dispositivo; `retorno_em` passou a ser preenchido
+por um trigger (`fn_corrida_registrar_retorno`) com `now()` do servidor
+no instante em que o fechamento é de fato aplicado (útil se a fila
+offline sincronizar atrasada). `FecharCorridaInput.retornoEm` virou
+`retornoEmLocal`; o `update` de corridas parou de mandar `retorno_em`
+do cliente.
+
+**RLS de `eventos` era tenant-wide:** o gate "só admin/gerente vê
+Notificações/Ocorrências/Auditoria" sempre foi só de UI — qualquer
+autenticado do tenant conseguia ler todo evento via query direta.
+Policy de SELECT reescrita: gerente/admin continuam vendo tudo do
+tenant; caixa só vê os próprios eventos (`user_id = auth.uid()`) —
+suficiente pro select-antes-de-inserir de `inserirEventoIdempotente`
+continuar funcionando, já que quem insere sempre grava o próprio id.
+
+Testado no browser logado como admin: fechei a corrida do João Silva
+(vale V-000012, virou "Entregue"), fila offline (IndexedDB) esvaziou
+sozinha — só acontece se o sync deu certo contra o schema novo.
+Registro de Auditoria confirmou o evento `status_alterado`
+correspondente, autor resolvido, RLS não quebrou nada pro admin.
+
+## 8. Estendendo dois relógios pra `pagamentos` e `eventos`
+
+Usuário perguntou "ele salva o horário de quando é feito ação offline?"
+— resposta revelou que a lacuna dos gaps conhecidos era maior: nem
+`pagamentos.registrado_em` nem `eventos.ocorrido_em` tinham QUALQUER
+par de dispositivo (pior que o caso de `corridas`, que ao menos tinha
+`saida_em_local`). Usuário pediu pra estender a correção pros dois.
+
+- `pagamentos.registrado_em_local` novo. `criarPagamentoPrevisto` e
+  `marcarDivergencia` passaram a receber/gravar o relógio do
+  dispositivo — reaproveitado de `ocorridoEmLocal` da entrega quando o
+  previsto nasce junto com o cadastro, ou capturado no próprio dialog
+  de divergência (`NotificarOcorrenciaDialog.tsx`) quando é ação
+  isolada.
+- `eventos.ocorrido_em_local` novo. Os 3 tipos que passam pela fila
+  offline (`pagamento_alterado`, `falta_receita`, `insucesso_detalhado`)
+  passaram a receber o valor via `inserirEventoIdempotente`.
+  `entrega_criada` (gerado pelo trigger `fn_log_entrega`) ganhou o
+  valor de graça, direto de `entregas.ocorrido_em_local` da própria
+  linha — sem precisar de nada novo do cliente.
+- `status_alterado` **ficou sem** `ocorrido_em_local` de propósito —
+  pode vir de um UPDATE em lote (fechamento de corrida com vários
+  vales) sem um relógio de dispositivo confiável por linha até a
+  entrega. Gap novo, documentado no comentário da migration, não uma
+  regressão.
+
+**Achado de teste real:** a primeira tentativa de testar a divergência
+pareceu funcionar (fila offline vazia) mas na verdade não gravou nada
+— o console mostrou dezenas de HMR (`hot updated`) disparando em
+arquivos que eu nem tinha tocado (`CadastroEntrega.tsx`, `index.css`,
+etc.), quase certamente o OneDrive tocando timestamps da pasta inteira
+do projeto e o watcher do Vite reagindo, derrubando o estado do dialog
+no meio da interação. Só percebi porque fui conferir direto no banco
+(via `import('/src/lib/supabase.ts')` no console do browser) em vez de
+confiar na fila vazia. Recarreguei a página do zero e repeti — aí sim
+confirmado, com os pares `_local`/servidor batendo no milissegundo
+entre pagamento e evento. **Lição: depois de qualquer ação de teste,
+conferir o resultado direto no banco, não só o estado da tela — ainda
+mais nesta máquina, onde o projeto vive dentro do OneDrive.**
+
+Verificado no fim que o burst de HMR tinha parado sozinho (~19min sem
+recorrência, olhando o log do servidor Vite, não só o console
+acumulado do browser).
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -147,6 +220,8 @@ aparecendo na filial de origem, não na de destino).
 3. `06e36a0` — seta de vales por motoboy nos relatórios (início do item 5)
 4. `2169e7f` — hierarquia agência→motoboy nos relatórios + Registro de
    Auditoria (fim do item 5 + item 6)
+5. `6ab8dd8` — dois relógios em corridas/pagamentos/eventos + RLS de
+   eventos restrita (itens 7 e 8 acima)
 
 ## Migrations aplicadas nesta sessão
 
@@ -155,6 +230,13 @@ aparecendo na filial de origem, não na de destino).
    `receita_recebida_em`, `receita_recebida_por` em `entregas`)
 9. `20260809220000_eventos_user_fk.sql` (FK `eventos.user_id` →
    `profiles.id`)
+10. `20260809230000_corrida_retorno_dois_relogios.sql`
+    (`retorno_em_local` + trigger)
+11. `20260809230100_eventos_select_restrita.sql` (RLS de `eventos`)
+12. `20260810120000_pagamentos_dois_relogios.sql`
+    (`registrado_em_local`)
+13. `20260810120100_eventos_dois_relogios.sql` (`ocorrido_em_local` +
+    backfill em `fn_log_entrega`)
 
 Todas confirmadas rodando pelo usuário antes dos testes. Nenhuma migration
 pendente no momento em que esta sessão terminou.
@@ -170,14 +252,13 @@ o que já era classificado como "fora do MVP atual, mas anotado":
 
 ## Gaps conhecidos, não resolvidos
 
-- `corridas.retorno_em` não tem par "dois relógios" (não existe
-  `retorno_em_local` no schema — só `saida_em`/`saida_em_local` tem o
-  par). Provavelmente não importa muito (retorno acontece no balcão, não
-  na rua) — mas é uma assimetria real que ninguém revisou ainda.
-- RLS de `eventos` é tenant-wide pra qualquer autenticado — o gate "só
-  admin/gerente vê Notificações/Ocorrências/Registro de Auditoria" é só de
-  UI, não impede uma query direta de um caixa. Pré-existente (não
-  introduzido nesta sessão), fora do escopo consertar agora.
+- ~~`corridas.retorno_em` não tem par "dois relógios"~~ — resolvido no
+  item 7 (2026-08-10).
+- ~~RLS de `eventos` tenant-wide~~ — resolvido no item 7 (2026-08-10).
+- `eventos.status_alterado` não tem `ocorrido_em_local` — introduzido
+  de propósito no item 8 (2026-08-10): a transição pode vir de um
+  UPDATE em lote (fechamento de corrida) sem relógio de dispositivo
+  confiável por linha. Não dá pra preencher sem inventar valor.
 
 ## Nota pra próxima sessão sobre testes de UI no navegador
 
@@ -192,6 +273,17 @@ pra a maioria dos botões) ou, quando isso falhava (especialmente Radix
 elemento. Console de erros também acumula histórico entre reloads na
 mesma aba — abrir uma aba nova antes de checar `read_console_messages` dá
 sinal mais limpo. Considerar essas abordagens primeiro da próxima vez.
+
+**Atualização 2026-08-10:** nesta máquina o projeto vive dentro do
+OneDrive, e o Vite reagiu com rajadas de HMR espúrio (dezenas de
+`hot updated` em arquivos não relacionados, provavelmente o OneDrive
+tocando timestamps da pasta inteira depois de uma edição) bem no meio
+de um teste — o dialog fechou como se tivesse sucesso, mas nada foi
+gravado no banco. Fila offline vazia / dialog fechado **não** é prova
+de sucesso por si só; depois de qualquer escrita testada, confirmar
+direto no banco (dá pra usar o client já autenticado da própria página:
+`await (await import('/src/lib/supabase.ts')).supabase.from(...).select(...)`
+no `javascript_tool`).
 
 ## Coisas úteis pra retomar o trabalho
 
@@ -234,6 +326,11 @@ no banco:
 - `V-000010`/`V-000011` (Carlos Cliente, Diego Mello) apareceram durante
   os testes sem eu ter criado — provavelmente uso real concorrente (app
   com Realtime ligado). Não investigado, só registrado pra não confundir.
+- `V-000015` (Teste Dois Relogios) — testou pagamento previsto +
+  divergência (Dinheiro → Pix) com `registrado_em_local`/
+  `ocorrido_em_local` preenchidos, confirmado direto no banco.
+- `V-000016` (Teste Falta Receita) — testou "Precisa de receita" +
+  "Falta de receita" pelo seletor, mesmo tipo de verificação.
 
 Se quiser começar "limpo" pra operação real, isso teria que ser removido
 manualmente via SQL Editor — o app não tem (e não deveria ter) um jeito de
