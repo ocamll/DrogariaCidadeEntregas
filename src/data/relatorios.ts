@@ -3,6 +3,16 @@ import { supabase } from '@/lib/supabase'
 
 export type FiltroPeriodo = { dataInicio: string; dataFim: string }
 
+export type RelatorioVale = {
+  id: string
+  numeroVale: string
+  clienteNome: string
+  tipo: 'cliente' | 'transferencia'
+  statusEntrega: string
+  valorEntregaCents: number
+  ocorridoEmLocal: string
+}
+
 export type RelatorioGrupo = {
   chave: string
   nome: string
@@ -10,6 +20,7 @@ export type RelatorioGrupo = {
   entregues: number
   insucessos: number
   valorEntregaCents: number
+  vales: RelatorioVale[]
 }
 
 export type Relatorio = {
@@ -25,10 +36,13 @@ export type Relatorio = {
 
 type EntregaRelatorioRow = {
   id: string
+  numero_vale: string
+  cliente_nome: string
   tipo: 'cliente' | 'transferencia'
   valor_compra_cents: number
   valor_entrega_cents: number
   status_entrega: string
+  ocorrido_em_local: string
   corridas: {
     mototaxista_id: string
     agencia_id: string | null
@@ -38,11 +52,21 @@ type EntregaRelatorioRow = {
 }
 
 function acumularGrupo(mapa: Map<string, RelatorioGrupo>, id: string, nome: string, row: EntregaRelatorioRow) {
-  const atual = mapa.get(id) ?? { chave: id, nome, totalVales: 0, entregues: 0, insucessos: 0, valorEntregaCents: 0 }
+  const atual =
+    mapa.get(id) ?? { chave: id, nome, totalVales: 0, entregues: 0, insucessos: 0, valorEntregaCents: 0, vales: [] }
   atual.totalVales += 1
   if (row.status_entrega === 'entregue') atual.entregues += 1
   if (row.status_entrega === 'insucesso') atual.insucessos += 1
   atual.valorEntregaCents += row.valor_entrega_cents
+  atual.vales.push({
+    id: row.id,
+    numeroVale: row.numero_vale,
+    clienteNome: row.cliente_nome,
+    tipo: row.tipo,
+    statusEntrega: row.status_entrega,
+    valorEntregaCents: row.valor_entrega_cents,
+    ocorridoEmLocal: row.ocorrido_em_local,
+  })
   mapa.set(id, atual)
 }
 
@@ -57,10 +81,11 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
   const { data, error } = await supabase
     .from('entregas')
     .select(
-      'id, tipo, valor_compra_cents, valor_entrega_cents, status_entrega, corridas(mototaxista_id, agencia_id, mototaxistas(nome), agencias(nome))'
+      'id, numero_vale, cliente_nome, tipo, valor_compra_cents, valor_entrega_cents, status_entrega, ocorrido_em_local, corridas(mototaxista_id, agencia_id, mototaxistas(nome), agencias(nome))'
     )
     .gte('ocorrido_em_local', inicio.toISOString())
     .lt('ocorrido_em_local', fim.toISOString())
+    .order('ocorrido_em_local', { ascending: false })
 
   if (error) throw error
   const rows = data as unknown as EntregaRelatorioRow[]

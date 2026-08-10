@@ -147,7 +147,14 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       Agregação client-side, sem view/RPC nova — volume do MVP não
       justifica ainda. Sem gráfico e sem PDF (ambos na lista "Fora").
       Testado com "Este mês": números batem, inclusive corrida antiga sem
-      agência contando só pro motoboy.
+      agência contando só pro motoboy. Linha de motoboy tem seta
+      "mostrar/esconder vales" (`ChevronRight`/`ChevronDown`) que expande
+      a lista completa dos vales daquele motoboy no período (vale,
+      cliente, status, valor de entrega, data) — útil justamente pra
+      investigar diferenças como a de cima, sem precisar consultar o
+      banco. `RelatorioGrupo` ganhou campo `vales[]`, populado na mesma
+      query já existente (sem round-trip extra); a tabela "Por agência"
+      usa o mesmo componente mas sem a seta (prop opcional).
 - [x] **Cadastro de agências, mototaxistas, convênios** — aba "Cadastros"
       (admin/gerente), sub-abas pra cada entidade. Tabelas já existiam desde
       o schema inicial (com RLS pronta, escrita restrita a `is_gerente()`) —

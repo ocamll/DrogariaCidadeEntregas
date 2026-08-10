@@ -4,6 +4,23 @@ Registro de trabalho, não é documentação permanente do projeto (isso é o
 CLAUDE.md). Decisões duráveis desta sessão já foram incorporadas lá; aqui
 fica o que é mais "estado da sessão" — útil pra retomar, mas não é regra.
 
+## Quarta parte da sessão: seta "mostrar vales" no relatório por motoboy
+
+Usuário notou uma diferença entre a soma dos vales "por motoboy" e o total
+"por agência" (investigado e explicado antes desta parte: corrida antiga do
+Pedro Souza sem `agencia_id`, já documentado no CLAUDE.md). Pedido: uma
+seta em cada linha de motoboy que expande a lista de vales daquele
+período, pra dar pra investigar esse tipo de coisa sem precisar abrir o
+banco. `src/data/relatorios.ts` ganhou `RelatorioVale`/`RelatorioGrupo.vales`
+(populado na mesma query que já buscava as entregas, sem round-trip novo,
+só adicionando `numero_vale`/`cliente_nome`/`ocorrido_em_local` no
+`select` e um `.order()`). `Relatorios.tsx`: `GrupoTable` ganhou dois props
+opcionais (`expandidos`/`onToggle`) só usados na tabela "Por motoboy" — a
+de agência continua igual, sem seta. Testado: expandi os dois motoboys ao
+mesmo tempo (independentes), os vales batem exatamente com os totais da
+linha (inclusive os V-1001/V-1002 da corrida sem agência aparecendo na
+lista do Pedro Souza).
+
 ## O que foi feito
 
 Fechada a pendência "fila offline nas outras 4 escritas": agora as 5 escritas

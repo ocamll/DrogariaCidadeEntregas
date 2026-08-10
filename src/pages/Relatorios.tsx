@@ -1,9 +1,11 @@
-import { useState } from 'react'
-import { useRelatorio, type FiltroPeriodo } from '@/data/relatorios'
+import { Fragment, useState } from 'react'
+import { ChevronDown, ChevronRight } from 'lucide-react'
+import { useRelatorio, type FiltroPeriodo, type RelatorioGrupo } from '@/data/relatorios'
 import { formatBRL } from '@/lib/money'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { Badge } from '@/components/ui/badge'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import {
   Table,
@@ -33,8 +35,18 @@ export function Relatorios() {
   const hoje = localDateStr(new Date())
   const [form, setForm] = useState<FiltroPeriodo>({ dataInicio: hoje, dataFim: hoje })
   const [filtro, setFiltro] = useState<FiltroPeriodo>({ dataInicio: hoje, dataFim: hoje })
+  const [expandidos, setExpandidos] = useState<Set<string>>(new Set())
 
   const { data, isLoading, isError, error } = useRelatorio(filtro)
+
+  function toggleExpandido(chave: string) {
+    setExpandidos((prev) => {
+      const next = new Set(prev)
+      if (next.has(chave)) next.delete(chave)
+      else next.add(chave)
+      return next
+    })
+  }
 
   function aplicarHoje() {
     const h = localDateStr(new Date())
@@ -123,6 +135,8 @@ export function Relatorios() {
                 grupos={data.porMototaxista}
                 nomeColuna="Motoboy"
                 vazio="Nenhuma corrida com motoboy no período."
+                expandidos={expandidos}
+                onToggle={toggleExpandido}
               />
             </CardContent>
           </Card>
@@ -158,19 +172,28 @@ function GrupoTable({
   grupos,
   nomeColuna,
   vazio,
+  expandidos,
+  onToggle,
 }: {
-  grupos: Array<{ chave: string; nome: string; totalVales: number; entregues: number; insucessos: number; valorEntregaCents: number }>
+  grupos: RelatorioGrupo[]
   nomeColuna: string
   vazio: string
+  // opcional — só a tabela "Por motoboy" usa isso hoje. Sem esses dois
+  // props, a tabela fica exatamente como antes (sem seta, sem expandir).
+  expandidos?: Set<string>
+  onToggle?: (chave: string) => void
 }) {
   if (grupos.length === 0) {
     return <p className="text-sm text-muted-foreground">{vazio}</p>
   }
 
+  const expansivel = !!onToggle
+
   return (
     <Table>
       <TableHeader>
         <TableRow>
+          {expansivel && <TableHead />}
           <TableHead>{nomeColuna}</TableHead>
           <TableHead>Vales</TableHead>
           <TableHead>Entregues</TableHead>
@@ -179,13 +202,79 @@ function GrupoTable({
         </TableRow>
       </TableHeader>
       <TableBody>
-        {grupos.map((grupo) => (
-          <TableRow key={grupo.chave}>
-            <TableCell>{grupo.nome}</TableCell>
-            <TableCell>{grupo.totalVales}</TableCell>
-            <TableCell>{grupo.entregues}</TableCell>
-            <TableCell>{grupo.insucessos}</TableCell>
-            <TableCell>{formatBRL(grupo.valorEntregaCents)}</TableCell>
+        {grupos.map((grupo) => {
+          const aberto = expandidos?.has(grupo.chave) ?? false
+          return (
+            <Fragment key={grupo.chave}>
+              <TableRow>
+                {expansivel && (
+                  <TableCell>
+                    <Button
+                      variant="ghost"
+                      size="icon-sm"
+                      aria-label={aberto ? 'Esconder vales' : 'Mostrar vales'}
+                      onClick={() => onToggle!(grupo.chave)}
+                    >
+                      {aberto ? <ChevronDown /> : <ChevronRight />}
+                    </Button>
+                  </TableCell>
+                )}
+                <TableCell>{grupo.nome}</TableCell>
+                <TableCell>{grupo.totalVales}</TableCell>
+                <TableCell>{grupo.entregues}</TableCell>
+                <TableCell>{grupo.insucessos}</TableCell>
+                <TableCell>{formatBRL(grupo.valorEntregaCents)}</TableCell>
+              </TableRow>
+              {expansivel && aberto && (
+                <TableRow>
+                  <TableCell colSpan={6} className="bg-muted/30 p-3">
+                    <ValesGrupoTable vales={grupo.vales} />
+                  </TableCell>
+                </TableRow>
+              )}
+            </Fragment>
+          )
+        })}
+      </TableBody>
+    </Table>
+  )
+}
+
+function ValesGrupoTable({ vales }: { vales: RelatorioGrupo['vales'] }) {
+  return (
+    <Table>
+      <TableHeader>
+        <TableRow>
+          <TableHead>Vale</TableHead>
+          <TableHead>Cliente</TableHead>
+          <TableHead>Status</TableHead>
+          <TableHead>Valor de entrega</TableHead>
+          <TableHead>Data</TableHead>
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {vales.map((vale) => (
+          <TableRow key={vale.id}>
+            <TableCell>{vale.numeroVale}</TableCell>
+            <TableCell>
+              {vale.clienteNome}
+              {vale.tipo === 'transferencia' && (
+                <Badge variant="secondary" className="ml-2">
+                  Transferência
+                </Badge>
+              )}
+            </TableCell>
+            <TableCell>{STATUS_LABEL[vale.statusEntrega] ?? vale.statusEntrega}</TableCell>
+            <TableCell>{formatBRL(vale.valorEntregaCents)}</TableCell>
+            <TableCell>
+              {new Date(vale.ocorridoEmLocal).toLocaleString('pt-BR', {
+                day: '2-digit',
+                month: '2-digit',
+                year: '2-digit',
+                hour: '2-digit',
+                minute: '2-digit',
+              })}
+            </TableCell>
           </TableRow>
         ))}
       </TableBody>
