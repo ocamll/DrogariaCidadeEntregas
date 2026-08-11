@@ -339,6 +339,15 @@ descrevia um caminho impossível. Implementado em 2026-08-10.
 - **Vale cancelado não soma dinheiro nos relatórios**, mas continua contado
   em "por status" — a soma dos status tem que fechar com o total de vales.
   Se somasse, cancelar inflaria os totais em vez de limpá-los.
+- **"Vales cancelados" tem bloco próprio no topo do relatório**, em vermelho
+  quando maior que zero: é número que a gerência acompanha (cancelamento
+  demais pode ser sinal de treinamento ou de cliente desistindo por demora),
+  e no meio da lista "por status" ficava escondido.
+- **Cancelado nunca aparece em agência/motoboy** — como só cancela vale
+  pendente, ele nunca teve corrida. Isso vale por consequência, não por
+  regra explícita: se um dia liberarem cancelar vale em rota, o dinheiro
+  dele passa a entrar no acerto da agência sem ninguém notar, porque o
+  total geral continuaria certo.
 
 ---
 

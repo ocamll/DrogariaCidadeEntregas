@@ -47,6 +47,9 @@ export type Relatorio = {
   totalVales: number
   totalClientes: number
   totalTransferencias: number
+  // conta separada porque virou bloco próprio no topo do relatório: é
+  // número que a gerência acompanha, não só mais um status na lista.
+  totalCancelados: number
   valorCompraCents: number
   valorEntregaCents: number
   valorFarmaciaDeveCents: number
@@ -174,16 +177,20 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
   let valorFarmaciaDeveCents = 0
   let totalClientes = 0
   let totalTransferencias = 0
+  let totalCancelados = 0
 
   for (const row of rows) {
     porStatus[row.status_entrega] = (porStatus[row.status_entrega] ?? 0) + 1
 
-    // Vale cancelado continua contado (aparece em "por status", e a soma
-    // dos status tem que fechar com o total de vales), mas NÃO entra no
-    // dinheiro: a compra não aconteceu e a agência não recebe por ele.
-    // Sem isso, cancelar um vale inflaria os totais em vez de limpá-los —
-    // o oposto do motivo de existir o cancelamento.
-    if (row.status_entrega !== 'cancelada') {
+    // Vale cancelado continua CONTADO — aparece em "por status", tem bloco
+    // próprio no topo, e a soma dos status precisa fechar com o total de
+    // vales. Mas não entra no DINHEIRO: a compra não aconteceu e a agência
+    // não recebe por ele. Sem essa separação, cancelar um vale inflaria os
+    // totais em vez de limpá-los, que é o oposto do motivo de existir o
+    // cancelamento.
+    if (row.status_entrega === 'cancelada') {
+      totalCancelados += 1
+    } else {
       valorCompraCents += row.valor_compra_cents
       valorEntregaCents += row.valor_entrega_cents
       valorFarmaciaDeveCents += row.valor_entrega_cents - row.entrega_paga_cliente_cents
@@ -209,6 +216,7 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
     totalVales: rows.length,
     totalClientes,
     totalTransferencias,
+    totalCancelados,
     valorCompraCents,
     valorEntregaCents,
     valorFarmaciaDeveCents,

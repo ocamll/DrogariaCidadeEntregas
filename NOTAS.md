@@ -559,6 +559,20 @@ evento, não só cancelamento — a fila offline invalidava
 `notificacoes-*` mas nunca a auditoria. Corrigido em
 `QUERY_KEYS_POR_TIPO` (todas as 6 operações) e no cancelamento.
 
+**Ajuste depois de conversar sobre o relatório:** o usuário confirmou que
+a leitura dele batia com o que foi construído — cancelamento acontece
+antes de o tele chegar na farmácia, então o vale não pertence a agência
+nem a motoboy nenhum, e o lugar dele é no relatório da farmácia. A única
+mudança pedida foi **promover "Vales cancelados" a bloco próprio** no
+topo (em vermelho quando > 0), porque dentro da lista "por status" ficava
+escondido. Continua fora do dinheiro.
+
+Fica anotado o que **não** foi feito: o bloco que soma por agência não
+checa cancelamento — hoje isso não importa porque cancelado nunca tem
+corrida, mas é garantia por consequência, não por regra. Ofereci a
+guarda de 2 linhas duas vezes e o assunto não foi retomado; se alguém
+liberar cancelar vale em rota, esse é o primeiro lugar a olhar.
+
 Testado: motivo vazio barrado com o vale intacto; cancelamento gravando
 os dois relógios (329ms de diferença) + motivo + autor; evento
 `entrega_cancelada` com o motivo no payload; vale sumindo de "Nova

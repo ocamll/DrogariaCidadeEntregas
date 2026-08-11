@@ -2,6 +2,7 @@ import { Fragment, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import { useRelatorio, type FiltroPeriodo, type RelatorioAgencia, type RelatorioGrupo } from '@/data/relatorios'
 import { formatBRL } from '@/lib/money'
+import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -119,6 +120,15 @@ export function Relatorios() {
             <StatTile label="Vales no período" valor={String(data.totalVales)} />
             <StatTile label="Entregas de cliente" valor={String(data.totalClientes)} />
             <StatTile label="Transferências" valor={String(data.totalTransferencias)} />
+            {/* Promovido de dentro de "Por status" a bloco próprio: é número
+                que a gerência acompanha (cancelamento demais pode ser sinal
+                de treinamento ou de cliente desistindo por demora), e ali
+                embaixo ficava escondido no meio dos outros status. */}
+            <StatTile
+              label="Vales cancelados"
+              valor={String(data.totalCancelados)}
+              alerta={data.totalCancelados > 0}
+            />
             <StatTile label="Valor de compra" valor={formatBRL(data.valorCompraCents)} />
             <StatTile label="Valor de entrega" valor={formatBRL(data.valorEntregaCents)} />
             <StatTile
@@ -166,11 +176,21 @@ export function Relatorios() {
   )
 }
 
-function StatTile({ label, valor }: { label: string; valor: string }) {
+function StatTile({
+  label,
+  valor,
+  // destaque só quando o número pede atenção — cancelamento em zero é
+  // notícia boa e não deve gritar na tela.
+  alerta = false,
+}: {
+  label: string
+  valor: string
+  alerta?: boolean
+}) {
   return (
-    <div className="rounded-lg border p-3">
+    <div className={cn('rounded-lg border p-3', alerta && 'border-destructive/40 bg-destructive/5')}>
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className="text-lg font-medium">{valor}</p>
+      <p className={cn('text-lg font-medium', alerta && 'text-destructive')}>{valor}</p>
     </div>
   )
 }
