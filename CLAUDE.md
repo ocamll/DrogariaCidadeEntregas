@@ -371,15 +371,20 @@ mais de lá.
 
 Cronometrado pelo usuário com uso real, já com a máscara de moeda:
 
-| | tempo |
-|---|---|
-| **Sistema** | **~15 a 18 s** |
-| Papel — um vale | ~1 min |
-| Papel — dois vales | ~1 min 30 s |
+| entrega | à mão hoje | tempo no papel | no sistema |
+|---|---|---|---|
+| normal (R$ 9,00) | 1 vale + 1 linha na planilha = **2 escrituras** | ~1 min | **~15 a 18 s** |
+| distante (R$ 18,00) | 2 vales + 2 linhas na planilha = **4 escrituras** | ~1 min 40 s | **~15 a 18 s** |
 
-Ou seja: entre **3x e 6x mais rápido** que o papel, e com folga de ~7 a 10
-segundos sobre o alvo de 25 s. O projeto passou no teste que o define — isso
-deixa de ser hipótese.
+Entre **4x e 6x mais rápido** que o papel, com folga de ~7 a 10 segundos sobre
+o alvo de 25 s. O projeto passou no teste que o define — isso deixa de ser
+hipótese.
+
+Repare que o tempo no sistema **não muda** entre os dois casos, enquanto no
+papel quase dobra: é onde a diferença mais aparece.
+
+**"Os dois papéis" são vale do tele + planilha de controle da farmácia**, não
+duas vias do mesmo vale. Entrega distante multiplica os dois.
 
 **Essa folga é orçamento, não sobra pra gastar à toa.** Toda mudança na tela de
 cadastro continua sendo avaliada contra os 25 s, e campo novo ali continua

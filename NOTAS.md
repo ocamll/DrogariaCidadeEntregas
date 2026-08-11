@@ -470,6 +470,18 @@ seção "O teste que decide o projeto" tinha literalmente um `X segundos`
 de placeholder no lugar da linha de base do papel, desde o começo do
 projeto. Agora tem número dos dois lados.
 
+**Correção de entendimento que veio junto** (eu tinha lido errado): "dois
+vales" não são duas entregas — é **uma** entrega de endereço distante. E
+"os dois papéis" do CLAUDE.md são vale do tele + linha na planilha de
+controle da farmácia, não duas vias do mesmo vale. Entrega distante
+multiplica os dois lados: 2 vales + 2 linhas = 4 escrituras, 1min40.
+
+Detalhe de negócio que apareceu aí e que o projeto inteiro não sabia: **o
+valor da entrega é R$ 9,00 fixo, nunca outro valor.** A única variação é
+endereço distante, que cobra 2 vales (R$ 18,00). Ver a pergunta em aberto
+no fim deste arquivo — isso tem consequência de desenho na tela de
+cadastro e possivelmente nos relatórios.
+
 Duas coisas que isso muda pra quem retomar:
 
 - A máscara de moeda (item 12) **não** regrediu o tempo, apesar de ter
