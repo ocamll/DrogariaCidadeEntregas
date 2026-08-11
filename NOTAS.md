@@ -580,6 +580,81 @@ corrida"; totais caindo **exatamente** o valor do vale (compra −1500,
 entrega −500); soma dos status fechando com o total (9+2+3+10 = 24); e o
 caminho negativo — cancelar um vale em insucesso volta bloqueado.
 
+## 18. O eixo `status_financeiro` estava morto — os dois lados
+
+Segundo dos 3 buracos que eu tinha levantado. A coluna existe desde o
+schema inicial com três valores e o CLAUDE.md defende os três eixos como
+independentes ("não colapsar em um enum linear"), mas **zero ocorrências
+no código**: todo vale ficava em `na_ordem` pra sempre, inclusive os que
+tinham divergência de pagamento registrada em `pagamentos` e evento no
+log.
+
+**Lado `divergente`** (inequívoco, feito direto): `marcarDivergencia`
+passou a gravar. Idempotente no reenvio da fila, e como o UPDATE dispara
+`fn_log_entrega`, a mudança já aparece sozinha no Registro de Auditoria
+como "financeiro Na ordem → Divergente". Migration só de dado corrigiu o
+passado. O relatório passou a mostrar os dois eixos em blocos separados
+— misturar numa lista só sugeriria que são estados alternativos, quando
+um vale pode estar entregue e com dinheiro por conferir.
+
+**Lado `conferido`**: aqui eu parei e perguntei, porque encostava na
+linha do "fechamento mensal" (lista Fora) e porque havia várias leituras
+possíveis. Foi a decisão certa — a resposta mudou o que eu ia construir.
+
+## 19. Fechamento de caixa — o que o usuário contou mudou o desenho
+
+Perguntei *quando* e *quem* confere. A resposta trouxe o problema real:
+o operador fecha o caixa, aparece se sobrou ou faltou, e aí *"é passado
+pra gestão fazer os procedimentos deles, ou justificar ao financeiro
+caso falte dinheiro, **coisa que fica meio à mercê da memória do
+caixa**"*.
+
+Ou seja: o problema não era marcar um status. Era o caixa não ter a
+explicação na tela.
+
+**Limite que eu levantei antes de construir, e que muda tudo:** o
+sistema **não consegue calcular sobra nem falta**, porque só conhece
+tele-entrega — venda de balcão é a maior parte do caixa e vive no Trier.
+Somar os vales e chamar de "esperado na gaveta" daria número errado. O
+usuário confirmou que só o lado da tele já ajuda, e a tela diz isso
+explicitamente pra ninguém somar achando que é o caixa inteiro. **Se um
+dia entrar o total do Trier, aí sim dá pra falar em sobra/falta. Sem
+esse dado, não inventar o número.**
+
+A aba "Fechamento" (admin/gerente) responde uma pergunta só: *o que, do
+lado da tele, explica uma diferença hoje?* As quatro causas já estavam
+no banco, nunca reunidas: divergência de pagamento, **vale extra pago em
+mãos ao motoboy** (o que mais parece falta sem ser — R$ 9,00 que vão do
+cliente pro motoboy e nunca entram na gaveta), cancelado e insucesso.
+
+**Fluxo, que o usuário precisou corrigir uma vez:** operador marca
+divergências → gestor confere → **o dia inteiro sobe pra administração**,
+conferidos e divergentes. Eu tinha escrito na tela que "o divergente é
+que sobe", dando a entender que conferido parava no gestor. Errado: sobe
+tudo, e o que a marca faz é dizer **quais precisam de ação lá**, porque
+o gestor não resolve divergência sozinho. Por isso conferir nunca
+sobrescreve `divergente` — apagar a marca faria o problema chegar lá em
+cima sem sinalização.
+
+Conferência é ato de supervisão, então a guarda ficou no **banco**:
+trigger `fn_entrega_protege_conferencia`. Não dá com policy — `entregas`
+precisa de UPDATE liberado pro caixa (cadastro, corrida, retorno,
+cancelamento) e RLS não restringe coluna, mesma limitação de `profiles`.
+
+Testado: backfill marcando os 5 divergentes sem inconsistência; aba com
+dados reais (8 vales, as 4 causas certas); conferir o dia marcando 6 e
+**preservando** divergente e cancelado; caixa bloqueado ao conferir mas
+ainda podendo marcar divergente; aba invisível pro caixa.
+
+**Lição de teste que vale mais que o resultado:** na primeira tentativa
+do caminho negativo eu escolhi um vale que **já estava `conferido`**. A
+transição não existiu, a trigger não teve o que barrar, e o teste
+"passou" — eu quase reportei isso como guarda funcionando. Só peguei
+porque fui conferir qual vale tinha usado antes de concluir. **Testar
+transição de estado exige garantir que a transição existe.** (Na
+segunda rodada a falha era real: a migration da trigger ainda não tinha
+rodado.)
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -600,8 +675,16 @@ caminho negativo — cancelar um vale em insucesso volta bloqueado.
 12. `71a3a8a` — alinhamento do campo de moeda à esquerda
 13. `87f66ed` — max-rows e `saida_em` (item 13)
 14. `354ca8e` — painel de usuários (item 14)
-15. atualização de CLAUDE.md e NOTAS.md — último commit desta sessão,
-    hash pelo `git log`
+15. `fd98f64` — CLAUDE.md e NOTAS.md com o painel de usuários
+16. `6c37428` — medição do teste dos 25 segundos (item 15)
+17. `3630fcc` — correção do baseline do papel + tarifa fixa
+18. `ac2fd9f` — tarifa, quantidade de vales e quem paga (item 16)
+19. `9752912` — cancelamento de vale (item 17)
+20. `353498f` — "Vales cancelados" como bloco próprio
+21. `516b6a7` — eixo financeiro no caso da divergência (item 18)
+22. `5686be2` — aba Fechamento + fluxo da conferência (item 19)
+23. atualização final do NOTAS.md — último commit desta sessão, hash
+    pelo `git log`
 
 ## Migrations aplicadas nesta sessão
 
@@ -633,6 +716,10 @@ caminho negativo — cancelar um vale em insucesso volta bloqueado.
     `entregas.quantidade_vales`, `entregas.entrega_paga_cliente_cents`)
 19. `20260810190000_cancelamento_de_vale.sql` (`cancelado_em_local` +
     trigger `fn_entrega_registrar_cancelamento`)
+20. `20260810200000_backfill_status_financeiro.sql` (só dado: marca
+    `divergente` quem já tinha `pagamentos.realizado`)
+21. `20260810210000_conferencia_so_gerente.sql` (trigger
+    `fn_entrega_protege_conferencia`)
 
 Fora migration: a Edge Function `criar-usuario` foi publicada pelo
 usuário via dashboard (Edge Functions → Via Editor). **Não há CLI do
@@ -659,6 +746,18 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
+**Dos 3 buracos que levantei quando o usuário perguntou que ideias
+existiam além das obrigatórias, 2 foram feitos** (cancelamento no item
+17, eixo financeiro nos itens 18-19). Sobrou um:
+
+- [ ] **Correção de entrega já assinada.** A regra 7 diz que correção é
+      evento novo apontando pro original, nunca `UPDATE` silencioso. O
+      trigger no banco bloqueia o UPDATE (testado, funciona) — mas a
+      outra metade nunca foi construída. Hoje, se o caixa precisa
+      corrigir valor de um vale já assinado, ele bate num erro de
+      constraint e acabou: a regra descreve a saída, a saída não existe.
+      Mesmo formato do buraco do cancelamento antes do item 17.
+
 ## Gaps conhecidos, não resolvidos
 
 - ~~`corridas.retorno_em` não tem par "dois relógios"~~ — resolvido no
@@ -674,6 +773,19 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
   Settings → API → Max rows) mas nenhuma query depende mais dele.
 - ~~Regra 1 vs. `toCents('1.234')`~~ — resolvido no item 12
   (2026-08-10), pela raiz: `toCents` deixou de existir.
+- **Relatório por agência não checa cancelamento.** Hoje não importa,
+  porque só dá pra cancelar vale pendente e pendente nunca tem corrida —
+  ou seja, é garantia por consequência, não por regra. Ofereci a guarda
+  de 2 linhas e o assunto não foi retomado. Se um dia liberarem cancelar
+  vale em rota, o dinheiro dele entra no acerto da agência **em
+  silêncio**, porque o total geral continuaria certo. Primeiro lugar a
+  olhar nesse caso: `acumularAgencia`/`acumularGrupo` em
+  `src/data/relatorios.ts`.
+- **A aba "Fechamento" não calcula sobra nem falta** — não é bug, é
+  limite: o sistema só conhece tele, e venda de balcão (a maior parte do
+  caixa) vive no Trier. Está documentado no CLAUDE.md e escrito na
+  própria tela. Se um dia entrar o total do Trier, aí dá pra fazer a
+  conta; sem esse dado, **não inventar o número**.
 
 ## Nota pra próxima sessão sobre testes de UI no navegador
 
@@ -776,6 +888,13 @@ no banco:
   Senha `senha2026`.
 - `gerentepainel@drogcidade.sg` — "Gerente Teste Painel", criado pelo
   clique real que validou a chamada única. Senha `senha2026`.
+**Dados dos itens 18-19:** os vales do dia 10/08 da Matriz foram
+**marcados como conferidos** no teste do fechamento (V-000016, 17, 19,
+21, 22, 23). O `V-000015` ficou `divergente` de propósito — é o caso que
+prova que conferir não sobrescreve a marca. Se precisar de vale
+`na_ordem` pra testar conferência de novo, use um dia diferente ou crie
+um novo.
+
 **Dados do item 17:** `V-000018` e `V-000007` foram **cancelados** nos
 testes, com motivo gravado. São os dois únicos vales cancelados do banco
 — se precisar de um pendente pra testar outra coisa, não use esses.
