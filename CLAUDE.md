@@ -319,6 +319,43 @@ manual**, porque filial é rara e não vale a complexidade extra só por ela.)
 
 ---
 
+## Tarifa de entrega e vales — a regra do dinheiro da tele
+
+Descoberto em 2026-08-10, depois de o MVP inteiro estar pronto. O sistema
+tratava `valor_entrega_cents` como número livre digitado pelo caixa. A regra
+real é outra:
+
+- **A tarifa é fixa por filial** (R$ 9,00 hoje), em `lojas.tarifa_entrega_cents`.
+  O caixa nunca digita valor de entrega — escolhe **quantos vales**.
+- **Endereço distante cobra 2 vales.** É a única variação.
+- **O vale base a farmácia sempre deve à agência.** Ela recupera do cliente
+  quando a compra é abaixo de R$ 100 (a taxa entra no valor da compra, que
+  **já vem somada do Trier** — o sistema não soma nada, e não deve passar a
+  somar: viraria cobrança dobrada) e absorve quando é acima. Nos dois casos
+  ela deve os R$ 9 à agência, então isso não muda o acerto e não virou coluna.
+- **O vale extra o cliente paga em mãos ao motoboy** — nunca passa pela
+  farmácia. Exceção: convênio com `farmacia_paga_entrega_integral` (caso do
+  Minerva), onde ela banca os dois.
+
+| caso | total | farmácia deve | cliente em mãos |
+|---|---|---|---|
+| 1 vale | 900 | 900 | 0 |
+| 2 vales | 1800 | 900 | 900 |
+| 2 vales + convênio integral | 1800 | 1800 | 0 |
+
+**O que a farmácia deve = `valor_entrega_cents - entrega_paga_cliente_cents`.**
+Antes disso o relatório somava o total como se ela devesse tudo — o acerto com
+a agência vinha inflado em toda entrega distante.
+
+Duas colunas guardadas em vez de derivadas, de propósito:
+`quantidade_vales` (dividir valor pela tarifa daria contagem errada se a
+tarifa mudar) e `entrega_paga_cliente_cents` (a regra do convênio quebra a
+derivação, e desmarcar o convênio depois reescreveria o passado).
+
+Nunca comparar nome de convênio com `'Minerva'` no código — a regra é a flag.
+
+---
+
 ## Gestão de usuários — a única parte com backend
 
 O projeto é frontend puro falando direto com Postgres via RLS, **com uma

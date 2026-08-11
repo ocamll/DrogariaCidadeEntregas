@@ -213,6 +213,10 @@ export type ConvenioCadastro = {
   nome: string
   cnpj: string | null
   exigeAssinatura: boolean
+  // convênio em que a farmácia banca a entrega inteira, inclusive o vale
+  // extra de endereço distante (caso do Minerva) — ver migration
+  // 20260810180000. Sem essa flag o cliente paga o extra em mãos.
+  farmaciaPagaEntregaIntegral: boolean
   ativo: boolean
 }
 
@@ -221,13 +225,14 @@ type ConvenioCadastroRow = {
   nome: string
   cnpj: string | null
   exige_assinatura: boolean
+  farmacia_paga_entrega_integral: boolean
   ativo: boolean
 }
 
 async function buscarConveniosCadastro(): Promise<ConvenioCadastro[]> {
   const { data, error } = await supabase
     .from('convenios')
-    .select('id, nome, cnpj, exige_assinatura, ativo')
+    .select('id, nome, cnpj, exige_assinatura, farmacia_paga_entrega_integral, ativo')
     .order('ativo', { ascending: false })
     .order('nome')
     .limit(LIMITE_CADASTRO)
@@ -238,6 +243,7 @@ async function buscarConveniosCadastro(): Promise<ConvenioCadastro[]> {
     nome: row.nome,
     cnpj: row.cnpj,
     exigeAssinatura: row.exige_assinatura,
+    farmaciaPagaEntregaIntegral: row.farmacia_paga_entrega_integral,
     ativo: row.ativo,
   }))
 }
@@ -252,13 +258,19 @@ export type SalvarConvenioInput = {
   nome: string
   cnpj: string | null
   exigeAssinatura: boolean
+  farmaciaPagaEntregaIntegral: boolean
 }
 
 async function salvarConvenio(input: SalvarConvenioInput) {
   if (input.id) {
     const { error } = await supabase
       .from('convenios')
-      .update({ nome: input.nome, cnpj: input.cnpj, exige_assinatura: input.exigeAssinatura })
+      .update({
+        nome: input.nome,
+        cnpj: input.cnpj,
+        exige_assinatura: input.exigeAssinatura,
+        farmacia_paga_entrega_integral: input.farmaciaPagaEntregaIntegral,
+      })
       .eq('id', input.id)
     if (error) throw error
     return
@@ -269,6 +281,7 @@ async function salvarConvenio(input: SalvarConvenioInput) {
     nome: input.nome,
     cnpj: input.cnpj,
     exige_assinatura: input.exigeAssinatura,
+    farmacia_paga_entrega_integral: input.farmaciaPagaEntregaIntegral,
   })
   if (error) throw error
 }

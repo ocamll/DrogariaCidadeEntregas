@@ -110,6 +110,9 @@ function ConvenioFormDialog({
   const [nome, setNome] = useState(convenio?.nome ?? '')
   const [cnpj, setCnpj] = useState(convenio?.cnpj ?? '')
   const [exigeAssinatura, setExigeAssinatura] = useState(convenio?.exigeAssinatura ?? true)
+  const [pagaEntregaIntegral, setPagaEntregaIntegral] = useState(
+    convenio?.farmaciaPagaEntregaIntegral ?? false
+  )
   const [erro, setErro] = useState<string | null>(null)
 
   const salvar = useSalvarConvenio()
@@ -128,6 +131,7 @@ function ConvenioFormDialog({
         nome: nome.trim(),
         cnpj: cnpj.trim() || null,
         exigeAssinatura,
+        farmaciaPagaEntregaIntegral: pagaEntregaIntegral,
       },
       {
         onSuccess: () => onOpenChange(false),
@@ -160,6 +164,20 @@ function ConvenioFormDialog({
             />
             Exige assinatura na entrega
           </label>
+          <div className="flex flex-col gap-1">
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={pagaEntregaIntegral}
+                onChange={(e) => setPagaEntregaIntegral(e.target.checked)}
+              />
+              Farmácia paga a entrega inteira
+            </label>
+            <p className="text-xs text-muted-foreground">
+              Em endereço distante (2 vales), o normal é o cliente pagar o segundo vale em mãos
+              ao motoboy. Marcando aqui, a farmácia banca os dois — é o caso do Minerva.
+            </p>
+          </div>
 
           {erro && <p className="text-sm text-destructive">{erro}</p>}
         </div>

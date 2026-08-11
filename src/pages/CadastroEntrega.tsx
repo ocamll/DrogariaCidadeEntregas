@@ -5,7 +5,8 @@ import { enfileirarOperacao } from '@/data/filaOffline'
 import { FORMA_PAGAMENTO_OPTIONS, type FormaPagamento } from '@/data/pagamentos'
 import { useConveniosCadastro } from '@/data/cadastros'
 import { uuidv7 } from '@/lib/uuid'
-import { centsFromDigits } from '@/lib/money'
+import { useTarifaDaLoja } from '@/data/lojas'
+import { centsFromDigits, formatBRL } from '@/lib/money'
 import { CampoMoeda } from '@/components/CampoMoeda'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -51,7 +52,9 @@ function CadastroEntregaForm({
   const [endereco, setEndereco] = useState('')
   // dígitos crus da máscara de centavos ('' = vazio, '12345' = R$ 123,45)
   const [valorCompra, setValorCompra] = useState('')
-  const [valorEntrega, setValorEntrega] = useState('')
+  // 1 normal, 2 em endereço distante. O caixa não digita valor de
+  // entrega: a tarifa é fixa por filial e o valor sai daqui.
+  const [quantidadeVales, setQuantidadeVales] = useState(1)
   const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>('dinheiro')
   const [convenioId, setConvenioId] = useState('')
   const [temReceita, setTemReceita] = useState(false)
@@ -60,11 +63,23 @@ function CadastroEntregaForm({
 
   const { data: convenios } = useConveniosCadastro()
   const conveniosAtivos = (convenios ?? []).filter((c) => c.ativo)
+  const tarifaCents = useTarifaDaLoja(lojaId)
+
+  // O vale extra do endereço distante o cliente paga em mãos ao motoboy —
+  // não entra no acerto da farmácia com a agência. Menos quando o
+  // convênio escolhido banca a entrega inteira (caso do Minerva).
+  const convenioIntegral =
+    formaPagamento === 'convenio' &&
+    !!conveniosAtivos.find((c) => c.id === convenioId)?.farmaciaPagaEntregaIntegral
+
+  const valorEntregaCents = (tarifaCents ?? 0) * quantidadeVales
+  const entregaPagaClienteCents =
+    quantidadeVales > 1 && !convenioIntegral ? (tarifaCents ?? 0) * (quantidadeVales - 1) : 0
 
   const nomeRef = useRef<HTMLInputElement>(null)
   const enderecoRef = useRef<HTMLInputElement>(null)
   const valorCompraRef = useRef<HTMLInputElement>(null)
-  const valorEntregaRef = useRef<HTMLInputElement>(null)
+  const valesRef = useRef<HTMLSelectElement>(null)
   const formaRef = useRef<HTMLSelectElement>(null)
   const convenioRef = useRef<HTMLSelectElement>(null)
 
@@ -84,7 +99,7 @@ function CadastroEntregaForm({
     setNome('')
     setEndereco('')
     setValorCompra('')
-    setValorEntrega('')
+    setQuantidadeVales(1)
     setFormaPagamento('dinheiro')
     setConvenioId('')
     setTemReceita(false)
@@ -104,6 +119,12 @@ function CadastroEntregaForm({
       setErroValidacao('Escolhe o convênio.')
       return
     }
+    // Sem tarifa carregada não dá pra montar o valor da entrega — melhor
+    // barrar que gravar entrega com valor zero em silêncio.
+    if (tarifaCents === null) {
+      setErroValidacao('Não consegui carregar a tarifa da filial. Recarrega a página.')
+      return
+    }
     setErroValidacao(null)
 
     const payload: NovaEntrega = {
@@ -114,7 +135,9 @@ function CadastroEntregaForm({
       clienteNome: nomeTrim,
       clienteEndereco: enderecoTrim,
       valorCompraCents,
-      valorEntregaCents: centsFromDigits(valorEntrega),
+      valorEntregaCents,
+      quantidadeVales,
+      entregaPagaClienteCents,
       formaPagamento,
       ocorridoEmLocal: new Date().toISOString(),
       convenioId: formaPagamento === 'convenio' ? convenioId : null,
@@ -191,18 +214,37 @@ function CadastroEntregaForm({
                 ref={valorCompraRef}
                 digitos={valorCompra}
                 onDigitos={setValorCompra}
-                onKeyDown={advanceOnEnter(valorEntregaRef)}
+                onKeyDown={advanceOnEnter(valesRef)}
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="valor-entrega">Valor da entrega</Label>
-              <CampoMoeda
-                id="valor-entrega"
-                ref={valorEntregaRef}
-                digitos={valorEntrega}
-                onDigitos={setValorEntrega}
+              <Label htmlFor="quantidade-vales">Entrega</Label>
+              {/* A tarifa é fixa, então o caixa escolhe QUANTOS vales em vez
+                  de digitar valor — no caso normal ele só passa com Enter,
+                  sem digitar nada. Endereço distante cobra 2. */}
+              <select
+                id="quantidade-vales"
+                ref={valesRef}
+                className={SELECT_CLASSNAME}
+                value={quantidadeVales}
+                onChange={(e) => setQuantidadeVales(Number(e.target.value))}
                 onKeyDown={advanceOnEnter(formaRef)}
-              />
+              >
+                <option value={1}>
+                  1 vale{tarifaCents !== null ? ` — ${formatBRL(tarifaCents)}` : ''}
+                </option>
+                <option value={2}>
+                  2 vales (endereço distante)
+                  {tarifaCents !== null ? ` — ${formatBRL(tarifaCents * 2)}` : ''}
+                </option>
+              </select>
+              {quantidadeVales > 1 && (
+                <p className="text-xs text-muted-foreground">
+                  {entregaPagaClienteCents > 0
+                    ? `Cliente paga ${formatBRL(entregaPagaClienteCents)} em mãos ao motoboy.`
+                    : 'Convênio banca a entrega inteira — nada a receber do cliente.'}
+                </p>
+              )}
             </div>
             <div className="flex flex-col gap-2">
               <Label htmlFor="forma-pagamento">Forma de pagamento</Label>

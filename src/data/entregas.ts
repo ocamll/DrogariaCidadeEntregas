@@ -12,7 +12,16 @@ export type NovaEntrega = {
   clienteNome: string
   clienteEndereco: string
   valorCompraCents: number
+  // total da entrega: tarifa da loja × quantidadeVales
   valorEntregaCents: number
+  // 1 normal, 2 em endereço distante. Guardado explícito porque se a
+  // tarifa mudar, dividir valor por tarifa daria contagem errada em vale
+  // antigo (ver migration 20260810180000).
+  quantidadeVales: number
+  // parte do valorEntregaCents que o cliente paga em mãos ao motoboy e
+  // que portanto NÃO entra no acerto da farmácia com a agência. É o vale
+  // extra do endereço distante — zero quando o convênio banca tudo.
+  entregaPagaClienteCents: number
   formaPagamento: FormaPagamento
   ocorridoEmLocal: string
   convenioId: string | null
@@ -40,6 +49,8 @@ export async function criarEntrega(input: NovaEntrega): Promise<{ numeroVale: st
       cliente_endereco: input.clienteEndereco,
       valor_compra_cents: input.valorCompraCents,
       valor_entrega_cents: input.valorEntregaCents,
+      quantidade_vales: input.quantidadeVales,
+      entrega_paga_cliente_cents: input.entregaPagaClienteCents,
       ocorrido_em_local: input.ocorridoEmLocal,
       convenio_id: input.convenioId,
       status_documental: input.convenioId ? 'pendente' : 'nao_aplica',
@@ -94,6 +105,8 @@ export async function criarTransferencia(input: NovaTransferencia): Promise<{ nu
       criado_por: input.criadoPor,
       cliente_nome: input.lojaDestinoNome,
       cliente_endereco: `${input.lojaOrigemNome} para ${input.lojaDestinoNome}`,
+      // transferência não tem vale de tele nem valor de entrega
+      quantidade_vales: 0,
       ocorrido_em_local: input.ocorridoEmLocal,
     })
     .select('numero_vale')

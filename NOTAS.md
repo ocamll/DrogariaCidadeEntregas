@@ -491,6 +491,44 @@ Duas coisas que isso muda pra quem retomar:
   exigindo justificativa, mas dá pra cronometrar de novo em vez de
   discutir no abstrato.
 
+## 16. Tarifa fixa, quantidade de vales e quem paga cada um
+
+Veio de uma conversa que começou como "confirma o baseline do papel" e
+virou a descoberta de que **o sistema modelava o dinheiro da tele
+errado**. Detalhe por detalhe, cada resposta do usuário abriu uma camada:
+tarifa é fixa (R$ 9) → endereço distante cobra 2 vales → o segundo vale o
+cliente paga em mãos ao motoboy → menos no convênio Minerva.
+
+A consequência: `valor_entrega_cents` era tratado como número livre, e o
+relatório somava o total como se a farmácia devesse tudo. Numa entrega
+distante ela deve metade — **o acerto com a agência vinha inflado**. Esse
+era o bug de verdade, e ninguém tinha notado porque o caso distante nunca
+tinha sido lançado no sistema.
+
+Regra completa e as 3 combinações estão no CLAUDE.md (seção "Tarifa de
+entrega e vales"). O que vale registrar aqui é o que **não** virou
+coluna: a taxa de R$ 9 embutida na compra abaixo de R$ 100. Ela existe,
+mas não muda o acerto (a farmácia deve os R$ 9 à agência de qualquer
+jeito) e **já vem somada do Trier** — se alguém "melhorar" isso fazendo o
+sistema somar, vira cobrança dobrada.
+
+Na tela do caixa o campo de valor da entrega **sumiu**: virou seletor de
+1/2 vales, já em 1. São 3 teclas a menos por entrega (`900`) e some a
+chance de digitar valor errado num campo que nunca deveria variar.
+
+Testado os 3 casos conferindo centavos no banco:
+
+| caso | total | farmácia deve | cliente |
+|---|---|---|---|
+| V-000021 (1 vale) | 900 | 900 | 0 |
+| V-000022 (2 vales) | 1800 | 900 | 900 |
+| V-000023 (2 vales + Minerva) | 1800 | 1800 | 0 |
+
+E no relatório: total R$ 81,50 contra R$ 72,50 de "Farmácia deve" — a
+diferença de exatos R$ 9,00 é o vale que o cliente pagou em mãos. Os 3
+níveis da hierarquia renderizam a coluna nova com as colunas pareadas
+(7/7/5).
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -538,6 +576,10 @@ Duas coisas que isso muda pra quem retomar:
 17. `20260810170000_gestao_de_usuarios.sql` (`is_admin()`,
     `profiles.email`, policies de UPDATE separadas + trigger
     `fn_profiles_protege_campos`)
+18. `20260810180000_tarifa_e_vales_de_entrega.sql`
+    (`lojas.tarifa_entrega_cents`,
+    `convenios.farmacia_paga_entrega_integral`,
+    `entregas.quantidade_vales`, `entregas.entrega_paga_cliente_cents`)
 
 Fora migration: a Edge Function `criar-usuario` foi publicada pelo
 usuário via dashboard (Edge Functions → Via Editor). **Não há CLI do
@@ -681,6 +723,12 @@ no banco:
   Senha `senha2026`.
 - `gerentepainel@drogcidade.sg` — "Gerente Teste Painel", criado pelo
   clique real que validou a chamada única. Senha `senha2026`.
+**Dados do item 16:** `V-000021` (1 vale), `V-000022` (2 vales, cliente
+paga metade), `V-000023` (2 vales com Minerva, farmácia paga tudo) — os
+três casos da tabela de tarifa. E o **convênio "Minerva"**, criado pela
+UI com `farmacia_paga_entrega_integral = true`; é ele que faz o caso 3
+existir, então não desative sem saber disso.
+
 - `debug@drogcidade.sg` — **criado por mim depurando** o 403 do
   `functions.invoke`, antes de achar o bug. Deixado **bloqueado**
   (`ativo = false`), então não enxerga nada. Pra sumir de vez tem que

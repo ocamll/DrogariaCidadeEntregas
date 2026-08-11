@@ -21,6 +21,9 @@ export type RelatorioGrupo = {
   entregues: number
   insucessos: number
   valorEntregaCents: number
+  // parte do valor que a farmácia de fato deve à agência: o resto o
+  // cliente pagou em mãos ao motoboy (vale extra de endereço distante).
+  valorFarmaciaDeveCents: number
   vales: RelatorioVale[]
 }
 
@@ -36,6 +39,7 @@ export type RelatorioAgencia = {
   entregues: number
   insucessos: number
   valorEntregaCents: number
+  valorFarmaciaDeveCents: number
   porMototaxista: RelatorioGrupo[]
 }
 
@@ -45,6 +49,7 @@ export type Relatorio = {
   totalTransferencias: number
   valorCompraCents: number
   valorEntregaCents: number
+  valorFarmaciaDeveCents: number
   porStatus: Record<string, number>
   porAgencia: RelatorioAgencia[]
 }
@@ -56,6 +61,7 @@ type EntregaRelatorioRow = {
   tipo: 'cliente' | 'transferencia'
   valor_compra_cents: number
   valor_entrega_cents: number
+  entrega_paga_cliente_cents: number
   status_entrega: string
   ocorrido_em_local: string
   corridas: {
@@ -68,11 +74,22 @@ type EntregaRelatorioRow = {
 
 function acumularGrupo(mapa: Map<string, RelatorioGrupo>, id: string, nome: string, row: EntregaRelatorioRow) {
   const atual =
-    mapa.get(id) ?? { chave: id, nome, totalVales: 0, entregues: 0, insucessos: 0, valorEntregaCents: 0, vales: [] }
+    mapa.get(id) ??
+    {
+      chave: id,
+      nome,
+      totalVales: 0,
+      entregues: 0,
+      insucessos: 0,
+      valorEntregaCents: 0,
+      valorFarmaciaDeveCents: 0,
+      vales: [],
+    }
   atual.totalVales += 1
   if (row.status_entrega === 'entregue') atual.entregues += 1
   if (row.status_entrega === 'insucesso') atual.insucessos += 1
   atual.valorEntregaCents += row.valor_entrega_cents
+  atual.valorFarmaciaDeveCents += row.valor_entrega_cents - row.entrega_paga_cliente_cents
   atual.vales.push({
     id: row.id,
     numeroVale: row.numero_vale,
@@ -111,6 +128,7 @@ function acumularAgencia(
       entregues: 0,
       insucessos: 0,
       valorEntregaCents: 0,
+      valorFarmaciaDeveCents: 0,
       porMototaxista: [],
       motoboys: new Map<string, RelatorioGrupo>(),
     }
@@ -118,6 +136,7 @@ function acumularAgencia(
   if (row.status_entrega === 'entregue') atual.entregues += 1
   if (row.status_entrega === 'insucesso') atual.insucessos += 1
   atual.valorEntregaCents += row.valor_entrega_cents
+  atual.valorFarmaciaDeveCents += row.valor_entrega_cents - row.entrega_paga_cliente_cents
   acumularGrupo(atual.motoboys, mototaxistaId, mototaxistaNome, row)
   mapa.set(agenciaId, atual)
 }
@@ -139,7 +158,7 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
     supabase
       .from('entregas')
       .select(
-        'id, numero_vale, cliente_nome, tipo, valor_compra_cents, valor_entrega_cents, status_entrega, ocorrido_em_local, corridas(mototaxista_id, agencia_id, mototaxistas(nome), agencias(nome))'
+        'id, numero_vale, cliente_nome, tipo, valor_compra_cents, valor_entrega_cents, entrega_paga_cliente_cents, status_entrega, ocorrido_em_local, corridas(mototaxista_id, agencia_id, mototaxistas(nome), agencias(nome))'
       )
       .gte('ocorrido_em_local', inicio.toISOString())
       .lt('ocorrido_em_local', fim.toISOString())
@@ -152,6 +171,7 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
   const porAgencia = new Map<string, AgenciaAcumulador>()
   let valorCompraCents = 0
   let valorEntregaCents = 0
+  let valorFarmaciaDeveCents = 0
   let totalClientes = 0
   let totalTransferencias = 0
 
@@ -159,6 +179,7 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
     porStatus[row.status_entrega] = (porStatus[row.status_entrega] ?? 0) + 1
     valorCompraCents += row.valor_compra_cents
     valorEntregaCents += row.valor_entrega_cents
+    valorFarmaciaDeveCents += row.valor_entrega_cents - row.entrega_paga_cliente_cents
     if (row.tipo === 'cliente') totalClientes += 1
     else totalTransferencias += 1
 
@@ -182,6 +203,7 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
     totalTransferencias,
     valorCompraCents,
     valorEntregaCents,
+    valorFarmaciaDeveCents,
     porStatus,
     porAgencia: [...porAgencia.values()]
       .map((agencia) => ({
@@ -191,6 +213,7 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
         entregues: agencia.entregues,
         insucessos: agencia.insucessos,
         valorEntregaCents: agencia.valorEntregaCents,
+        valorFarmaciaDeveCents: agencia.valorFarmaciaDeveCents,
         porMototaxista: [...agencia.motoboys.values()].sort((a, b) => b.totalVales - a.totalVales),
       }))
       .sort((a, b) => b.totalVales - a.totalVales),

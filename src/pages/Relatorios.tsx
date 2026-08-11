@@ -121,6 +121,10 @@ export function Relatorios() {
             <StatTile label="Transferências" valor={String(data.totalTransferencias)} />
             <StatTile label="Valor de compra" valor={formatBRL(data.valorCompraCents)} />
             <StatTile label="Valor de entrega" valor={formatBRL(data.valorEntregaCents)} />
+            <StatTile
+              label="Farmácia deve à agência"
+              valor={formatBRL(data.valorFarmaciaDeveCents)}
+            />
           </div>
 
           <Card>
@@ -198,6 +202,7 @@ function AgenciaTable({
           <TableHead>Entregues</TableHead>
           <TableHead>Insucessos</TableHead>
           <TableHead>Valor de entrega</TableHead>
+          <TableHead>Farmácia deve</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -229,10 +234,11 @@ function AgenciaTable({
                 <TableCell>{agencia.entregues}</TableCell>
                 <TableCell>{agencia.insucessos}</TableCell>
                 <TableCell>{formatBRL(agencia.valorEntregaCents)}</TableCell>
+                <TableCell>{formatBRL(agencia.valorFarmaciaDeveCents)}</TableCell>
               </TableRow>
               {aberta && (
                 <TableRow>
-                  <TableCell colSpan={6} className="bg-muted/30 p-3">
+                  <TableCell colSpan={7} className="bg-muted/30 p-3">
                     <GrupoTable
                       grupos={agencia.porMototaxista}
                       nomeColuna="Motoboy"
@@ -278,6 +284,7 @@ function GrupoTable({
           <TableHead>Entregues</TableHead>
           <TableHead>Insucessos</TableHead>
           <TableHead>Valor de entrega</TableHead>
+          <TableHead>Farmácia deve</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -301,10 +308,11 @@ function GrupoTable({
                 <TableCell>{grupo.entregues}</TableCell>
                 <TableCell>{grupo.insucessos}</TableCell>
                 <TableCell>{formatBRL(grupo.valorEntregaCents)}</TableCell>
+                <TableCell>{formatBRL(grupo.valorFarmaciaDeveCents)}</TableCell>
               </TableRow>
               {aberto && (
                 <TableRow>
-                  <TableCell colSpan={6} className="bg-background p-3">
+                  <TableCell colSpan={7} className="bg-background p-3">
                     <ValesGrupoTable vales={grupo.vales} />
                   </TableCell>
                 </TableRow>
