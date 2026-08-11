@@ -20,6 +20,7 @@ export type TipoEvento =
   | 'pagamento_alterado'
   | 'falta_receita'
   | 'insucesso_detalhado'
+  | 'entrega_cancelada'
   | (string & {})
 
 export const TIPO_EVENTO_LABEL: Record<string, string> = {
@@ -28,6 +29,7 @@ export const TIPO_EVENTO_LABEL: Record<string, string> = {
   pagamento_alterado: 'Divergência de pagamento',
   falta_receita: 'Falta de receita',
   insucesso_detalhado: 'Insucesso detalhado',
+  entrega_cancelada: 'Vale cancelado',
 }
 
 export type EventoAuditoria = {
@@ -97,7 +99,7 @@ type EventoAuditoriaRow = {
   profiles: { nome: string } | null
 }
 
-// resumo/detalhe por tipo — cobre os 5 conhecidos; qualquer tipo novo que
+// resumo/detalhe por tipo — cobre os 6 conhecidos; qualquer tipo novo que
 // apareça no futuro (mudança de código, teste manual etc.) ainda mostra
 // alguma coisa em vez de quebrar a tela.
 function resumoEDetalhe(row: EventoAuditoriaRow): { resumo: string; detalhe: string | null } {
@@ -118,6 +120,10 @@ function resumoEDetalhe(row: EventoAuditoriaRow): { resumo: string; detalhe: str
       return { resumo: 'Receita não retornou com o motoboy', detalhe: row.payload.justificativa ?? null }
     case 'insucesso_detalhado':
       return { resumo: 'Insucesso — motivo "outro"', detalhe: row.payload.motivo_detalhe ?? null }
+    case 'entrega_cancelada':
+      // o rótulo do tipo já diz "Vale cancelado" — aqui vale dizer o que
+      // ele acrescenta: em que ponto do ciclo o cancelamento aconteceu.
+      return { resumo: 'Cancelado antes de entrar em corrida', detalhe: row.payload.motivo ?? null }
     default:
       return { resumo: row.tipo, detalhe: row.payload ? JSON.stringify(row.payload) : null }
   }

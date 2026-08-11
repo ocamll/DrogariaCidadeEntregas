@@ -10,19 +10,39 @@ import { notificarFaltaReceita } from '@/data/documentos'
 // Query keys invalidadas por tipo de operação, depois de sincronizar com
 // sucesso — mesmas listas que cada tela já invalidava quando escrevia direto
 // (ver histórico de src/data/entregas.ts, corridas.ts, pagamentos.ts).
+//
+// `eventos-auditoria` entra em TODAS: o Registro de Auditoria mostra os
+// eventos crus, e toda operação daqui gera pelo menos um (nem que seja o
+// `entrega_criada`/`status_alterado` do trigger). Ele fica sempre montado
+// — o componente é quem desenha o botão do cabeçalho —, então a query
+// carrega junto com a página e não recarrega sozinha depois. Sem isso o
+// registro fica velho até alguém dar refresh, que foi como esse esquecimento
+// apareceu: cancelei um vale e ele não surgiu na tela.
 const QUERY_KEYS_POR_TIPO: Record<TipoOperacaoFila, string[]> = {
-  entrega: ['entregas-hoje'],
-  transferencia: ['entregas-hoje'],
-  corrida: ['entregas-hoje', 'entregas-pendentes-sem-corrida', 'entregas-historico'],
-  divergencia: ['entregas-hoje', 'entregas-historico', 'notificacoes-hoje', 'notificacoes-todas'],
+  entrega: ['entregas-hoje', 'eventos-auditoria'],
+  transferencia: ['entregas-hoje', 'eventos-auditoria'],
+  corrida: [
+    'entregas-hoje',
+    'entregas-pendentes-sem-corrida',
+    'entregas-historico',
+    'eventos-auditoria',
+  ],
+  divergencia: [
+    'entregas-hoje',
+    'entregas-historico',
+    'notificacoes-hoje',
+    'notificacoes-todas',
+    'eventos-auditoria',
+  ],
   fechamento_corrida: [
     'entregas-hoje',
     'entregas-historico',
     'corridas-abertas',
     'notificacoes-hoje',
     'notificacoes-todas',
+    'eventos-auditoria',
   ],
-  falta_receita: ['notificacoes-hoje', 'notificacoes-todas'],
+  falta_receita: ['notificacoes-hoje', 'notificacoes-todas', 'eventos-auditoria'],
 }
 
 async function executarOperacao(item: ItemFilaOperacao): Promise<void> {

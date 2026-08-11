@@ -177,9 +177,17 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
 
   for (const row of rows) {
     porStatus[row.status_entrega] = (porStatus[row.status_entrega] ?? 0) + 1
-    valorCompraCents += row.valor_compra_cents
-    valorEntregaCents += row.valor_entrega_cents
-    valorFarmaciaDeveCents += row.valor_entrega_cents - row.entrega_paga_cliente_cents
+
+    // Vale cancelado continua contado (aparece em "por status", e a soma
+    // dos status tem que fechar com o total de vales), mas NÃO entra no
+    // dinheiro: a compra não aconteceu e a agência não recebe por ele.
+    // Sem isso, cancelar um vale inflaria os totais em vez de limpá-los —
+    // o oposto do motivo de existir o cancelamento.
+    if (row.status_entrega !== 'cancelada') {
+      valorCompraCents += row.valor_compra_cents
+      valorEntregaCents += row.valor_entrega_cents
+      valorFarmaciaDeveCents += row.valor_entrega_cents - row.entrega_paga_cliente_cents
+    }
     if (row.tipo === 'cliente') totalClientes += 1
     else totalTransferencias += 1
 

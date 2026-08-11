@@ -529,6 +529,43 @@ diferença de exatos R$ 9,00 é o vale que o cliente pagou em mãos. Os 3
 níveis da hierarquia renderizam a coluna nova com as colunas pareadas
 (7/7/5).
 
+## 17. Cancelamento de vale — a regra que descrevia um caminho impossível
+
+Era o mais concreto dos 3 buracos que levantei quando o usuário perguntou
+que ideias existiam além das obrigatórias. O schema tinha tudo desde o
+início (`cancelado_em`, `cancelado_por`, `motivo_cancelamento` e um CHECK
+exigindo o motivo) e a regra 4 descrevia o fluxo em detalhe — mas nada no
+app nunca escreveu esse status. A palavra 'cancelada' aparecia no código
+só como rótulo. Vale digitado errado ficava pendente pra sempre.
+
+Detalhes de desenho no CLAUDE.md. O que vale registrar aqui:
+
+**Zero linhas não é erro no PostgREST.** O `UPDATE` filtra por
+`status_entrega = 'pendente'`, e sem conferir as linhas afetadas o
+cancelamento falharia **calado** em dois casos reais: o vale saiu de
+pendente entre abrir o dialog e confirmar, ou ainda está na fila offline
+e nem existe no banco. O caixa acharia que cancelou.
+
+**O menu "⋮" sumia em transferência sem receita** — então transferência
+digitada errada não teria como ser cancelada. Agora ele aparece se houver
+qualquer ação disponível.
+
+**Bug pré-existente que só apareceu agora:** o Registro de Auditoria fica
+**sempre montado** (o componente é quem desenha o botão do cabeçalho),
+então a query dele carrega junto com a página e nada invalidava
+`eventos-auditoria` depois. Cancelei um vale, o banco tinha 14 eventos e
+a tela mostrava os 12 de antes. Isso valia pra **todos** os tipos de
+evento, não só cancelamento — a fila offline invalidava
+`notificacoes-*` mas nunca a auditoria. Corrigido em
+`QUERY_KEYS_POR_TIPO` (todas as 6 operações) e no cancelamento.
+
+Testado: motivo vazio barrado com o vale intacto; cancelamento gravando
+os dois relógios (329ms de diferença) + motivo + autor; evento
+`entrega_cancelada` com o motivo no payload; vale sumindo de "Nova
+corrida"; totais caindo **exatamente** o valor do vale (compra −1500,
+entrega −500); soma dos status fechando com o total (9+2+3+10 = 24); e o
+caminho negativo — cancelar um vale em insucesso volta bloqueado.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -580,6 +617,8 @@ níveis da hierarquia renderizam a coluna nova com as colunas pareadas
     (`lojas.tarifa_entrega_cents`,
     `convenios.farmacia_paga_entrega_integral`,
     `entregas.quantidade_vales`, `entregas.entrega_paga_cliente_cents`)
+19. `20260810190000_cancelamento_de_vale.sql` (`cancelado_em_local` +
+    trigger `fn_entrega_registrar_cancelamento`)
 
 Fora migration: a Edge Function `criar-usuario` foi publicada pelo
 usuário via dashboard (Edge Functions → Via Editor). **Não há CLI do
@@ -723,6 +762,10 @@ no banco:
   Senha `senha2026`.
 - `gerentepainel@drogcidade.sg` — "Gerente Teste Painel", criado pelo
   clique real que validou a chamada única. Senha `senha2026`.
+**Dados do item 17:** `V-000018` e `V-000007` foram **cancelados** nos
+testes, com motivo gravado. São os dois únicos vales cancelados do banco
+— se precisar de um pendente pra testar outra coisa, não use esses.
+
 **Dados do item 16:** `V-000021` (1 vale), `V-000022` (2 vales, cliente
 paga metade), `V-000023` (2 vales com Minerva, farmácia paga tudo) — os
 três casos da tabela de tarifa. E o **convênio "Minerva"**, criado pela

@@ -319,6 +319,29 @@ manual**, porque filial é rara e não vale a complexidade extra só por ela.)
 
 ---
 
+## Cancelamento de vale
+
+O schema previa isso desde o início (`cancelado_em`, `cancelado_por`,
+`motivo_cancelamento`, o CHECK `entrega_cancelada_tem_motivo`) e a regra 4
+descreve o fluxo — mas nada no app nunca escreveu o status, então a regra
+descrevia um caminho impossível. Implementado em 2026-08-10.
+
+- **Só vale `pendente` cancela.** Depois que entra numa corrida o papel está
+  fisicamente com o motoboy, e o desfecho passa a ser insucesso no retorno.
+  O `UPDATE` filtra por `status_entrega = 'pendente'` **e confere as linhas
+  afetadas**: zero linhas não é erro no PostgREST, então sem essa checagem o
+  cancelamento falharia calado quando o vale saísse de pendente entre abrir
+  o dialog e confirmar, ou quando ele ainda estivesse na fila offline.
+- **Motivo é obrigatório**, na tela e no banco.
+- **Não passa pela fila offline** (mutation direta): enfileirar criaria uma
+  ordem delicada com a entrega que talvez ainda esteja na própria fila. Na
+  prática, sem internet não dá pra cancelar. Se isso incomodar, é revisível.
+- **Vale cancelado não soma dinheiro nos relatórios**, mas continua contado
+  em "por status" — a soma dos status tem que fechar com o total de vales.
+  Se somasse, cancelar inflaria os totais em vez de limpá-los.
+
+---
+
 ## Tarifa de entrega e vales — a regra do dinheiro da tele
 
 Descoberto em 2026-08-10, depois de o MVP inteiro estar pronto. O sistema

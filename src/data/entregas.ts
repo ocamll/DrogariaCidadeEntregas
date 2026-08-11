@@ -1,7 +1,8 @@
 import { useEffect } from 'react'
-import { useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { criarPagamentoPrevisto, type FormaPagamento } from '@/data/pagamentos'
+import { inserirEventoIdempotente } from '@/data/eventos'
 import { centsFromDigits } from '@/lib/money'
 
 export type NovaEntrega = {
@@ -115,6 +116,85 @@ export async function criarTransferencia(input: NovaTransferencia): Promise<{ nu
   if (error) throw error
   const row = data as unknown as { numero_vale: string }
   return { numeroVale: row.numero_vale }
+}
+
+export type CancelarEntregaInput = {
+  tenantId: string
+  entregaId: string
+  numeroVale: string
+  motivo: string
+  canceladoPor: string
+  autorNome: string
+  ocorridoEmLocal: string
+  eventoIdempotencyKey: string
+}
+
+// Cancelar é a única forma de "apagar" um vale (regra 4: DELETE em
+// entregas é proibido). Só vale PENDENTE pode ser cancelado — depois que
+// entra numa corrida o papel está fisicamente com o motoboy, e o
+// desfecho certo passa a ser insucesso no retorno, não cancelamento.
+//
+// Mutation direta, sem fila offline: é ação corretiva e rara, e enfileirar
+// criaria uma ordem delicada com a entrega que talvez ainda esteja na
+// própria fila esperando sincronizar.
+export async function cancelarEntrega(input: CancelarEntregaInput): Promise<void> {
+  const { data, error } = await supabase
+    .from('entregas')
+    .update({
+      status_entrega: 'cancelada',
+      motivo_cancelamento: input.motivo,
+      cancelado_por: input.canceladoPor,
+      // cancelado_em (relógio do servidor) vem da trigger
+      // fn_entrega_registrar_cancelamento
+      cancelado_em_local: input.ocorridoEmLocal,
+    })
+    .eq('id', input.entregaId)
+    .eq('status_entrega', 'pendente')
+    .select('id')
+
+  if (error) throw error
+
+  // Zero linhas não vem como erro no PostgREST. Acontece em dois casos
+  // reais: o vale saiu de 'pendente' entre abrir o dialog e confirmar
+  // (outro caixa pôs numa corrida), ou ele ainda está na fila offline e
+  // nem existe no banco. Sem isso, o cancelamento falharia calado e o
+  // caixa acharia que deu certo.
+  if (!data || data.length === 0) {
+    throw new Error(
+      'Não consegui cancelar: o vale já saiu de pendente ou ainda não sincronizou. Recarrega a lista e confere.'
+    )
+  }
+
+  await inserirEventoIdempotente({
+    tenantId: input.tenantId,
+    entregaId: input.entregaId,
+    tipo: 'entrega_cancelada',
+    idempotencyKey: input.eventoIdempotencyKey,
+    payload: {
+      numero_vale: input.numeroVale,
+      motivo: input.motivo,
+      autor_nome: input.autorNome,
+    },
+    registradoPor: input.canceladoPor,
+    ocorridoEmLocal: input.ocorridoEmLocal,
+  })
+}
+
+export function useCancelarEntrega() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: cancelarEntrega,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['entregas-hoje'] })
+      queryClient.invalidateQueries({ queryKey: ['entregas-historico'] })
+      queryClient.invalidateQueries({ queryKey: ['entregas-pendentes-sem-corrida'] })
+      // O Registro de Auditoria fica sempre montado (o componente é quem
+      // desenha o botão do cabeçalho), então a query dele carrega junto
+      // com a página e não recarrega sozinha. Sem invalidar aqui, o
+      // cancelamento não aparece lá até dar refresh.
+      queryClient.invalidateQueries({ queryKey: ['eventos-auditoria'] })
+    },
+  })
 }
 
 export type EntregaRecente = {

@@ -92,7 +92,10 @@ export function EntregasTable({
               <TableCell>
                 <EntregaAcoesMenu
                   entregaId={entrega.id}
+                  numeroVale={entrega.numeroVale}
+                  clienteNome={entrega.clienteNome}
                   tipo={entrega.tipo}
+                  statusEntrega={entrega.statusEntrega}
                   formaEsperadaAtual={entrega.formaPrevista}
                   valorCents={entrega.valorCompraCents}
                   temReceita={entrega.temReceita}
