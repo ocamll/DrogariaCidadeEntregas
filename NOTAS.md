@@ -383,6 +383,82 @@ aplicar lá. Testei o fluxo mesmo assim pra garantir que não regrediu:
 V-000020 gravado com valores 0 e nenhum `pagamentos` criado, como
 esperado.
 
+## 13. Fechando as dívidas anotadas: max-rows e saida_em
+
+**max-rows:** a correção não foi descobrir o número do dashboard — foi
+fazer nenhuma query depender dele. Os 11 SELECTs sem limite ganharam teto
+explícito. Nos dois que crescem por inércia (documentos de convênio e
+receitas pendentes, que só encolhem quando alguém marca como recebido)
+entrou o truque do "+1" (`buscarComTeto`): pede uma linha a mais do que
+mostra e, se ela vier, avisa na tela. Funciona sem saber o max-rows,
+contanto que nosso teto seja bem menor que o dele.
+
+Antes de sair paginando tudo, conferi a ordenação de cada lista: as
+filas de trabalho (documentos, corridas abertas, entregas pendentes sem
+corrida) ordenam **ascendente**, então truncar perderia o mais novo — a
+direção benigna numa fila que se limpa pelo topo. Por isso nenhuma delas
+virou paginada, só ganharam teto.
+
+**saida_em era pior do que a nota dizia.** Não era "não passa por
+trigger": `saida_em` e `saida_em_local` recebiam o **mesmo**
+`ocorridoEmLocal`. O par existia só no nome, não havia relógio de
+servidor nenhum na saída. Trigger carimba `now()` agora e o cliente manda
+só o `_local`. O caso delicado é o reenvio da fila offline, que vira
+UPDATE no upsert — se remarcasse `now()` ali, a saída passaria a ser o
+horário do sync, pior que o bug original; por isso só carimba quando
+ainda não há valor. Sem backfill: o horário de servidor das corridas
+antigas nunca existiu, inventar seria pior.
+
+Testado com o relógio do dispositivo 40 min atrasado (o cenário da regra
+8): `saida_em_local` 20:37 (errado, como mandado), `saida_em` 21:17
+(servidor) — 40 min de diferença que antes seria invisível. Reenvio
+preservou ao milissegundo.
+
+## 14. Painel de admin para criar e gerenciar usuários
+
+Primeira peça de backend do projeto. Escopo decidido com o usuário:
+cria, edita nome/papel/loja, bloqueia/libera — **senha fica fora**
+(definir a inicial faz parte da criação; trocar depois é direto no
+Supabase, decisão dele). Só `admin`, não `is_gerente()`.
+
+Só a **criação** passa pela Edge Function, porque mexer no Auth exige a
+`service_role`. Editar e bloquear são `UPDATE` comum em `profiles`
+resolvido pela RLS — a função ficou com uma rota só, a menor superfície
+possível rodando com aquela chave.
+
+**A armadilha que a migration fecha, e que eu quase criei.**
+`marcarNotificacoesPagamentoLidas` faz o usuário dar UPDATE no próprio
+profile, então precisava existir policy de auto-update. Uma policy
+simples de `id = auth.uid()` deixaria **qualquer caixa rodar
+`update profiles set papel='admin'` na própria linha** — escalação de
+privilégio introduzida por mim, não pré-existente. RLS não restringe por
+coluna, então a policy sozinha não resolve: a policy libera a linha e o
+trigger `fn_profiles_protege_campos` barra nome/papel/loja/ativo/email
+pra quem não é admin. Testado com a conta de caixa: as três tentativas
+de escalar voltaram bloqueadas e o caminho legítimo (marcar notificação
+lida) continuou funcionando.
+
+**Bug real achado no teste:** `functions.invoke` não anexava o JWT da
+sessão — mandava a anon key, a função não achava perfil de admin e
+devolvia 403 mesmo com admin logado. Descobri porque a chamada idêntica
+via `fetch` com o header na mão passava com 200. Agora o `Authorization`
+vai explícito no invoke. **Se alguém mexer nisso e "simplificar"
+removendo o header, o painel quebra com 403 e o motivo não é óbvio.**
+
+Testado de ponta a ponta: criar pelo painel → logar com a conta nova →
+RLS prendeu à filial dela (20 entregas, uma loja só) → editar os três
+campos → bloquear → confirmar que o bloqueado ainda autentica mas não
+enxerga nada, nem o próprio perfil, caindo na tela "Perfil não
+encontrado ou inativo". Negativo: caixa chamando a função devolve 403,
+sem credencial devolve 401.
+
+Um susto no meio que vale registrar como método: cliquei num toggle com
+uma referência de elemento velha e nada aconteceu. Antes de concluir
+qualquer coisa, verifiquei se eu não tinha bloqueado **outro** usuário
+por engano — não tinha. O toggle funcionou nos dois sentidos quando
+localizei o botão pela linha certa, e o `UPDATE` direto no banco já
+tinha provado que a camada de dados estava correta.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -399,8 +475,12 @@ esperado.
 8. `69e3c06` — histórico paginado + filtro de filial (item 10 acima)
 9. `d72231f` — NOTAS.md com auditoria e paginação
 10. `ca07dfd` — aba "Hoje" paginada + `Paginacao` extraído (item 11)
-11. máscara de moeda + remoção do `toCents` (item 12) — último commit
-    desta sessão, hash pelo `git log`
+11. `f09fda4` — máscara de moeda + remoção do `toCents` (item 12)
+12. `71a3a8a` — alinhamento do campo de moeda à esquerda
+13. `87f66ed` — max-rows e `saida_em` (item 13)
+14. `354ca8e` — painel de usuários (item 14)
+15. atualização de CLAUDE.md e NOTAS.md — último commit desta sessão,
+    hash pelo `git log`
 
 ## Migrations aplicadas nesta sessão
 
@@ -421,6 +501,18 @@ esperado.
 15. `20260810150000_custodia_dois_relogios.sql`
     (`documento_recebido_em_local`, `receita_recebida_em_local` +
     trigger `fn_entrega_registrar_custodia`)
+16. `20260810160000_corrida_saida_dois_relogios.sql` (trigger
+    `fn_corrida_registrar_saida`)
+17. `20260810170000_gestao_de_usuarios.sql` (`is_admin()`,
+    `profiles.email`, policies de UPDATE separadas + trigger
+    `fn_profiles_protege_campos`)
+
+Fora migration: a Edge Function `criar-usuario` foi publicada pelo
+usuário via dashboard (Edge Functions → Via Editor). **Não há CLI do
+Supabase configurada neste projeto** — mandei o comando `supabase
+functions deploy` sem checar isso antes e o usuário acabou colando o
+`index.ts` no SQL Editor, que obviamente falhou. Da próxima vez que
+aparecer algo pra publicar, o caminho é o dashboard.
 
 Todas confirmadas rodando pelo usuário antes dos testes. Nenhuma migration
 pendente no momento em que esta sessão terminou.
@@ -430,9 +522,13 @@ pendente no momento em que esta sessão terminou.
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
 o que já era classificado como "fora do MVP atual, mas anotado":
 
-- [ ] Painel do admin criar/gerenciar usuários — trava é precisar da
-      primeira Edge Function do projeto (`service_role` nunca pode rodar
-      no navegador). Ver "Ideias futuras" no CLAUDE.md.
+- ~~Painel do admin criar/gerenciar usuários~~ — feito no item 14.
+
+Não sobrou nada na lista. O que existe daqui pra frente é escolha, não
+dívida — e o passo mais útil provavelmente não é feature nenhuma:
+decidir o que fazer com os dados de teste acumulados (lista no fim deste
+arquivo) e cronometrar os 25 segundos com o caixa de verdade, agora que
+a máscara mudou o jeito de digitar valor.
 
 ## Gaps conhecidos, não resolvidos
 
@@ -540,6 +636,22 @@ no banco:
   como "1.234".
 - `V-000020` (Transferência Matriz → Filial 02) — teste de regressão do
   fluxo de transferência depois da máscara (item 12).
+- Uma corrida com o relógio 40 min atrasado de propósito (item 13) e um
+  vale criado pelo console pra disparar Realtime.
+
+**Usuários de teste criados no item 14** (esses vivem no Auth, não só em
+`profiles` — o app não deleta, e desativar só bloqueia):
+
+- `caixanovo@drogcidade.sg` — criado pelo painel como caixa/Matriz,
+  depois editado pra "Caixa Editado Pelo Painel", gerente/Filial 02.
+  Senha `senha2026`.
+- `gerentepainel@drogcidade.sg` — "Gerente Teste Painel", criado pelo
+  clique real que validou a chamada única. Senha `senha2026`.
+- `debug@drogcidade.sg` — **criado por mim depurando** o 403 do
+  `functions.invoke`, antes de achar o bug. Deixado **bloqueado**
+  (`ativo = false`), então não enxerga nada. Pra sumir de vez tem que
+  apagar no dashboard do Supabase (Authentication → Users), porque o app
+  não tem e não deveria ter esse botão.
 
 Se quiser começar "limpo" pra operação real, isso teria que ser removido
 manualmente via SQL Editor — o app não tem (e não deveria ter) um jeito de

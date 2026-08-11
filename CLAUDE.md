@@ -16,8 +16,9 @@ A farmácia real tem **17 filiais** (hoje só 2 existem como dado de teste:
 Matriz e Filial 02) — o sistema já suporta múltiplas lojas de ponta a
 ponta (entregas escopadas por `loja_id`, transferência entre filiais,
 relatórios e Registro de Auditoria filtráveis por filial). Só a
-**criação** de loja nova continua manual via SQL, decisão consciente (ver
-"Ideias futuras" abaixo) — não confundir isso com "não suporta
+**criação** de loja nova continua manual via SQL, decisão consciente
+(filial é rara; usuário, que tem rotatividade, já se cria pelo app — ver
+"Gestão de usuários" abaixo) — não confundir isso com "não suporta
 multi-loja".
 
 ---
@@ -31,7 +32,9 @@ Lista fechada. Não instalar dependência nova sem perguntar.
 - TanStack Query (server state) + Dexie (fila offline em IndexedDB, +
   `dexie-react-hooks` pro `useLiveQuery` — pacote oficial da Dexie, não é lib nova)
 - `signature_pad` (captura de assinatura)
-- Supabase: Postgres + Auth + Storage + Realtime + RLS
+- Supabase: Postgres + Auth + Storage + Realtime + RLS + **uma** Edge Function
+  (`criar-usuario` — a única coisa que roda no servidor, ver "Gestão de
+  usuários" abaixo)
 - Deploy: Cloudflare Pages
 
 ---
@@ -288,6 +291,12 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       cru), filtro de filial isolando corretamente Matriz de Filial 02
       (inclusive o vale de transferência aparecendo na filial de origem,
       não na de destino).
+- [x] **Painel de admin criar/gerenciar usuários** — entrou **depois** de a
+      checklist original fechar (era "Ideias futuras"), por pedido explícito.
+      Sub-aba "Usuários" em Cadastros, só pra `admin`. Cria, edita
+      nome/papel/filial e bloqueia/libera acesso. Trouxe a primeira (e
+      única) peça de backend do projeto — ver "Gestão de usuários" abaixo,
+      que é onde estão as regras que não dá pra descobrir lendo só o código.
 
 ### Fora — não construir, não sugerir, não "já que estou aqui"
 
@@ -304,15 +313,49 @@ Se algum destes parecer necessário, **pare e pergunte antes de implementar.**
 
 ### Ideias futuras — fora do MVP atual, mas anotadas pra não esquecer
 
-- **Painel do admin criar/gerenciar usuários (caixas) direto pelo app.** Hoje
-  cadastro de usuário é manual: Supabase Auth (dashboard) + `insert` em
-  `profiles` via SQL Editor. Faz sentido automatizar porque funcionário tem
-  rotatividade — mas **loja continua manual**, porque filial é rara e não
-  vale a complexidade extra só por ela. Trava técnica: criar usuário no Auth
-  exige a `service_role` key, que nunca pode rodar no navegador (ignora RLS
-  inteiro). Precisaria da primeira peça de backend do projeto — uma Supabase
-  Edge Function rodando essa chave do lado do servidor. Hoje o projeto é
-  frontend puro falando direto com Postgres via RLS; isso muda essa forma.
+(Nada aqui no momento. O painel de usuários, que era a única entrada desta
+lista, foi construído — ver "Gestão de usuários" abaixo. **Loja continua
+manual**, porque filial é rara e não vale a complexidade extra só por ela.)
+
+---
+
+## Gestão de usuários — a única parte com backend
+
+O projeto é frontend puro falando direto com Postgres via RLS, **com uma
+exceção**: criar usuário no Supabase Auth exige a `service_role` key, que
+ignora RLS inteira e por isso nunca pode ir pro navegador. Isso mora numa
+Edge Function (`supabase/functions/criar-usuario/`), a única peça de
+servidor do projeto.
+
+Editar e bloquear usuário **não** passam por lá — são `UPDATE` comum em
+`profiles`, resolvidos pela RLS. A função tem uma rota só, de propósito:
+quanto menor a superfície que roda com `service_role`, melhor.
+
+- **A `service_role` nunca aparece no código nem no repositório.** Ela já
+  vem injetada nas Edge Functions como variável de ambiente. Se algum dia
+  precisar colar essa chave em algum lugar do projeto, a resposta é não —
+  o desenho está errado.
+- **Nada que vem no corpo do request é confiado.** `tenant_id` sai do
+  perfil de quem chamou (validado pelo JWT), nunca do body; papel é
+  checado contra lista fechada; a loja precisa ser do mesmo tenant.
+- **Só `admin`** cria/edita usuário — mais restrito que `is_gerente()`,
+  que vale pro resto da gestão. Gerente não vê a sub-aba.
+- **Senha fica fora do app.** Definir a inicial faz parte da criação;
+  trocar depois é feito direto no Supabase, decisão consciente pra não
+  existir rota de reset.
+- **Cuidado ao mexer nas policies de `profiles`.** Existe um caminho
+  legítimo de "usuário atualiza a própria linha" (marcar notificação como
+  lida). Uma policy de auto-update sem proteção por coluna deixaria
+  qualquer caixa se promover a admin — RLS não restringe coluna. Quem
+  segura isso é o trigger `fn_profiles_protege_campos`; não remova sem
+  colocar outra coisa no lugar.
+- **`profiles.email`** é snapshot gravado na criação (o cliente não lê
+  `auth.users`). Como o app não edita e-mail, não desincroniza.
+- **Ninguém bloqueia a própria conta** — senão o admin se tranca pra fora
+  e só outro admin devolve o acesso.
+
+Deploy da função (não tem CLI configurada neste projeto): dashboard →
+Edge Functions → Deploy a new function → Via Editor, nome `criar-usuario`.
 
 ---
 
@@ -399,10 +442,12 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   aguenta bem o tanto de telas que o MVP tem hoje — se crescer muito mais, reconsiderar
   (mas aí é conversa pra ter, não decisão unilateral).
 - **Login é e-mail/senha (Supabase Auth nativo), não usuário.** Pra ficar rápido de
-  digitar sem construir um sistema de username de verdade, contas são provisionadas
-  com e-mail curto e fake tipo `caixa1@drogariacidade.local` (não precisa ser e-mail
-  real — não tem fluxo de "esqueci minha senha" nem confirmação por e-mail no MVP).
-  Decisão consciente, não workaround temporário.
+  digitar sem construir um sistema de username de verdade, contas usam e-mail curto
+  e fake tipo `caixa1@drogariacidade.local` (não precisa ser e-mail real — não tem
+  fluxo de "esqueci minha senha" nem confirmação por e-mail). Decisão consciente,
+  não workaround temporário. Contas são criadas pelo painel de admin (o `email_confirm`
+  já vem marcado pela Edge Function justamente por isso); só a **troca de senha**
+  continua manual no Supabase.
 
 ---
 
