@@ -3,6 +3,7 @@ import type { AuthProfile } from '@/data/auth'
 import { ListaEntregas } from '@/pages/ListaEntregas'
 import { HistoricoEntregas } from '@/pages/HistoricoEntregas'
 import { DocumentosPendentes } from '@/pages/DocumentosPendentes'
+import { Fechamento } from '@/pages/Fechamento'
 import { Ocorrencias } from '@/pages/Ocorrencias'
 import { Relatorios } from '@/pages/Relatorios'
 import { Cadastros } from '@/pages/Cadastros'
@@ -61,6 +62,7 @@ export function Painel({ profile }: { profile: AuthProfile }) {
               <TabsTrigger value="hoje">Hoje</TabsTrigger>
               <TabsTrigger value="historico">Histórico</TabsTrigger>
               <TabsTrigger value="documentos">Documentos</TabsTrigger>
+              {isAdmin && <TabsTrigger value="fechamento">Fechamento</TabsTrigger>}
               {isAdmin && <TabsTrigger value="ocorrencias">Ocorrências</TabsTrigger>}
               {isAdmin && <TabsTrigger value="relatorios">Relatórios</TabsTrigger>}
               {isAdmin && <TabsTrigger value="cadastros">Cadastros</TabsTrigger>}
@@ -74,6 +76,11 @@ export function Painel({ profile }: { profile: AuthProfile }) {
             <TabsContent value="documentos" className="pt-3">
               <DocumentosPendentes profile={profile} />
             </TabsContent>
+            {isAdmin && (
+              <TabsContent value="fechamento" className="pt-3">
+                <Fechamento profile={profile} />
+              </TabsContent>
+            )}
             {isAdmin && (
               <TabsContent value="ocorrencias" className="pt-3">
                 <Ocorrencias />

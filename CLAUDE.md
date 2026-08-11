@@ -319,6 +319,50 @@ manual**, porque filial é rara e não vale a complexidade extra só por ela.)
 
 ---
 
+## Fechamento de caixa e o eixo financeiro
+
+`status_financeiro` existiu morto desde o schema inicial — nada no app
+escrevia nele. Ganhou uso em 2026-08-10, e os três valores significam:
+
+| valor | quer dizer |
+|---|---|
+| `na_ordem` | ainda não conferido |
+| `divergente` | tem problema, precisa de solução na administração |
+| `conferido` | gestor bateu e está ok |
+
+**O fluxo real da farmácia** (não dá pra descobrir lendo código): o
+operador marca as divergências que percebeu → o **gestor** confere os
+vales → **o dia inteiro sobe pra administração**, conferidos e
+divergentes. A diferença é que o gestor *não resolve divergência
+sozinho*: a marca `divergente` é o que sinaliza, lá em cima, quais
+precisam de ação. Por isso:
+
+- **Conferir NUNCA sobrescreve `divergente`.** Só mexe em `na_ordem`.
+  Apagar a marca no fechamento faria o problema chegar na administração
+  sem sinalização nenhuma.
+- **Cancelado fica de fora da conferência** — não virou venda, não há o
+  que conferir.
+- **Só gerente/admin marca `conferido`**, garantido pelo trigger
+  `fn_entrega_protege_conferencia` e não só pela tela. Não dá pra fazer
+  com policy: `entregas` precisa de UPDATE liberado pro caixa (cadastro,
+  corrida, retorno, cancelamento) e RLS não restringe coluna — mesma
+  limitação de `profiles`. O caixa continua podendo marcar `divergente`,
+  que é o papel dele no fluxo.
+
+**A aba "Fechamento" não calcula sobra nem falta, e isso é deliberado.**
+O sistema só conhece tele-entrega; venda de balcão é a maior parte do
+caixa e vive no Trier. Somar os vales e chamar de "esperado na gaveta"
+daria número errado. O que a tela faz é responder *o que, do lado da
+tele, explica uma diferença* — que era o que dependia da memória do caixa
+na hora de justificar ao financeiro. São quatro coisas, todas já no
+banco: divergência de pagamento, vale extra pago em mãos ao motoboy (o
+que mais parece falta sem ser), vale cancelado e insucesso.
+
+Se um dia entrar o total do Trier aqui, aí sim dá pra falar em sobra e
+falta. Sem esse dado, **não inventar o número.**
+
+---
+
 ## Cancelamento de vale
 
 O schema previa isso desde o início (`cancelado_em`, `cancelado_por`,
