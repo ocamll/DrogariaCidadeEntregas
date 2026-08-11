@@ -54,6 +54,10 @@ export type Relatorio = {
   valorEntregaCents: number
   valorFarmaciaDeveCents: number
   porStatus: Record<string, number>
+  // eixo financeiro (na_ordem/divergente/conferido). Fica separado do
+  // status de entrega de propósito: os três eixos do CLAUDE.md são
+  // independentes, um vale pode estar entregue e com dinheiro pendente.
+  porStatusFinanceiro: Record<string, number>
   porAgencia: RelatorioAgencia[]
 }
 
@@ -66,6 +70,7 @@ type EntregaRelatorioRow = {
   valor_entrega_cents: number
   entrega_paga_cliente_cents: number
   status_entrega: string
+  status_financeiro: string
   ocorrido_em_local: string
   corridas: {
     mototaxista_id: string
@@ -161,7 +166,7 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
     supabase
       .from('entregas')
       .select(
-        'id, numero_vale, cliente_nome, tipo, valor_compra_cents, valor_entrega_cents, entrega_paga_cliente_cents, status_entrega, ocorrido_em_local, corridas(mototaxista_id, agencia_id, mototaxistas(nome), agencias(nome))'
+        'id, numero_vale, cliente_nome, tipo, valor_compra_cents, valor_entrega_cents, entrega_paga_cliente_cents, status_entrega, status_financeiro, ocorrido_em_local, corridas(mototaxista_id, agencia_id, mototaxistas(nome), agencias(nome))'
       )
       .gte('ocorrido_em_local', inicio.toISOString())
       .lt('ocorrido_em_local', fim.toISOString())
@@ -171,6 +176,7 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
   )) as unknown as EntregaRelatorioRow[]
 
   const porStatus: Record<string, number> = {}
+  const porStatusFinanceiro: Record<string, number> = {}
   const porAgencia = new Map<string, AgenciaAcumulador>()
   let valorCompraCents = 0
   let valorEntregaCents = 0
@@ -181,6 +187,7 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
 
   for (const row of rows) {
     porStatus[row.status_entrega] = (porStatus[row.status_entrega] ?? 0) + 1
+    porStatusFinanceiro[row.status_financeiro] = (porStatusFinanceiro[row.status_financeiro] ?? 0) + 1
 
     // Vale cancelado continua CONTADO — aparece em "por status", tem bloco
     // próprio no topo, e a soma dos status precisa fechar com o total de
@@ -221,6 +228,7 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
     valorEntregaCents,
     valorFarmaciaDeveCents,
     porStatus,
+    porStatusFinanceiro,
     porAgencia: [...porAgencia.values()]
       .map((agencia) => ({
         chave: agencia.chave,

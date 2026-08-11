@@ -116,6 +116,20 @@ export async function marcarDivergencia(input: MarcarDivergenciaInput) {
     if (error && !isDuplicateKeyError(error)) throw error
   }
 
+  // Acende o eixo financeiro. Ele existe no schema desde o início (os três
+  // eixos de status são independentes de propósito — ver CLAUDE.md) mas
+  // nada no app nunca escrevia nele: todo vale ficava em 'na_ordem' pra
+  // sempre, inclusive os que tinham divergência registrada.
+  //
+  // Idempotente no reenvio da fila offline: gravar 'divergente' de novo
+  // não muda nada, e o trigger fn_log_entrega só registra evento quando o
+  // status muda de fato — então reenviar não polui o log.
+  const { error: statusError } = await supabase
+    .from('entregas')
+    .update({ status_financeiro: 'divergente' })
+    .eq('id', input.entregaId)
+  if (statusError) throw statusError
+
   await inserirEventoIdempotente({
     tenantId: input.tenantId,
     entregaId: input.entregaId,

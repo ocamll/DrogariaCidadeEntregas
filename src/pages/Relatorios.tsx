@@ -25,6 +25,12 @@ const STATUS_LABEL: Record<string, string> = {
   cancelada: 'Cancelada',
 }
 
+const STATUS_FINANCEIRO_LABEL: Record<string, string> = {
+  na_ordem: 'Na ordem',
+  divergente: 'Divergente',
+  conferido: 'Conferido',
+}
+
 function localDateStr(d: Date): string {
   const yyyy = d.getFullYear()
   const mm = String(d.getMonth() + 1).padStart(2, '0')
@@ -145,12 +151,30 @@ export function Relatorios() {
               {Object.keys(data.porStatus).length === 0 ? (
                 <p className="text-sm text-muted-foreground">Nenhum vale no período.</p>
               ) : (
-                <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                  {Object.entries(data.porStatus).map(([status, quantidade]) => (
-                    <span key={status}>
-                      {STATUS_LABEL[status] ?? status}: <strong>{quantidade}</strong>
-                    </span>
-                  ))}
+                // Dois eixos lado a lado, não misturados: um vale pode estar
+                // entregue e com o dinheiro ainda por conferir. Somar tudo
+                // numa lista só sugeriria que são estados alternativos.
+                <div className="flex flex-col gap-3">
+                  <div className="flex flex-col gap-1">
+                    <p className="text-xs text-muted-foreground">Entrega</p>
+                    <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                      {Object.entries(data.porStatus).map(([status, quantidade]) => (
+                        <span key={status}>
+                          {STATUS_LABEL[status] ?? status}: <strong>{quantidade}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
+                  <div className="flex flex-col gap-1">
+                    <p className="text-xs text-muted-foreground">Financeiro</p>
+                    <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
+                      {Object.entries(data.porStatusFinanceiro).map(([status, quantidade]) => (
+                        <span key={status}>
+                          {STATUS_FINANCEIRO_LABEL[status] ?? status}: <strong>{quantidade}</strong>
+                        </span>
+                      ))}
+                    </div>
+                  </div>
                 </div>
               )}
             </CardContent>
