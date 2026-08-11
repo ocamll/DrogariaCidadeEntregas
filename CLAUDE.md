@@ -361,14 +361,30 @@ Edge Functions → Deploy a new function → Via Editor, nome `criar-usuario`.
 
 ## O teste que decide o projeto
 
-O caixa preenche os dois papéis em X segundos. Se o sistema demorar mais que isso,
-ele fracassou mesmo funcionando perfeitamente — o caixa volta pro papel e não sai
+O caixa preenche os dois papéis à mão. Se o sistema demorar mais que isso, ele
+fracassou mesmo funcionando perfeitamente — o caixa volta pro papel e não sai
 mais de lá.
 
 **Alvo: menos de 25 segundos, sem tocar no mouse.**
 
-Toda mudança na tela de cadastro precisa ser avaliada contra esse número. Campo novo
-nessa tela exige justificativa explícita.
+### MEDIDO EM 2026-08-10 — o alvo foi batido
+
+Cronometrado pelo usuário com uso real, já com a máscara de moeda:
+
+| | tempo |
+|---|---|
+| **Sistema** | **~15 a 18 s** |
+| Papel — um vale | ~1 min |
+| Papel — dois vales | ~1 min 30 s |
+
+Ou seja: entre **3x e 6x mais rápido** que o papel, e com folga de ~7 a 10
+segundos sobre o alvo de 25 s. O projeto passou no teste que o define — isso
+deixa de ser hipótese.
+
+**Essa folga é orçamento, não sobra pra gastar à toa.** Toda mudança na tela de
+cadastro continua sendo avaliada contra os 25 s, e campo novo ali continua
+exigindo justificativa explícita. A diferença é que agora dá pra medir de novo
+em vez de discutir no achismo — e uma regressão que coma a folga é visível.
 
 Requisitos derivados:
 - Foco automático no primeiro campo ao abrir

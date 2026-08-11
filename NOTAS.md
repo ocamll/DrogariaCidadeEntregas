@@ -459,6 +459,26 @@ por engano — não tinha. O toggle funcionou nos dois sentidos quando
 localizei o botão pela linha certa, e o `UPDATE` direto no banco já
 tinha provado que a camada de dados estava correta.
 
+## 15. O teste dos 25 segundos foi medido de verdade
+
+O usuário cronometrou com uso real, já com a máscara de moeda no ar:
+**~15 a 18 s** pelo sistema, contra ~1 min pra um vale no papel e
+~1 min 30 s pra dois. Folga de 7 a 10 segundos sobre o alvo.
+
+Isso encerra a única incógnita que o CLAUDE.md tratava como aberta — a
+seção "O teste que decide o projeto" tinha literalmente um `X segundos`
+de placeholder no lugar da linha de base do papel, desde o começo do
+projeto. Agora tem número dos dois lados.
+
+Duas coisas que isso muda pra quem retomar:
+
+- A máscara de moeda (item 12) **não** regrediu o tempo, apesar de ter
+  mudado o jeito de digitar valor. A previsão era neutra ou levemente
+  melhor porque compra de farmácia raramente é redonda; bateu.
+- A folga agora é mensurável. Campo novo na tela de cadastro continua
+  exigindo justificativa, mas dá pra cronometrar de novo em vez de
+  discutir no abstrato.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -525,10 +545,12 @@ o que já era classificado como "fora do MVP atual, mas anotado":
 - ~~Painel do admin criar/gerenciar usuários~~ — feito no item 14.
 
 Não sobrou nada na lista. O que existe daqui pra frente é escolha, não
-dívida — e o passo mais útil provavelmente não é feature nenhuma:
-decidir o que fazer com os dados de teste acumulados (lista no fim deste
-arquivo) e cronometrar os 25 segundos com o caixa de verdade, agora que
-a máscara mudou o jeito de digitar valor.
+dívida.
+
+O teste dos 25 segundos foi cronometrado e passou (item 15). Resta uma
+decisão operacional antes de uso real: o que fazer com os dados de teste
+acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
+é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
 ## Gaps conhecidos, não resolvidos
 
