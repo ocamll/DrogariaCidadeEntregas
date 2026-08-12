@@ -129,20 +129,35 @@ export function EntregasTable({
                Cada coluna começava numa altura diferente e a linha inteira
                parecia torta. Alinhados pelo topo, todos partem do mesmo Y. */
             <TableRow key={entrega.id} className="[&>td]:align-top">
-              {/* nunca quebra: o selo fica ao lado do número, não embaixo */}
+              {/* só o número. O selo de transferência vive na coluna
+                  Cliente: aqui ele dobrava a largura mínima da coluna por
+                  causa de poucas linhas, e todo vale normal herdava esse
+                  espaço vazio. */}
               <TableCell className={`font-medium tabular-nums ${COLUNA_CENTRO}`}>
                 {entrega.numeroVale}
-                {transferencia && (
-                  <Badge variant="secondary" className="ml-2 px-1.5 text-[10px]">
-                    Transferência
-                  </Badge>
-                )}
               </TableCell>
-              {/* a largura vem do `w-56` no cabeçalho desta coluna — o
+              {/* A largura vem do `w-56` no cabeçalho desta coluna — o
                   endereço longo quebra em duas linhas em vez de esticar a
-                  coluna */}
+                  coluna.
+
+                  Na transferência o selo ocupa a primeira linha, no lugar
+                  do nome do cliente: ali `cliente_nome` guarda só a filial
+                  de destino, que já está dita por extenso na rota logo
+                  abaixo ("Matriz para Filial 02"). Trocar um pelo outro
+                  não esconde nada e ainda tira o selo da coluna Vale. */}
               <TableCell className={COLUNA_TEXTO}>
-                <div className="font-medium">{entrega.clienteNome}</div>
+                {transferencia ? (
+                  // `flex` e não bloco comum: como item de linha de texto, o
+                  // selo herda o espaço de baseline e deixava a linha da
+                  // transferência 2px mais alta que as demais.
+                  <div className="flex">
+                    <Badge variant="secondary" className="px-1.5 text-[10px]">
+                      Transferência
+                    </Badge>
+                  </div>
+                ) : (
+                  <div className="font-medium">{entrega.clienteNome}</div>
+                )}
                 <div className={TEXTO_SECUNDARIO}>{entrega.clienteEndereco}</div>
               </TableCell>
               {/* Transferência não tem venda (compra fica '—'), mas TEM valor

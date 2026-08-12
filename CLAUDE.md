@@ -675,8 +675,14 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
     divide dos dois lados e não incomoda. **Não resolver isso com uma
     coluna `w-full` no fim**: aquilo espreme as demais até o *mínimo* e um
     endereço longo passa a quebrar em quatro linhas.
-  - **Número do vale e o selo "Transferência" nunca quebram** — o selo fica
-    ao lado do número, não embaixo.
+  - **O selo "Transferência" mora na coluna Cliente**, na primeira linha,
+    com a rota logo abaixo ("Matriz para Filial 02"). Ele já esteve ao lado
+    do número do vale e de lá inflava a largura mínima daquela coluna por
+    causa de poucas linhas — todo vale normal herdava o espaço vazio. Na
+    Cliente ele ocupa a linha do nome, que na transferência guardaria só a
+    filial de destino, já dita por extenso na rota. O selo vai dentro de um
+    `flex`: como item de linha de texto ele herda espaço de baseline e
+    deixa a linha 2px mais alta que as outras.
   - **Data em cima, hora embaixo, sempre**, em duas linhas explícitas. Se a
     célula quebrar sozinha, o resultado depende da largura sobrando e um
     vale aparece diferente do vizinho.
