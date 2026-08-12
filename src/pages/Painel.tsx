@@ -50,14 +50,14 @@ export function Painel({ profile }: { profile: AuthProfile }) {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Entregas</CardTitle>
           <div className="flex gap-2">
+            <Button variant="outline" onClick={() => setView('nova-transferencia')}>
+              Transferência
+            </Button>
             <Button variant="outline" onClick={() => setView('retorno-corrida')}>
               Retorno de corrida
             </Button>
             <Button variant="outline" onClick={() => setView('nova-corrida')}>
               Nova corrida
-            </Button>
-            <Button variant="outline" onClick={() => setView('nova-transferencia')}>
-              Transferência
             </Button>
             <Button onClick={() => setView('nova')}>Nova entrega</Button>
           </div>
