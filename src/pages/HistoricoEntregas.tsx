@@ -27,7 +27,10 @@ export function HistoricoEntregas({ profile }: { profile: AuthProfile }) {
 
   // Caixa já é preso à própria loja pela RLS — o select só faz sentido pra
   // quem enxerga mais de uma filial.
-  const podeFiltrarFilial = profile.papel === 'admin' || profile.papel === 'gerente'
+  // Só admin: desde 2026-08-12 a RLS prende gerente e caixa à própria
+  // filial, então pros dois o select mostraria 17 opções que devolvem a
+  // mesma coisa (ou nada).
+  const podeFiltrarFilial = profile.papel === 'admin'
 
   // Todo filtro novo volta pra página 1: senão dá pra ficar preso numa
   // página 7 que não existe mais no resultado novo.

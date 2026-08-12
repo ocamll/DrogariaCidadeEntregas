@@ -36,7 +36,13 @@ export function Painel({ profile }: { profile: AuthProfile }) {
     return <RetornoCorrida profile={profile} onVoltar={() => setView('lista')} />
   }
 
-  const isAdmin = profile.papel === 'admin' || profile.papel === 'gerente'
+  // Dois gates diferentes, não um só. Gestão (fechamento, ocorrências,
+  // relatórios) é do gerente também — a RLS é que limita o que ele vê
+  // nelas à própria filial. Cadastros é só do admin, por decisão de
+  // 2026-08-12, e a policy de escrita das três tabelas garante isso mesmo
+  // que alguém volte a mostrar a aba aqui.
+  const isGestao = profile.papel === 'admin' || profile.papel === 'gerente'
+  const isAdmin = profile.papel === 'admin'
 
   return (
     <div className="mx-auto max-w-6xl">
@@ -62,9 +68,9 @@ export function Painel({ profile }: { profile: AuthProfile }) {
               <TabsTrigger value="hoje">Hoje</TabsTrigger>
               <TabsTrigger value="historico">Histórico</TabsTrigger>
               <TabsTrigger value="documentos">Documentos</TabsTrigger>
-              {isAdmin && <TabsTrigger value="fechamento">Fechamento</TabsTrigger>}
-              {isAdmin && <TabsTrigger value="ocorrencias">Ocorrências</TabsTrigger>}
-              {isAdmin && <TabsTrigger value="relatorios">Relatórios</TabsTrigger>}
+              {isGestao && <TabsTrigger value="fechamento">Fechamento</TabsTrigger>}
+              {isGestao && <TabsTrigger value="ocorrencias">Ocorrências</TabsTrigger>}
+              {isGestao && <TabsTrigger value="relatorios">Relatórios</TabsTrigger>}
               {isAdmin && <TabsTrigger value="cadastros">Cadastros</TabsTrigger>}
             </TabsList>
             <TabsContent value="hoje" className="pt-3">
@@ -76,17 +82,17 @@ export function Painel({ profile }: { profile: AuthProfile }) {
             <TabsContent value="documentos" className="pt-3">
               <DocumentosPendentes profile={profile} />
             </TabsContent>
-            {isAdmin && (
+            {isGestao && (
               <TabsContent value="fechamento" className="pt-3">
                 <Fechamento profile={profile} />
               </TabsContent>
             )}
-            {isAdmin && (
+            {isGestao && (
               <TabsContent value="ocorrencias" className="pt-3">
                 <Ocorrencias />
               </TabsContent>
             )}
-            {isAdmin && (
+            {isGestao && (
               <TabsContent value="relatorios" className="pt-3">
                 <Relatorios />
               </TabsContent>
