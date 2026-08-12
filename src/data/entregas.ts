@@ -223,10 +223,20 @@ export type EntregaRecente = {
   formasRealizadas: FormaPagamento[]
   temReceita: boolean
   receitaRecebidaEm: string | null
+  // quem lançou o vale. Cada caixa tem o próprio login, então isso
+  // responde "quem fez" direto na lista, sem abrir o Registro de
+  // Auditoria. Vem do join, não de snapshot no payload: se a pessoa
+  // trocar de nome, a lista acompanha.
+  criadoPorNome: string | null
 }
 
+// `profiles!entregas_criado_por_fkey` não é preciosismo: entregas tem
+// VÁRIAS colunas apontando pra profiles (criado_por, cancelado_por,
+// documento_recebido_por, receita_recebida_por), então o embed sem hint
+// devolve PGRST201 por ambiguidade — o mesmo erro que o embed de lojas
+// deu no Registro de Auditoria.
 const ENTREGA_RECENTE_SELECT =
-  'id, numero_vale, tipo, cliente_nome, cliente_endereco, valor_compra_cents, valor_entrega_cents, status_entrega, ocorrido_em_local, tem_receita, receita_recebida_em, pagamentos(forma, momento)'
+  'id, numero_vale, tipo, cliente_nome, cliente_endereco, valor_compra_cents, valor_entrega_cents, status_entrega, ocorrido_em_local, tem_receita, receita_recebida_em, criado_por, profiles!entregas_criado_por_fkey(nome), pagamentos(forma, momento)'
 
 type EntregaRecenteRow = {
   id: string
@@ -240,6 +250,8 @@ type EntregaRecenteRow = {
   ocorrido_em_local: string
   tem_receita: boolean
   receita_recebida_em: string | null
+  criado_por: string
+  profiles: { nome: string } | null
   pagamentos: Array<{ forma: FormaPagamento; momento: 'previsto' | 'realizado' }>
 }
 
@@ -258,16 +270,19 @@ function mapEntregaRecente(row: EntregaRecenteRow): EntregaRecente {
     formasRealizadas: row.pagamentos.filter((p) => p.momento === 'realizado').map((p) => p.forma),
     temReceita: row.tem_receita,
     receitaRecebidaEm: row.receita_recebida_em,
+    criadoPorNome: row.profiles?.nome ?? null,
   }
 }
 
 // Paginada pelo mesmo motivo do histórico: a ordenação é descendente, e
 // pro caixa isso nunca chega perto de teto nenhum (um dia, uma loja) —
-// mas admin/gerente enxergam as 17 filiais juntas, e num dia movimentado
-// o corte silencioso do max-rows derrubaria justamente os vales da
-// manhã. Página maior que a do histórico porque aqui é a tela de
-// trabalho: o caixa quer ver o dia inteiro sem clicar.
-export const TAMANHO_PAGINA_HOJE = 100
+// mas admin enxerga as 17 filiais juntas, e num dia movimentado o corte
+// silencioso do max-rows derrubaria justamente os vales da manhã.
+//
+// 25 por página nas duas listas, por pedido do usuário (2026-08-12).
+// Antes eram 100 aqui e 50 no histórico; página curta rola menos e
+// monta menos dropdown por vez, que é o que pesa nesta tabela.
+export const TAMANHO_PAGINA_HOJE = 25
 
 async function buscarEntregasDeHoje(pagina: number): Promise<PaginaEntregas> {
   const inicioDoDia = new Date()
@@ -331,7 +346,8 @@ export const FILTROS_HISTORICO_VAZIOS: FiltrosHistorico = {
 // corte por `registrado_em desc` derrubava justamente os mais antigos —
 // exatamente os procurados. Paginando não há teto nenhum, e ainda carrega
 // menos por vez (a tabela não virtualiza e monta um dropdown por linha).
-export const TAMANHO_PAGINA_HISTORICO = 50
+// Mesmo tamanho da aba "Hoje" — ver comentário lá.
+export const TAMANHO_PAGINA_HISTORICO = 25
 
 // Mesma forma pras duas listas paginadas (Hoje e Histórico).
 export type PaginaEntregas = {
