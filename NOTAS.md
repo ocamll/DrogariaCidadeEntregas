@@ -915,6 +915,16 @@ O que ficou:
 Resultado em 1280 (a largura do usuário): **24 linhas de 53px, todas
 iguais**, sobra horizontal zero.
 
+**Segundo passo, no dia seguinte:** o usuário disse que as colunas ainda
+estavam "meio tortas". Estavam mesmo, e sobrou da própria mudança que
+empilhou Cliente/endereço e Data/hora: a `TableCell` do shadcn é
+`align-middle`, então numa linha com células de alturas diferentes as de
+uma linha só ficavam centralizadas e as de duas começavam no topo.
+Medido na mesma tela, injetando `vertical-align: middle` pra comparar:
+**9px de desalinhamento máximo antes, 1px depois** (o 1px é medida de
+elemento contra nó de texto, não diferença real). `[&>td]:align-top` na
+linha resolve. "Registrado por" virou **"Usuário"**, também a pedido.
+
 ## 25. Polimento pedido em lote
 
 Oito itens numa mensagem só. Os que valem registro:

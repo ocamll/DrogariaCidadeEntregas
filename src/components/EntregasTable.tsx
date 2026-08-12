@@ -78,7 +78,7 @@ export function EntregasTable({
           <TableHead>Entrega</TableHead>
           <TableHead>Pagamento</TableHead>
           <TableHead>Status</TableHead>
-          <TableHead>Registrado por</TableHead>
+          <TableHead>Usuário</TableHead>
           <TableHead>{mostrarData ? 'Data' : 'Horário'}</TableHead>
           <TableHead />
         </TableRow>
@@ -100,7 +100,13 @@ export function EntregasTable({
           })
           const hora = quando.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
           return (
-            <TableRow key={entrega.id}>
+            /* `align-top` em toda célula da linha: a TableCell do shadcn é
+               `align-middle`, e numa linha onde Cliente e Data ocupam duas
+               linhas e Compra/Entrega/Status ocupam uma, os de uma linha
+               ficavam centralizados — uns 8px abaixo do nome do cliente.
+               Cada coluna começava numa altura diferente e a linha inteira
+               parecia torta. Alinhados pelo topo, todos partem do mesmo Y. */
+            <TableRow key={entrega.id} className="[&>td]:align-top">
               {/* nunca quebra: o selo fica ao lado do número, não embaixo */}
               <TableCell className="font-medium tabular-nums">
                 {entrega.numeroVale}

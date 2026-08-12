@@ -673,6 +673,11 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   - **Linha de apoio não usa `text-muted-foreground`** — aquele cinza
     (`oklch(0.556)`) é claro demais pra informação que o caixa lê de fato.
     O padrão é o texto principal a 70%.
+  - **A linha inteira é `align-top`.** A `TableCell` do shadcn é
+    `align-middle`, e como Cliente e Data ocupam duas linhas enquanto
+    valor/status ocupam uma, os de uma linha ficavam centralizados — 9px
+    abaixo do nome do cliente, com cada coluna começando numa altura
+    diferente. Célula de altura mista sempre alinha pelo topo aqui.
 - **Sem router.** Não está na stack. Navegação é troca de estado local (`useState<View>`)
   dentro de `Painel.tsx`, com `onVoltar` como prop pra cada tela voltar pra lista. Isso
   aguenta bem o tanto de telas que o MVP tem hoje — se crescer muito mais, reconsiderar
