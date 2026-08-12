@@ -44,13 +44,15 @@ function CadastroTransferenciaForm({
   onVoltar: () => void
 }) {
   const { data: lojas, isLoading, isError } = useLojas()
-  const destinos = (lojas ?? []).filter((loja) => loja.id !== lojaId)
+  const fornecedoras = (lojas ?? []).filter((loja) => loja.id !== lojaId)
   // mesma tarifa fixa da entrega de cliente: a transferência também é uma
   // corrida que a agência faz e cobra. Sempre 1 vale.
   const tarifaCents = useTarifaDaLoja(lojaId)
 
   const [id, setId] = useState(() => uuidv7())
-  const [lojaDestinoId, setLojaDestinoId] = useState('')
+  // filial que TEM o produto. Quem opera esta tela é a filial que está sem
+  // ele e está pedindo — o motoboy passa na escolhida, pega, e entrega aqui.
+  const [lojaOrigemId, setLojaOrigemId] = useState('')
   const [status, setStatus] = useState<Status>(null)
   const [erroValidacao, setErroValidacao] = useState<string | null>(null)
 
@@ -59,14 +61,14 @@ function CadastroTransferenciaForm({
 
   function resetForm() {
     setId(uuidv7())
-    setLojaDestinoId('')
+    setLojaOrigemId('')
     selectRef.current?.focus()
   }
 
   function handleSalvar() {
-    const destino = destinos.find((loja) => loja.id === lojaDestinoId)
-    if (!destino) {
-      setErroValidacao('Escolhe a filial de destino.')
+    const origem = fornecedoras.find((loja) => loja.id === lojaOrigemId)
+    if (!origem) {
+      setErroValidacao('Escolhe a filial que tem o produto.')
       return
     }
     // Sem a tarifa carregada o vale iria pro banco valendo zero e ninguém
@@ -82,9 +84,9 @@ function CadastroTransferenciaForm({
       id,
       tenantId: profile.tenantId,
       lojaId,
-      lojaOrigemNome: profile.lojaNome ?? 'Filial',
-      lojaDestinoId: destino.id,
-      lojaDestinoNome: destino.nome,
+      lojaSolicitanteNome: profile.lojaNome ?? 'Filial',
+      lojaOrigemId: origem.id,
+      lojaOrigemNome: origem.nome,
       criadoPor: profile.id,
       ocorridoEmLocal: new Date().toISOString(),
       valorEntregaCents: tarifaCents,
@@ -95,7 +97,7 @@ function CadastroTransferenciaForm({
     void enfileirarOperacao('transferencia', payload.id, payload)
     setStatus({
       kind: 'ok',
-      texto: `Transferência de ${payload.lojaOrigemNome} para ${payload.lojaDestinoNome} salva — sincronizando…`,
+      texto: `Transferência de ${payload.lojaOrigemNome} para ${payload.lojaSolicitanteNome} salva — sincronizando…`,
     })
 
     resetForm()
@@ -115,38 +117,43 @@ function CadastroTransferenciaForm({
       <Card>
         <CardHeader>
           <CardTitle>Transferência entre filiais</CardTitle>
+          {/* "Para" e não "De": quem lança é a filial que está sem o
+              produto e vai recebê-lo. */}
           <p className="text-sm text-muted-foreground">
-            {hoje} · De: {profile.lojaNome ?? 'sua filial'}
+            {hoje} · Para: {profile.lojaNome ?? 'sua filial'}
           </p>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <Label htmlFor="loja-destino">Filial de destino</Label>
+              <Label htmlFor="loja-origem">Filial que tem o produto</Label>
               {isLoading && <p className="text-sm text-muted-foreground">Carregando filiais…</p>}
               {isError && (
                 <p className="text-sm text-destructive">Não consegui carregar as filiais.</p>
               )}
               {!isLoading && !isError && (
                 <select
-                  id="loja-destino"
+                  id="loja-origem"
                   ref={selectRef}
                   autoFocus
                   className={SELECT_CLASSNAME}
-                  value={lojaDestinoId}
-                  onChange={(e) => setLojaDestinoId(e.target.value)}
+                  value={lojaOrigemId}
+                  onChange={(e) => setLojaOrigemId(e.target.value)}
                   onKeyDown={handleKeyDown}
                 >
                   <option value="" disabled>
                     Selecione…
                   </option>
-                  {destinos.map((loja) => (
+                  {fornecedoras.map((loja) => (
                     <option key={loja.id} value={loja.id}>
                       {loja.nome}
                     </option>
                   ))}
                 </select>
               )}
+              <p className="text-xs text-foreground/70">
+                O motoboy passa nela pra pegar o produto e entrega aqui.
+              </p>
             </div>
 
             {/* Não é campo: o caixa não digita nem escolhe valor de

@@ -155,9 +155,10 @@ async function buscarEventosAuditoria(filtro: FiltroPeriodo): Promise<EventoAudi
   const { data, error } = await supabase
     .from('eventos')
     .select(
-      // entregas tem duas FKs pra lojas (loja_id de origem, loja_destino_id
-      // da transferência) — sem o hint !entregas_loja_id_fkey o PostgREST
-      // não sabe qual usar e recusa o embed (erro PGRST201, ambiguidade).
+      // entregas tem duas FKs pra lojas (loja_id, a filial dona do vale, e
+      // loja_origem_id, a que fornece na transferência) — sem o hint
+      // !entregas_loja_id_fkey o PostgREST não sabe qual usar e recusa o
+      // embed (erro PGRST201, ambiguidade).
       'id, tipo, payload, ocorrido_em, entregas(loja_id, numero_vale, cliente_nome, lojas!entregas_loja_id_fkey(nome)), profiles(nome)'
     )
     .gte('ocorrido_em', inicio.toISOString())

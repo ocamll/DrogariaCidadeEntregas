@@ -125,8 +125,9 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       `'transferencia'`), mesmo ciclo de status/corrida/assinatura na retirada,
       mas sem cliente real e sem venda (`valor_compra_cents` default 0, nenhum
       `pagamentos` criado). **Tem valor de entrega**, sim — ver "Tarifa de
-      entrega e vales". Único campo digitado: filial de destino (select);
-      origem é a loja de quem tá logado, resto é automático igual ao vale normal.
+      entrega e vales". Único campo digitado: a filial que **tem o produto**
+      (select); quem opera a tela é a filial que está sem ele — ver "Direção
+      da transferência" —, e o resto é automático igual ao vale normal.
 - [x] Captura de assinatura no tablet → status `em_rota` — fluxo único (não
       duas telas): escolhe agência de tele → motoboy (filtrado pela agência
       escolhida, via `mototaxistas.agencia_id`) → marca os vales pendentes
@@ -286,15 +287,15 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       farmácia tem 17; não precisou criar as outras agora) — filial
       filtra client-side sobre o período já carregado, sem round-trip
       extra. Query com bug real encontrado e corrigido durante o teste:
-      `entregas` tem duas FKs pra `lojas` (`loja_id` de origem e
-      `loja_destino_id` de transferência), então o embed
-      `entregas(lojas(nome))` sem hint dá erro de ambiguidade do PostgREST
-      (`PGRST201`) — resolvido com `lojas!entregas_loja_id_fkey(nome)`.
-      Testado de ponta a ponta: os 5 tipos aparecendo com resumo correto,
-      autor resolvido nos 2 tipos novos (que antes só tinham `user_id`
-      cru), filtro de filial isolando corretamente Matriz de Filial 02
-      (inclusive o vale de transferência aparecendo na filial de origem,
-      não na de destino).
+      `entregas` tem duas FKs pra `lojas` (`loja_id`, a filial dona do
+      vale, e `loja_origem_id`, a que fornece na transferência), então o
+      embed `entregas(lojas(nome))` sem hint dá erro de ambiguidade do
+      PostgREST (`PGRST201`) — resolvido com
+      `lojas!entregas_loja_id_fkey(nome)`. Testado de ponta a ponta: os 5
+      tipos aparecendo com resumo correto, autor resolvido nos 2 tipos
+      novos (que antes só tinham `user_id` cru), filtro de filial isolando
+      corretamente Matriz de Filial 02 (inclusive o vale de transferência
+      aparecendo na filial que o criou).
 - [x] **Painel de admin criar/gerenciar usuários** — entrou **depois** de a
       checklist original fechar (era "Ideias futuras"), por pedido explícito.
       Sub-aba "Usuários" em Cadastros, só pra `admin`. Cria, edita
@@ -500,7 +501,7 @@ Nunca comparar nome de convênio com `'Minerva'` no código — a regra é a fla
 Confirmado na farmácia em 2026-08-11: quem leva o produto de uma filial
 pra outra é o motoboy da agência, e ela cobra por essa corrida como por
 qualquer outra. Então o vale de transferência nasce com
-`valor_entrega_cents` = tarifa da filial de **origem** e
+`valor_entrega_cents` = tarifa da filial que **pediu** (é ela que paga) e
 `quantidade_vales = 1` — a variação de 2 vales é endereço distante do
 *cliente*, que não existe aqui. `entrega_paga_cliente_cents` fica 0: não
 há cliente pra pagar em mãos, a farmácia deve o valor inteiro. O que
@@ -512,6 +513,37 @@ real, o espelho do bug do endereço distante.
 A tarifa é capturada no cadastro e vai no payload da fila offline, não
 lida na hora do sync: se ela mudar enquanto o vale espera pra
 sincronizar, o certo é gravar a de quando o vale foi criado.
+
+---
+
+## Direção da transferência — quem pede, quem fornece
+
+Confirmado com o usuário em 2026-08-12, e o sistema gravava **ao
+contrário** antes disso.
+
+O fluxo real: a filial que está **sem** o produto é quem pede. O motoboy
+vai primeiro na filial que **tem**, pega o produto, entrega na filial que
+pediu, e é lá que ele assina e recolhe o vale — a corrida já aconteceu
+quando a assinatura é capturada.
+
+Disso saem três coisas que não dá pra deduzir do código:
+
+- **Quem opera a tela é a filial que recebe.** O select mostra a filial
+  que fornece ("Filial que tem o produto"), não um destino. Rotular como
+  destino foi o erro original, e ele se propagava pro texto da rota.
+- **`loja_id` é a filial que pediu** — dona do vale, quem recebe, quem
+  assina e **quem paga a tele**. Por isso a tarifa sai dela, e por isso
+  RLS, relatório e Registro de Auditoria escopam o vale nela. Isso já
+  estava certo antes; o que estava errado era só o nome do outro lado.
+- **`loja_origem_id`** (antes `loja_destino_id`, renomeada na migration
+  `20260812130000`) é a filial que fornece. `cliente_nome` guarda a filial
+  que recebe, mantendo "cliente = quem recebe a entrega" igual ao vale
+  normal, e `cliente_endereco` é a rota: `"fornecedora para solicitante"`.
+
+Vale de transferência **já assinado ficou com a rota antiga** — a trigger
+de imutabilidade (regra 7) congela cliente e valor, e contorná-la é
+proibido. São vales de teste; a migration corrige só os que ainda não
+foram assinados.
 
 ---
 

@@ -79,14 +79,18 @@ export async function criarEntrega(input: NovaEntrega): Promise<{ numeroVale: st
 export type NovaTransferencia = {
   id: string
   tenantId: string
+  // filial que PEDE o produto: é ela que opera a tela, recebe a entrega,
+  // assina o vale na chegada e paga a tele. Dona do vale, e o que a RLS e
+  // o relatório usam pra escopar.
   lojaId: string
+  lojaSolicitanteNome: string
+  // filial que FORNECE: o motoboy passa nela primeiro pra pegar o produto.
+  lojaOrigemId: string
   lojaOrigemNome: string
-  lojaDestinoId: string
-  lojaDestinoNome: string
   criadoPor: string
   ocorridoEmLocal: string
-  // tarifa da filial de origem — a corrida existe e a agência cobra por
-  // ela igual a qualquer outra. Capturado aqui, no momento do cadastro,
+  // tarifa da filial que pede, que é quem paga a tele. Capturado aqui, no
+  // momento do cadastro,
   // e não lido no sync: se a tarifa mudar enquanto o vale espera na fila
   // offline, o certo é gravar o valor de quando o vale foi criado.
   valorEntregaCents: number
@@ -113,11 +117,13 @@ export async function criarTransferencia(input: NovaTransferencia): Promise<{ nu
       id: input.id,
       tenant_id: input.tenantId,
       loja_id: input.lojaId,
-      loja_destino_id: input.lojaDestinoId,
+      loja_origem_id: input.lojaOrigemId,
       tipo: 'transferencia',
       criado_por: input.criadoPor,
-      cliente_nome: input.lojaDestinoNome,
-      cliente_endereco: `${input.lojaOrigemNome} para ${input.lojaDestinoNome}`,
+      // "cliente" é quem recebe, igual no vale normal — aqui, a filial que
+      // pediu. A rota diz o caminho do produto: sai de quem fornece.
+      cliente_nome: input.lojaSolicitanteNome,
+      cliente_endereco: `${input.lojaOrigemNome} para ${input.lojaSolicitanteNome}`,
       valor_entrega_cents: input.valorEntregaCents,
       quantidade_vales: 1,
       ocorrido_em_local: input.ocorridoEmLocal,
