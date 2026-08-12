@@ -80,6 +80,18 @@ type EntregaRelatorioRow = {
   } | null
 }
 
+// Vale cancelado CONTA como vale em todo nível do relatório, mas não soma
+// dinheiro em lugar nenhum: nem no total geral, nem no acerto por agência
+// ou motoboy. Uma regra só, um lugar só — antes ela existia escrita apenas
+// no total geral, e o acerto por agência ficava certo por consequência
+// (só dá pra cancelar vale pendente, e pendente nunca tem corrida). No dia
+// em que alguém liberar cancelar vale em rota, aquela garantia some sem
+// aviso: o valor entraria no acerto da agência em silêncio, porque o total
+// geral continuaria certo e ninguém compara os dois níveis.
+function entraNoDinheiro(row: EntregaRelatorioRow) {
+  return row.status_entrega !== 'cancelada'
+}
+
 function acumularGrupo(mapa: Map<string, RelatorioGrupo>, id: string, nome: string, row: EntregaRelatorioRow) {
   const atual =
     mapa.get(id) ??
@@ -96,8 +108,10 @@ function acumularGrupo(mapa: Map<string, RelatorioGrupo>, id: string, nome: stri
   atual.totalVales += 1
   if (row.status_entrega === 'entregue') atual.entregues += 1
   if (row.status_entrega === 'insucesso') atual.insucessos += 1
-  atual.valorEntregaCents += row.valor_entrega_cents
-  atual.valorFarmaciaDeveCents += row.valor_entrega_cents - row.entrega_paga_cliente_cents
+  if (entraNoDinheiro(row)) {
+    atual.valorEntregaCents += row.valor_entrega_cents
+    atual.valorFarmaciaDeveCents += row.valor_entrega_cents - row.entrega_paga_cliente_cents
+  }
   atual.vales.push({
     id: row.id,
     numeroVale: row.numero_vale,
@@ -143,8 +157,10 @@ function acumularAgencia(
   atual.totalVales += 1
   if (row.status_entrega === 'entregue') atual.entregues += 1
   if (row.status_entrega === 'insucesso') atual.insucessos += 1
-  atual.valorEntregaCents += row.valor_entrega_cents
-  atual.valorFarmaciaDeveCents += row.valor_entrega_cents - row.entrega_paga_cliente_cents
+  if (entraNoDinheiro(row)) {
+    atual.valorEntregaCents += row.valor_entrega_cents
+    atual.valorFarmaciaDeveCents += row.valor_entrega_cents - row.entrega_paga_cliente_cents
+  }
   acumularGrupo(atual.motoboys, mototaxistaId, mototaxistaNome, row)
   mapa.set(agenciaId, atual)
 }
@@ -189,15 +205,14 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
     porStatus[row.status_entrega] = (porStatus[row.status_entrega] ?? 0) + 1
     porStatusFinanceiro[row.status_financeiro] = (porStatusFinanceiro[row.status_financeiro] ?? 0) + 1
 
-    // Vale cancelado continua CONTADO — aparece em "por status", tem bloco
-    // próprio no topo, e a soma dos status precisa fechar com o total de
-    // vales. Mas não entra no DINHEIRO: a compra não aconteceu e a agência
-    // não recebe por ele. Sem essa separação, cancelar um vale inflaria os
-    // totais em vez de limpá-los, que é o oposto do motivo de existir o
-    // cancelamento.
-    if (row.status_entrega === 'cancelada') {
-      totalCancelados += 1
-    } else {
+    // Cancelado tem bloco próprio no topo, além de aparecer em "por status"
+    // — a soma dos status precisa fechar com o total de vales. O que ele não
+    // faz é somar dinheiro (ver `entraNoDinheiro`): a compra não aconteceu e
+    // a agência não recebe por ele. Sem isso, cancelar um vale inflaria os
+    // totais em vez de limpá-los, que é o oposto do motivo de o
+    // cancelamento existir.
+    if (row.status_entrega === 'cancelada') totalCancelados += 1
+    if (entraNoDinheiro(row)) {
       valorCompraCents += row.valor_compra_cents
       valorEntregaCents += row.valor_entrega_cents
       valorFarmaciaDeveCents += row.valor_entrega_cents - row.entrega_paga_cliente_cents

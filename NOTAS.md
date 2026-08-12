@@ -572,6 +572,7 @@ checa cancelamento — hoje isso não importa porque cancelado nunca tem
 corrida, mas é garantia por consequência, não por regra. Ofereci a
 guarda de 2 linhas duas vezes e o assunto não foi retomado; se alguém
 liberar cancelar vale em rota, esse é o primeiro lugar a olhar.
+*(Feito no item 21, em 2026-08-11.)*
 
 Testado: motivo vazio barrado com o vale intacto; cancelamento gravando
 os dois relógios (329ms de diferença) + motivo + autor; evento
@@ -687,6 +688,51 @@ Sobrou também uma branch local `claude/sharp-haibt-2b1db4` de sessão
 anterior — não subiu, não atrapalha, e não apaguei porque não sei se tem
 algo dentro.
 
+## 21. Continuação em 2026-08-11: a guarda do cancelamento no relatório
+
+Retomei do NOTAS.md. Ofereci as pendências que sobraram (correção de vale
+assinado, limpeza dos dados de teste, esta guarda) e o usuário escolheu a
+guarda — a menor das três, e a única que eu já tinha oferecido duas vezes
+sem retomar.
+
+A regra "cancelado não soma dinheiro" existia escrita **só no total
+geral**. Agência e motoboy acertavam por consequência (só cancela vale
+pendente; pendente nunca tem corrida). Virou um predicado único,
+`entraNoDinheiro`, usado pelos **três** acumuladores — a mesma regra num
+lugar só, em vez de uma regra escrita e duas implícitas.
+
+**Como provei uma guarda que hoje não muda número nenhum.** O caso que ela
+protege (vale cancelado com corrida) é impossível de criar pelo app, e
+fabricá-lo no banco significaria sujar dados de produção justo enquanto a
+limpeza é pendência aberta. Então foram duas metades:
+
+- **A guarda em si**, com linhas sintéticas passadas pra `acumularAgencia`
+  de verdade (export temporário, revertido depois; nenhuma escrita no
+  banco). Dois vales normais numa agência — 1 vale (900/0) e 2 vales
+  (1800/900) — dão `entrega 2700` / `deve 1800`, batendo com a tabela de
+  tarifa. Entrou um terceiro, `cancelada` **com corrida**: contagem 2→3,
+  dinheiro parado em 2700/1800, `entregues` intacto, e o vale continuando
+  na lista do 3º nível marcado "Cancelada". Sem a guarda seriam 4500/2700.
+  Vale pros dois níveis, porque `acumularGrupo` é exercitado por dentro.
+- **A não-regressão**, contra o dado real: conferi antes no banco que
+  `canceladas com corrida = 0` (é o que torna "os números não podem mudar"
+  uma previsão testável, não uma esperança), calculei os totais esperados
+  direto do Supabase com os mesmos limites de período do relatório, e
+  comparei com a tela em "Este mês". Bateu em tudo: 24 vales, 2 cancelados,
+  compra R$ 2.210,75, entrega R$ 130,50, farmácia deve R$ 121,50; por
+  status 9+2+3+10 = 24; Ágil Motos 11/9/2/R$ 40,00/R$ 40,00 e "(sem
+  agência)" 2/1/1/R$ 14,00/R$ 14,00. Expandido, o 2º nível fecha com o 1º
+  (João Silva 7 + Pedro Souza 4 = 11 vales, 6+3 = 9 entregues, R$ 40,00 +
+  R$ 0,00). Zero erro no console. `tsc -b` OK.
+
+**Nota de método pra próxima vez:** o `screenshot` falhou duas vezes de
+jeitos diferentes — uma mostrando a tela *anterior* ao clique, outra com
+"Browser pane not displayed". A leitura do DOM (`get_page_text` e uma
+query juntando as `<tr>`) deu prova melhor e mais checável que a imagem
+teria dado. E o HMR do OneDrive apareceu de novo no meio: a aba voltou
+sozinha de Relatórios pro Histórico entre um comando e outro, porque a
+navegação é `useState<View>` e o remount perde o estado. Não é bug do app.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -721,6 +767,10 @@ algo dentro.
 
 Do 24 em diante os commits estão em `origin/main` — antes disso, tudo
 existia só nesta máquina.
+
+Sessão de 2026-08-11:
+
+25. guarda do cancelamento nos três acumuladores do relatório (item 21)
 
 ## Migrations aplicadas nesta sessão
 
@@ -809,14 +859,11 @@ existiam além das obrigatórias, 2 foram feitos** (cancelamento no item
   Settings → API → Max rows) mas nenhuma query depende mais dele.
 - ~~Regra 1 vs. `toCents('1.234')`~~ — resolvido no item 12
   (2026-08-10), pela raiz: `toCents` deixou de existir.
-- **Relatório por agência não checa cancelamento.** Hoje não importa,
-  porque só dá pra cancelar vale pendente e pendente nunca tem corrida —
-  ou seja, é garantia por consequência, não por regra. Ofereci a guarda
-  de 2 linhas e o assunto não foi retomado. Se um dia liberarem cancelar
-  vale em rota, o dinheiro dele entra no acerto da agência **em
-  silêncio**, porque o total geral continuaria certo. Primeiro lugar a
-  olhar nesse caso: `acumularAgencia`/`acumularGrupo` em
-  `src/data/relatorios.ts`.
+- ~~**Relatório por agência não checa cancelamento**~~ — resolvido no item
+  21 (2026-08-11). A regra virou o predicado `entraNoDinheiro` em
+  `src/data/relatorios.ts`, usado pelos três acumuladores. Liberar
+  cancelar vale em rota deixou de ser uma mudança que quebra o acerto da
+  agência em silêncio.
 - **A aba "Fechamento" não calcula sobra nem falta** — não é bug, é
   limite: o sistema só conhece tele, e venda de balcão (a maior parte do
   caixa) vive no Trier. Está documentado no CLAUDE.md e escrito na

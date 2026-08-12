@@ -390,11 +390,17 @@ descrevia um caminho impossível. Implementado em 2026-08-10.
   quando maior que zero: é número que a gerência acompanha (cancelamento
   demais pode ser sinal de treinamento ou de cliente desistindo por demora),
   e no meio da lista "por status" ficava escondido.
-- **Cancelado nunca aparece em agência/motoboy** — como só cancela vale
-  pendente, ele nunca teve corrida. Isso vale por consequência, não por
-  regra explícita: se um dia liberarem cancelar vale em rota, o dinheiro
-  dele passa a entrar no acerto da agência sem ninguém notar, porque o
-  total geral continuaria certo.
+- **Cancelado não soma dinheiro em nível nenhum do relatório** — nem no
+  total geral, nem no acerto por agência, nem por motoboy. É uma regra só,
+  escrita num lugar só: o predicado `entraNoDinheiro` em
+  `src/data/relatorios.ts`, usado pelos três acumuladores. Ele **continua
+  contado** em todos eles (a soma dos status tem que fechar com o total de
+  vales, e no 3º nível o vale aparece marcado "Cancelada"), só não move
+  valor. Hoje isso não muda número nenhum, porque só dá pra cancelar vale
+  pendente e pendente nunca teve corrida — a guarda existe justamente pro
+  dia em que essa premissa cair: sem ela, liberar cancelar vale em rota
+  faria o dinheiro entrar no acerto da agência em silêncio, já que o total
+  geral continuaria certo e ninguém compara os dois níveis.
 
 ---
 
