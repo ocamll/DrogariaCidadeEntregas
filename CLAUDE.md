@@ -664,7 +664,17 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   decisão de custo — cada uma empurra o "⋮" de volta pra fora.
   - **Cliente e endereço moram na mesma célula**, empilhados. Separados
     custavam ~360px pra responder uma coisa só ("pra quem e onde"), e foi
-    isso que pagou a coluna "Registrado por" sem trazer a rolagem de volta.
+    isso que pagou a coluna "Usuário" sem trazer a rolagem de volta.
+  - **Cliente tem largura fixa (`w-56`), e é a única que tem.** Com a
+    tabela em `w-full`, a sobra é repartida proporcionalmente e quem mais
+    recebe é a coluna de maior conteúdo — Cliente. Como ela é também a
+    única alinhada à esquerda, essa sobra virava um vão morto à direita do
+    texto (chegou a 90px com um endereço longo) e afastava o nome do resto
+    da linha. Fixando a largura, o endereço longo quebra em duas linhas em
+    vez de esticar a coluna, e a sobra vai pras centralizadas, onde se
+    divide dos dois lados e não incomoda. **Não resolver isso com uma
+    coluna `w-full` no fim**: aquilo espreme as demais até o *mínimo* e um
+    endereço longo passa a quebrar em quatro linhas.
   - **Número do vale e o selo "Transferência" nunca quebram** — o selo fica
     ao lado do número, não embaixo.
   - **Data em cima, hora embaixo, sempre**, em duas linhas explícitas. Se a

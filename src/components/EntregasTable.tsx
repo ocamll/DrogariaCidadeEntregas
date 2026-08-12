@@ -86,7 +86,14 @@ export function EntregasTable({
             só um dos dois dá a mesma sensação de desalinho, invertida. */}
         <TableRow>
           <TableHead className={COLUNA_CENTRO}>Vale</TableHead>
-          <TableHead>Cliente</TableHead>
+          {/* Largura fixa aqui, e só aqui. Cliente é a única coluna
+              alinhada à esquerda, então a sobra da tabela se acumulava
+              toda de um lado só — o nome ficava colado na borda esquerda e
+              o resto da linha longe. Nas outras, que são centralizadas, a
+              folga se divide dos dois lados e não incomoda. Fixando esta,
+              a sobra vai pras demais em vez de inchar justamente a que
+              tem o texto mais comprido. */}
+          <TableHead className="w-56">Cliente</TableHead>
           <TableHead className={COLUNA_CENTRO}>Compra</TableHead>
           <TableHead className={COLUNA_CENTRO}>Entrega</TableHead>
           <TableHead className={COLUNA_CENTRO}>Pagamento</TableHead>
@@ -131,6 +138,9 @@ export function EntregasTable({
                   </Badge>
                 )}
               </TableCell>
+              {/* a largura vem do `w-56` no cabeçalho desta coluna — o
+                  endereço longo quebra em duas linhas em vez de esticar a
+                  coluna */}
               <TableCell className={COLUNA_TEXTO}>
                 <div className="font-medium">{entrega.clienteNome}</div>
                 <div className={TEXTO_SECUNDARIO}>{entrega.clienteEndereco}</div>
