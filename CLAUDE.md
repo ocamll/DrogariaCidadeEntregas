@@ -673,10 +673,18 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   - **Linha de apoio não usa `text-muted-foreground`** — aquele cinza
     (`oklch(0.556)`) é claro demais pra informação que o caixa lê de fato.
     O padrão é o texto principal a 70%.
-  - **Colunas centralizadas, cabeçalho junto.** O dado não começa na
-    primeira letra do título; título e conteúdo dividem o mesmo centro.
-    Centralizar só um dos dois dá a mesma sensação de desalinho, invertida
-    — e o status, que é uma pastilha estreita, era o que mais denunciava.
+  - **Colunas centralizadas, cabeçalho junto — menos Cliente.** Título e
+    conteúdo dividem o mesmo centro; centralizar só um dos dois dá a mesma
+    sensação de desalinho, invertida, e o status (pastilha estreita) era o
+    que mais denunciava. **Cliente é a exceção e fica à esquerda**: ali são
+    duas linhas de texto livre, e centralizar deixa nome e endereço com
+    recuo diferente um do outro em cada linha da tabela. Regra prática:
+    texto corrido lê melhor a partir de uma margem fixa; número, status e
+    data leem melhor centralizados.
+  - O centro vem de uma classe **por célula**, não de um `[&>td]:` na
+    linha: o seletor da linha tem especificidade maior que a classe da
+    célula, então a exceção do Cliente perderia justamente pra regra que
+    ela deveria contrariar.
   - **A linha inteira é `align-top`.** A `TableCell` do shadcn é
     `align-middle`, e como Cliente e Data ocupam duas linhas enquanto
     valor/status ocupam uma, os de uma linha ficavam centralizados — 9px

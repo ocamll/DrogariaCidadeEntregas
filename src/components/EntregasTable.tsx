@@ -51,6 +51,13 @@ const COLUNA_TEXTO = 'whitespace-normal break-words'
 // Continua mais leve que o texto principal, sem sumir.
 const TEXTO_SECUNDARIO = 'text-xs text-foreground/70'
 
+// Todas as colunas centralizam, menos **Cliente**: ali são duas linhas de
+// texto livre (nome em cima, endereço embaixo) e centralizar deixaria as
+// duas com recuo diferente uma da outra, irregular a cada linha da tabela.
+// Texto corrido lê melhor a partir de uma margem fixa; número, status e
+// data, que são curtos e de largura parecida, leem melhor centralizados.
+const COLUNA_CENTRO = 'text-center'
+
 // Cliente e endereço moram na MESMA coluna, empilhados. Eram duas colunas
 // e juntas custavam ~360px pra dizer uma coisa só ("pra quem e onde");
 // empilhar devolveu largura pro resto da tabela e é o que pagou a coluna
@@ -71,19 +78,23 @@ export function EntregasTable({
   return (
     <Table>
       <TableHeader>
-        {/* Cabeçalho centralizado junto com o corpo. Centralizar só um dos
-            dois deixaria o título à esquerda e o dado no meio, que é a
-            mesma sensação de desalinho, só invertida. A TableHead do
-            shadcn nasce `text-left`, daí o override. */}
-        <TableRow className="[&>th]:text-center">
-          <TableHead>Vale</TableHead>
+        {/* Centralizado coluna a coluna, e não por um seletor na linha:
+            Cliente é a exceção (fica à esquerda), e um `[&>th]:text-center`
+            na linha teria especificidade maior que um `text-left` na
+            célula — a exceção perderia justamente pra regra que ela
+            deveria contrariar. Título e conteúdo andam juntos: centralizar
+            só um dos dois dá a mesma sensação de desalinho, invertida. */}
+        <TableRow>
+          <TableHead className={COLUNA_CENTRO}>Vale</TableHead>
           <TableHead>Cliente</TableHead>
-          <TableHead>Compra</TableHead>
-          <TableHead>Entrega</TableHead>
-          <TableHead>Pagamento</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Usuário</TableHead>
-          <TableHead>{mostrarData ? 'Data' : 'Horário'}</TableHead>
+          <TableHead className={COLUNA_CENTRO}>Compra</TableHead>
+          <TableHead className={COLUNA_CENTRO}>Entrega</TableHead>
+          <TableHead className={COLUNA_CENTRO}>Pagamento</TableHead>
+          <TableHead className={COLUNA_CENTRO}>Status</TableHead>
+          <TableHead className={COLUNA_CENTRO}>Usuário</TableHead>
+          <TableHead className={COLUNA_CENTRO}>
+            {mostrarData ? 'Data' : 'Horário'}
+          </TableHead>
           <TableHead />
         </TableRow>
       </TableHeader>
@@ -110,9 +121,9 @@ export function EntregasTable({
                ficavam centralizados — uns 8px abaixo do nome do cliente.
                Cada coluna começava numa altura diferente e a linha inteira
                parecia torta. Alinhados pelo topo, todos partem do mesmo Y. */
-            <TableRow key={entrega.id} className="[&>td]:align-top [&>td]:text-center">
+            <TableRow key={entrega.id} className="[&>td]:align-top">
               {/* nunca quebra: o selo fica ao lado do número, não embaixo */}
-              <TableCell className="font-medium tabular-nums">
+              <TableCell className={`font-medium tabular-nums ${COLUNA_CENTRO}`}>
                 {entrega.numeroVale}
                 {transferencia && (
                   <Badge variant="secondary" className="ml-2 px-1.5 text-[10px]">
@@ -127,15 +138,17 @@ export function EntregasTable({
               {/* Transferência não tem venda (compra fica '—'), mas TEM valor
                   de entrega: quem leva o produto entre filiais é o motoboy da
                   agência, e ela cobra a tarifa por isso. */}
-              <TableCell className="tabular-nums">
+              <TableCell className={`tabular-nums ${COLUNA_CENTRO}`}>
                 {transferencia ? '—' : formatBRL(entrega.valorCompraCents)}
               </TableCell>
-              <TableCell className="tabular-nums">{formatBRL(entrega.valorEntregaCents)}</TableCell>
-              <TableCell className={COLUNA_TEXTO}>
+              <TableCell className={`tabular-nums ${COLUNA_CENTRO}`}>
+                {formatBRL(entrega.valorEntregaCents)}
+              </TableCell>
+              <TableCell className={`${COLUNA_TEXTO} ${COLUNA_CENTRO}`}>
                 {textoPagamento}
                 {divergiu && <span className="ml-1 text-xs text-muted-foreground">(divergiu)</span>}
               </TableCell>
-              <TableCell>
+              <TableCell className={COLUNA_CENTRO}>
                 <Badge
                   variant="secondary"
                   className={STATUS_CLASSE[entrega.statusEntrega] ?? ''}
@@ -143,12 +156,14 @@ export function EntregasTable({
                   {STATUS_LABEL[entrega.statusEntrega] ?? entrega.statusEntrega}
                 </Badge>
               </TableCell>
-              <TableCell className={COLUNA_TEXTO}>{entrega.criadoPorNome ?? '—'}</TableCell>
+              <TableCell className={`${COLUNA_TEXTO} ${COLUNA_CENTRO}`}>
+                {entrega.criadoPorNome ?? '—'}
+              </TableCell>
               {/* Data em cima, hora embaixo, sempre — duas linhas explícitas
                   em vez de deixar a célula quebrar sozinha, que era o que
                   fazia um vale mostrar "10/08/26, 23:22" numa linha e o
                   vizinho em duas, dependendo da largura sobrando. */}
-              <TableCell className="tabular-nums">
+              <TableCell className={`tabular-nums ${COLUNA_CENTRO}`}>
                 {mostrarData ? (
                   <div className="flex flex-col leading-tight">
                     <span>{dia}</span>
@@ -158,7 +173,7 @@ export function EntregasTable({
                   hora
                 )}
               </TableCell>
-              <TableCell>
+              <TableCell className={COLUNA_CENTRO}>
                 <EntregaAcoesMenu
                   entregaId={entrega.id}
                   numeroVale={entrega.numeroVale}
