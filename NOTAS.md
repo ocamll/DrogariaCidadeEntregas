@@ -733,6 +733,80 @@ teria dado. E o HMR do OneDrive apareceu de novo no meio: a aba voltou
 sozinha de Relatórios pro Histórico entre um comando e outro, porque a
 navegação é `useState<View>` e o remount perde o estado. Não é bug do app.
 
+## 22. Transferência tem valor, e a lista parou de rolar pra o lado
+
+Dois pedidos do usuário depois de conferir a operação na farmácia.
+
+**A transferência vale R$ 9,00.** O sistema tratava vale de transferência
+como "sem valor nenhum" desde que foi criado — `quantidade_vales = 0`,
+`valor_entrega_cents` no default 0. A informação que faltava é simples:
+quem leva o produto de uma filial pra outra é o motoboy da agência, e ela
+cobra a corrida como qualquer outra. **É o espelho exato do bug do item
+16**: lá o relatório inflava o acerto (somava o vale que o cliente paga em
+mãos), aqui ele encolhia (não somava a transferência) — a mesma coluna,
+errada nas duas direções, por dois motivos diferentes.
+
+- Sempre **1 vale**, e isso não é preguiça: a variação de 2 vales é
+  endereço distante do *cliente*, e transferência é entre filiais nossas.
+- `entrega_paga_cliente_cents` fica 0 — não há cliente pra pagar em mãos,
+  então a farmácia deve o valor inteiro à agência.
+- Venda continua zero (`valor_compra_cents`, nenhum `pagamentos`).
+  Transferência não é compra; o que mudou é entrega, não venda.
+- A tarifa é lida da loja de origem no **cadastro** e vai no payload da
+  fila offline, não é buscada no sync — se ela mudar enquanto o vale
+  espera, o certo é gravar a de quando o vale foi criado. Mesmo princípio
+  das duas colunas guardadas em vez de derivadas do item 16.
+- A tela ganhou uma linha só de leitura ("Valor da entrega · 1 vale —
+  R$ 9,00"). Não é campo: o caixa não digita valor de entrega em lugar
+  nenhum do sistema. Custa zero tecla e mostra o que vai ser registrado.
+- Se a tarifa ainda não carregou, salvar é **barrado**. Sem isso o vale
+  iria pro banco valendo zero e ninguém notaria — a transferência sumiria
+  do acerto em silêncio, que é o bug que esta sessão veio corrigir.
+- `EntregasTable` mostrava `—` na coluna Entrega pra transferência. Agora
+  mostra o valor; Compra continua `—`.
+
+Testado ponta a ponta: V-000024 criado pela tela, gravado com
+`valor_entrega_cents = 900`, `quantidade_vales = 1`,
+`entrega_paga_cliente_cents = 0` e compra 0 (conferido direto no banco,
+não só pela tela); fila offline esvaziou sozinha; lista mostrando
+"— | R$ 9,00"; relatório do dia somando R$ 9,00 em "Valor de entrega" e
+em "Farmácia deve à agência".
+
+**Sem backfill.** V-000003, V-000004, V-000008 e V-000020 continuam
+valendo 0 — são de antes da regra, e reescrevê-los inventaria passado. Se
+a decisão for outra, é `update` manual, mas convém junto da limpeza dos
+dados de teste, que já é pendência.
+
+**A lista não rola mais na horizontal.** O pedido foi literal: do número
+do vale ao "⋮", tudo visível sem arrastar. A `Table` do shadcn põe
+`whitespace-nowrap` em toda célula, então a tabela crescia até o texto
+mais longo (endereço) e empurrava as últimas colunas pra fora do container
+`overflow-x-auto` — o "⋮", justamente, era o que sumia.
+
+A correção é deixar as colunas de texto livre quebrarem linha
+(`COLUNA_TEXTO`): como a `<table>` é `w-full`, o layout automático encolhe
+essas e mantém valor/status/ações inteiros. **Quebrar, não truncar** —
+endereço em duas linhas é melhor que endereço cortado com reticências. A
+coluna "Data" do histórico ("10/08/26, 23:22") entrou junto: era a maior
+célula fixa depois do endereço, e quebrando em data/hora liberou 39px.
+
+Medido, não estimado — a largura mínima que a tabela exige:
+
+| | largura mínima da tabela | viewport mínima |
+|---|---|---|
+| antes | 1123px | ~1202px |
+| depois | 779px | ~858px |
+
+A viewport onde eu estava testando tinha 1142px, ou seja, **caía bem no
+meio** — é por isso que o usuário via a rolagem. O teste que vale é esse
+par: reapliquei `white-space: nowrap` por CSS injetado pra medir o "antes"
+na mesma tela, em vez de confiar que a mudança tinha feito efeito. Sem
+isso eu teria lido "sobra: 0" e concluído certo por sorte.
+
+Confirmado com `sobra = 0` e todos os "⋮" dentro da borda do container em
+1142px e em 1024px. Abaixo de ~858px ainda rola — o `overflow-x-auto`
+continua ali de propósito, como rede, então nada fica inalcançável.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -771,6 +845,8 @@ existia só nesta máquina.
 Sessão de 2026-08-11:
 
 25. guarda do cancelamento nos três acumuladores do relatório (item 21)
+26. transferência com valor de entrega + lista sem rolagem horizontal
+    (item 22)
 
 ## Migrations aplicadas nesta sessão
 
@@ -965,6 +1041,10 @@ no banco:
   como "1.234".
 - `V-000020` (Transferência Matriz → Filial 02) — teste de regressão do
   fluxo de transferência depois da máscara (item 12).
+- `V-000024` (Transferência Matriz → Filial 02) — teste do item 22, o
+  **primeiro vale de transferência com valor** (900, 1 vale). Os outros
+  quatro continuam em 0 de propósito, sem backfill: se algum dia alguém
+  conferir por que as transferências antigas não somam no acerto, é isso.
 - Uma corrida com o relógio 40 min atrasado de propósito (item 13) e um
   vale criado pelo console pra disparar Realtime.
 

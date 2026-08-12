@@ -123,8 +123,9 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
 - [x] Vale de transferência entre filiais — mesmo vale/sequência da entrega de
       cliente (mesma tabela `entregas`, coluna `tipo`: `'cliente'` ou
       `'transferencia'`), mesmo ciclo de status/corrida/assinatura na retirada,
-      mas sem cliente real e sem valor (`valor_compra_cents` default 0, nenhum
-      `pagamentos` criado). Único campo digitado: filial de destino (select);
+      mas sem cliente real e sem venda (`valor_compra_cents` default 0, nenhum
+      `pagamentos` criado). **Tem valor de entrega**, sim — ver "Tarifa de
+      entrega e vales". Único campo digitado: filial de destino (select);
       origem é a loja de quem tá logado, resto é automático igual ao vale normal.
 - [x] Captura de assinatura no tablet → status `em_rota` — fluxo único (não
       duas telas): escolhe agência de tele → motoboy (filtrado pela agência
@@ -439,6 +440,23 @@ derivação, e desmarcar o convênio depois reescreveria o passado).
 
 Nunca comparar nome de convênio com `'Minerva'` no código — a regra é a flag.
 
+**Transferência entre filiais paga a mesma tarifa, sempre 1 vale.**
+Confirmado na farmácia em 2026-08-11: quem leva o produto de uma filial
+pra outra é o motoboy da agência, e ela cobra por essa corrida como por
+qualquer outra. Então o vale de transferência nasce com
+`valor_entrega_cents` = tarifa da filial de **origem** e
+`quantidade_vales = 1` — a variação de 2 vales é endereço distante do
+*cliente*, que não existe aqui. `entrega_paga_cliente_cents` fica 0: não
+há cliente pra pagar em mãos, a farmácia deve o valor inteiro. O que
+continua zero é a **venda** (`valor_compra_cents`, nenhum `pagamentos`) —
+transferência não é compra. Antes disso a transferência entrava no
+relatório valendo nada, e o acerto com a agência vinha **menor** que o
+real, o espelho do bug do endereço distante.
+
+A tarifa é capturada no cadastro e vai no payload da fila offline, não
+lida na hora do sync: se ela mudar enquanto o vale espera pra
+sincronizar, o certo é gravar a de quando o vale foi criado.
+
 ---
 
 ## Gestão de usuários — a única parte com backend
@@ -580,6 +598,15 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   cartão: `1` `2` `3` `4` `5` → `0,01` → `0,12` → `1,23` → `12,34` → `123,45`. Ele
   nunca digita `,` nem `.`, então não existe como confundir os dois. O estado do
   componente pai guarda a string de dígitos crua, não o texto formatado.
+- **A lista de vales não rola pra o lado.** Do número do vale ao "⋮" tem que
+  caber na largura da tela — o caixa está com fila no balcão e não vai
+  arrastar tabela pro lado pra achar o menu de ações. A `Table` do shadcn põe
+  `whitespace-nowrap` em toda célula, então coluna de texto livre (cliente,
+  endereço, forma de pagamento, data) leva `COLUNA_TEXTO` em
+  `EntregasTable.tsx` pra poder quebrar linha; valor, status e o "⋮" ficam
+  inteiros. Quebrar, não truncar: endereço em duas linhas é melhor que
+  endereço cortado. Coluna nova ali é decisão de custo — cada uma empurra o
+  "⋮" de volta pra fora.
 - **Sem router.** Não está na stack. Navegação é troca de estado local (`useState<View>`)
   dentro de `Painel.tsx`, com `onVoltar` como prop pra cada tela voltar pra lista. Isso
   aguenta bem o tanto de telas que o MVP tem hoje — se crescer muito mais, reconsiderar

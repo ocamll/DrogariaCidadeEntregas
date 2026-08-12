@@ -85,11 +85,23 @@ export type NovaTransferencia = {
   lojaDestinoNome: string
   criadoPor: string
   ocorridoEmLocal: string
+  // tarifa da filial de origem — a corrida existe e a agência cobra por
+  // ela igual a qualquer outra. Capturado aqui, no momento do cadastro,
+  // e não lido no sync: se a tarifa mudar enquanto o vale espera na fila
+  // offline, o certo é gravar o valor de quando o vale foi criado.
+  valorEntregaCents: number
 }
 
-// Mesmo vale/sequência da entrega de cliente, só que sem cliente nem
-// valor — ver migration transferencia_entre_filiais. Não cria pagamento
-// nenhum (não é venda).
+// Mesmo vale/sequência da entrega de cliente, só que sem cliente e sem
+// valor de VENDA — ver migration transferencia_entre_filiais. Não cria
+// pagamento nenhum (não é venda), mas tem valor de ENTREGA: quem leva o
+// produto de uma filial pra outra é um motoboy da agência, e ela cobra a
+// tarifa normal por isso.
+//
+// Sempre 1 vale: a variação de 2 vales é endereço distante do cliente, e
+// transferência é entre filiais nossas. `entrega_paga_cliente_cents` fica
+// no default 0 — não há cliente pra pagar em mãos, então a farmácia deve
+// o valor inteiro à agência.
 //
 // upsert (não insert): mesmo motivo do criarEntrega — a fila offline pode
 // reenviar pelo mesmo id depois de uma falha parcial, e isso precisa virar
@@ -106,8 +118,8 @@ export async function criarTransferencia(input: NovaTransferencia): Promise<{ nu
       criado_por: input.criadoPor,
       cliente_nome: input.lojaDestinoNome,
       cliente_endereco: `${input.lojaOrigemNome} para ${input.lojaDestinoNome}`,
-      // transferência não tem vale de tele nem valor de entrega
-      quantidade_vales: 0,
+      valor_entrega_cents: input.valorEntregaCents,
+      quantidade_vales: 1,
       ocorrido_em_local: input.ocorridoEmLocal,
     })
     .select('numero_vale')

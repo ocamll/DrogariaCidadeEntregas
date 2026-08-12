@@ -2,7 +2,8 @@ import { useRef, useState, type KeyboardEvent } from 'react'
 import type { AuthProfile } from '@/data/auth'
 import type { NovaTransferencia } from '@/data/entregas'
 import { enfileirarOperacao } from '@/data/filaOffline'
-import { useLojas } from '@/data/lojas'
+import { useLojas, useTarifaDaLoja } from '@/data/lojas'
+import { formatBRL } from '@/lib/money'
 import { uuidv7 } from '@/lib/uuid'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -44,6 +45,9 @@ function CadastroTransferenciaForm({
 }) {
   const { data: lojas, isLoading, isError } = useLojas()
   const destinos = (lojas ?? []).filter((loja) => loja.id !== lojaId)
+  // mesma tarifa fixa da entrega de cliente: a transferência também é uma
+  // corrida que a agência faz e cobra. Sempre 1 vale.
+  const tarifaCents = useTarifaDaLoja(lojaId)
 
   const [id, setId] = useState(() => uuidv7())
   const [lojaDestinoId, setLojaDestinoId] = useState('')
@@ -65,6 +69,13 @@ function CadastroTransferenciaForm({
       setErroValidacao('Escolhe a filial de destino.')
       return
     }
+    // Sem a tarifa carregada o vale iria pro banco valendo zero e ninguém
+    // notaria — a transferência some do acerto com a agência em silêncio.
+    // Melhor barrar e pedir pra tentar de novo.
+    if (tarifaCents === null) {
+      setErroValidacao('Ainda não carreguei a tarifa da sua filial. Tenta de novo em um instante.')
+      return
+    }
     setErroValidacao(null)
 
     const payload: NovaTransferencia = {
@@ -76,6 +87,7 @@ function CadastroTransferenciaForm({
       lojaDestinoNome: destino.nome,
       criadoPor: profile.id,
       ocorridoEmLocal: new Date().toISOString(),
+      valorEntregaCents: tarifaCents,
     }
 
     // grava local e libera a tela na hora (mesmo padrão do cadastro de
@@ -135,6 +147,17 @@ function CadastroTransferenciaForm({
                   ))}
                 </select>
               )}
+            </div>
+
+            {/* Não é campo: o caixa não digita nem escolhe valor de
+                entrega em lugar nenhum do sistema (tarifa fixa por
+                filial). Está na tela só pra ele ver o que vai ser
+                registrado, sem custar tecla nenhuma. */}
+            <div className="flex items-baseline justify-between rounded-lg border bg-muted/40 px-3 py-2">
+              <span className="text-sm text-muted-foreground">Valor da entrega · 1 vale</span>
+              <span className="text-sm font-medium">
+                {tarifaCents === null ? '—' : formatBRL(tarifaCents)}
+              </span>
             </div>
 
             {erroValidacao && <p className="text-sm text-destructive">{erroValidacao}</p>}
