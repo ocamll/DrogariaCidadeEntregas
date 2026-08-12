@@ -124,7 +124,15 @@ async function buscarNotificacoesHoje(): Promise<Notificacao[]> {
 }
 
 export function useNotificacoesHoje() {
-  return useQuery({ queryKey: ['notificacoes-hoje'], queryFn: buscarNotificacoesHoje })
+  // Esta não dá pra adiar como a de auditoria: o contador do botão precisa
+  // do número antes de alguém abrir o dialog. O que dá é não refazer a
+  // query a cada remontagem — a fila offline invalida a chave quando uma
+  // ocorrência nova é gravada, então 1 minuto de frescor não atrasa aviso.
+  return useQuery({
+    queryKey: ['notificacoes-hoje'],
+    queryFn: buscarNotificacoesHoje,
+    staleTime: 60_000,
+  })
 }
 
 // Sem filtro de data — registro permanente do "porquê" de cada ocorrência,

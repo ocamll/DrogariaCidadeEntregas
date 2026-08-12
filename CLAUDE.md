@@ -323,6 +323,49 @@ manual**, porque filial é rara e não vale a complexidade extra só por ela.)
 
 ---
 
+## Quem vê o quê — papel e filial
+
+Confirmado com o usuário em 2026-08-12. São **duas perguntas diferentes**,
+e confundi-las foi o bug original:
+
+| papel | enxerga | Cadastros |
+|---|---|---|
+| caixa | só a própria filial | não |
+| gerente | só a própria filial | **não** |
+| admin | todas as filiais | sim |
+
+- **`is_admin()` governa escopo de filial. `is_gerente()` governa
+  capacidade de gestão.** Até 2026-08-12 quem liberava ver outra loja era
+  `is_gerente()` — que apesar do nome quer dizer "gerente OU admin" —, e
+  por isso gerente e admin enxergavam exatamente a mesma coisa. Hoje
+  `is_gerente()` sobrevive com um uso só: a trigger
+  `fn_entrega_protege_conferencia`, porque *poder conferir* não é
+  *enxergar outra filial*. O gerente confere, e alcança só a filial dele
+  porque o UPDATE cai na policy de `entregas`.
+- **`eventos` é o único que não sai de uma troca de função** — a tabela não
+  tem `loja_id`, só `entrega_id`/`corrida_id` (nullable). O escopo do
+  gerente passa pela entrega/corrida dona, via `pode_ver_entrega`/
+  `pode_ver_corrida`. Caixa continua vendo só os próprios eventos, e o
+  `user_id = auth.uid()` vem antes do resto porque é ele que sustenta o
+  `select`-antes-de-inserir da idempotência.
+- **Numa policy `for all`, `using` governa SELECT/UPDATE/DELETE e
+  `with check` governa INSERT** (e a linha nova do UPDATE). Restringir só
+  o `using` fecha a edição e **deixa a criação aberta** — foi exatamente
+  o que aconteceu na primeira versão desta mudança, herdado da forma da
+  policy original. Por isso `is_admin()` aparece nos dois lados em
+  Cadastros, e por isso o `with check` de `entregas_update`/
+  `corridas_update` repete a regra do `using`: sem isso dá pra pegar um
+  vale da própria loja e gravar `loja_id` de outra filial.
+- **A leitura de agências, mototaxistas e convênios continua ampla no
+  tenant.** Só a escrita é do admin. Fechar a leitura quebraria "Nova
+  corrida" e o select de convênio no balcão sem proteger nada: o dado
+  sensível (vale, pagamento, assinatura) já está preso por filial.
+- **`profiles` continua legível no tenant inteiro** — é o que resolve
+  "quem realizou" no Registro de Auditoria e "Registrado por" na lista de
+  vales. São nome, papel e filial, não dado operacional.
+
+---
+
 ## Fechamento de caixa e o eixo financeiro
 
 `status_financeiro` existiu morto desde o schema inicial — nada no app
@@ -358,9 +401,19 @@ O sistema só conhece tele-entrega; venda de balcão é a maior parte do
 caixa e vive no Trier. Somar os vales e chamar de "esperado na gaveta"
 daria número errado. O que a tela faz é responder *o que, do lado da
 tele, explica uma diferença* — que era o que dependia da memória do caixa
-na hora de justificar ao financeiro. São quatro coisas, todas já no
-banco: divergência de pagamento, vale extra pago em mãos ao motoboy (o
-que mais parece falta sem ser), vale cancelado e insucesso.
+na hora de justificar ao financeiro. A seção chama-se **"Ocorrências"** e
+hoje mostra três causas: divergência de pagamento, vale cancelado (com
+**quem cancelou e por quê** — gestão precisa dos dois) e insucesso. O
+vale extra pago em mãos ao motoboy saiu a pedido do usuário em
+2026-08-12; o dado continua no banco e em `entrega_paga_cliente_cents`,
+só não tem mais superfície aqui.
+
+**Conferir é olhar vale a vale.** A aba lista os vales a conferir com
+número, cliente, valor e forma prevista, usando a mesma regra do botão
+(nem cancelado, nem divergente) pra que a lista mostre exatamente o que
+"Marcar dia como conferido" vai alcançar. Antes existia só a contagem e o
+botão — dava pra marcar o dia inteiro sem ter conferido nada, que é o
+oposto do que conferência significa.
 
 Se um dia entrar o total do Trier aqui, aí sim dá pra falar em sobra e
 falta. Sem esse dado, **não inventar o número.**
@@ -430,6 +483,9 @@ real é outra:
 | 2 vales + convênio integral | 1800 | 1800 | 0 |
 
 **O que a farmácia deve = `valor_entrega_cents - entrega_paga_cliente_cents`.**
+Na tela isso se chama **"A pagar à agência"** (ou só "A pagar" nas colunas
+do relatório) — "Farmácia deve" foi trocado a pedido do usuário em
+2026-08-12. O campo em código continua `valorFarmaciaDeveCents`.
 Antes disso o relatório somava o total como se ela devesse tudo — o acerto com
 a agência vinha inflado em toda entrega distante.
 
@@ -601,12 +657,22 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
 - **A lista de vales não rola pra o lado.** Do número do vale ao "⋮" tem que
   caber na largura da tela — o caixa está com fila no balcão e não vai
   arrastar tabela pro lado pra achar o menu de ações. A `Table` do shadcn põe
-  `whitespace-nowrap` em toda célula, então coluna de texto livre (cliente,
-  endereço, forma de pagamento, data) leva `COLUNA_TEXTO` em
-  `EntregasTable.tsx` pra poder quebrar linha; valor, status e o "⋮" ficam
-  inteiros. Quebrar, não truncar: endereço em duas linhas é melhor que
-  endereço cortado. Coluna nova ali é decisão de custo — cada uma empurra o
-  "⋮" de volta pra fora.
+  `whitespace-nowrap` em toda célula, então coluna de texto livre (cliente
+  com endereço, forma de pagamento, quem registrou) leva `COLUNA_TEXTO` em
+  `EntregasTable.tsx` pra poder quebrar linha. Quebrar, não truncar:
+  endereço em duas linhas é melhor que endereço cortado. Coluna nova ali é
+  decisão de custo — cada uma empurra o "⋮" de volta pra fora.
+  - **Cliente e endereço moram na mesma célula**, empilhados. Separados
+    custavam ~360px pra responder uma coisa só ("pra quem e onde"), e foi
+    isso que pagou a coluna "Registrado por" sem trazer a rolagem de volta.
+  - **Número do vale e o selo "Transferência" nunca quebram** — o selo fica
+    ao lado do número, não embaixo.
+  - **Data em cima, hora embaixo, sempre**, em duas linhas explícitas. Se a
+    célula quebrar sozinha, o resultado depende da largura sobrando e um
+    vale aparece diferente do vizinho.
+  - **Linha de apoio não usa `text-muted-foreground`** — aquele cinza
+    (`oklch(0.556)`) é claro demais pra informação que o caixa lê de fato.
+    O padrão é o texto principal a 70%.
 - **Sem router.** Não está na stack. Navegação é troca de estado local (`useState<View>`)
   dentro de `Painel.tsx`, com `onVoltar` como prop pra cada tela voltar pra lista. Isso
   aguenta bem o tanto de telas que o MVP tem hoje — se crescer muito mais, reconsiderar

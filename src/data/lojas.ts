@@ -37,6 +37,11 @@ export function useLojas() {
   return useQuery({
     queryKey: ['lojas'],
     queryFn: buscarLojas,
+    // Filial não muda durante o expediente (criar loja nem existe na UI),
+    // e vários componentes chamam este hook — cadastro de transferência,
+    // fechamento, histórico, auditoria. Sem staleTime, cada um deles
+    // disparava um refetch ao montar.
+    staleTime: 5 * 60_000,
   })
 }
 

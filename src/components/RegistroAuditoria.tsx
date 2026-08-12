@@ -1,5 +1,6 @@
 import { useState } from 'react'
 import { useEventosAuditoria, TIPO_EVENTO_LABEL } from '@/data/auditoria'
+import type { AuthProfile } from '@/data/auth'
 import { useLojas } from '@/data/lojas'
 import type { FiltroPeriodo } from '@/data/relatorios'
 import { Button } from '@/components/ui/button'
@@ -25,13 +26,18 @@ function localDateStr(d: Date): string {
   return `${yyyy}-${mm}-${dd}`
 }
 
-export function RegistroAuditoria() {
+export function RegistroAuditoria({ profile }: { profile: AuthProfile }) {
+  const soAdmin = profile.papel === 'admin'
   const hoje = localDateStr(new Date())
   const [form, setForm] = useState<FiltroPeriodo>({ dataInicio: hoje, dataFim: hoje })
   const [filtro, setFiltro] = useState<FiltroPeriodo>({ dataInicio: hoje, dataFim: hoje })
   const [lojaId, setLojaId] = useState('') // '' = todas as filiais
+  // O componente fica sempre montado (é ele que desenha o botão do
+  // cabeçalho), então sem esta flag a query pesada rodava em toda carga de
+  // página pra quem nunca abre o registro.
+  const [aberto, setAberto] = useState(false)
 
-  const { data, isLoading, isError, error } = useEventosAuditoria(filtro)
+  const { data, isLoading, isError, error } = useEventosAuditoria(filtro, aberto)
   const { data: lojas } = useLojas()
 
   const eventos = (data ?? []).filter((e) => !lojaId || e.lojaId === lojaId)
@@ -53,7 +59,7 @@ export function RegistroAuditoria() {
   }
 
   return (
-    <Dialog>
+    <Dialog open={aberto} onOpenChange={setAberto}>
       <DialogTrigger asChild>
         <Button
           variant="outline"
@@ -97,22 +103,27 @@ export function RegistroAuditoria() {
           <Button variant="outline" onClick={aplicarEsteMes}>
             Este mês
           </Button>
-          <div className="flex flex-col gap-1">
-            <Label htmlFor="aud-filial">Filial</Label>
-            <select
-              id="aud-filial"
-              className={SELECT_CLASSNAME}
-              value={lojaId}
-              onChange={(e) => setLojaId(e.target.value)}
-            >
-              <option value="">Todas as filiais</option>
-              {lojas?.map((loja) => (
-                <option key={loja.id} value={loja.id}>
-                  {loja.nome}
-                </option>
-              ))}
-            </select>
-          </div>
+          {/* Só admin: pro gerente a RLS já devolve apenas os eventos da
+              filial dele, então o select listaria as 17 lojas pra filtrar
+              um conjunto que só tem uma. */}
+          {soAdmin && (
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="aud-filial">Filial</Label>
+              <select
+                id="aud-filial"
+                className={SELECT_CLASSNAME}
+                value={lojaId}
+                onChange={(e) => setLojaId(e.target.value)}
+              >
+                <option value="">Todas as filiais</option>
+                {lojas?.map((loja) => (
+                  <option key={loja.id} value={loja.id}>
+                    {loja.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+          )}
         </div>
 
         {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}

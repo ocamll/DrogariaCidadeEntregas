@@ -12,6 +12,14 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '@/components/ui/table'
 
 const SELECT_CLASSNAME =
   'h-9 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -60,22 +68,34 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
             onChange={(e) => setData(e.target.value)}
           />
         </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="fech-loja">Filial</Label>
-          <select
-            id="fech-loja"
-            className={SELECT_CLASSNAME}
-            value={lojaId}
-            onChange={(e) => setLojaId(e.target.value)}
-          >
-            <option value="">Todas as filiais</option>
-            {lojas?.map((loja) => (
-              <option key={loja.id} value={loja.id}>
-                {loja.nome}
-              </option>
-            ))}
-          </select>
-        </div>
+        {/* Só o admin escolhe filial. Pro gerente o campo virava uma
+            promessa falsa: desde 2026-08-12 a RLS não devolve vale de
+            outra loja, então "Todas as filiais" traria só a dele e
+            escolher outra traria vazio — parecendo dia sem movimento em
+            vez de acesso negado. */}
+        {profile.papel === 'admin' ? (
+          <div className="flex flex-col gap-1">
+            <Label htmlFor="fech-loja">Filial</Label>
+            <select
+              id="fech-loja"
+              className={SELECT_CLASSNAME}
+              value={lojaId}
+              onChange={(e) => setLojaId(e.target.value)}
+            >
+              <option value="">Todas as filiais</option>
+              {lojas?.map((loja) => (
+                <option key={loja.id} value={loja.id}>
+                  {loja.nome}
+                </option>
+              ))}
+            </select>
+          </div>
+        ) : (
+          <div className="flex flex-col gap-1">
+            <Label>Filial</Label>
+            <p className="py-1 text-sm">{profile.lojaNome ?? '—'}</p>
+          </div>
+        )}
         <Button variant="outline" onClick={() => setData(hoje)}>
           Hoje
         </Button>
@@ -102,12 +122,7 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
             <Tile label="Vales de cliente" valor={String(fechamento.totalVales)} />
             <Tile label="Valor de compra" valor={formatBRL(fechamento.valorCompraCents)} />
-            <Tile label="Farmácia deve à agência" valor={formatBRL(fechamento.valorFarmaciaDeveCents)} />
-            <Tile
-              label="Pago em mãos ao motoboy"
-              valor={formatBRL(fechamento.pagoEmMaosCents)}
-              alerta={fechamento.pagoEmMaosCents > 0}
-            />
+            <Tile label="A pagar à agência" valor={formatBRL(fechamento.valorFarmaciaDeveCents)} />
           </div>
 
           <Card>
@@ -126,6 +141,40 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
                   Divergentes: <strong>{fechamento.divergentes}</strong>
                 </span>
               </div>
+
+              {/* A lista existe porque conferir é olhar vale a vale. Sem ela
+                  a tela mostrava só a contagem e um botão — dava pra marcar
+                  o dia inteiro sem ter conferido nada. */}
+              {fechamento.aConferir.length > 0 && (
+                <div className="rounded-lg border">
+                  <Table>
+                    <TableHeader>
+                      <TableRow>
+                        <TableHead>Vale</TableHead>
+                        <TableHead>Cliente</TableHead>
+                        <TableHead>Compra</TableHead>
+                        <TableHead>Forma prevista</TableHead>
+                      </TableRow>
+                    </TableHeader>
+                    <TableBody>
+                      {fechamento.aConferir.map((vale) => (
+                        <TableRow key={vale.id}>
+                          <TableCell className="tabular-nums">{vale.numeroVale}</TableCell>
+                          <TableCell className="whitespace-normal break-words">
+                            {vale.clienteNome}
+                          </TableCell>
+                          <TableCell className="tabular-nums">
+                            {formatBRL(vale.valorCompraCents)}
+                          </TableCell>
+                          <TableCell>
+                            {vale.formaPrevista ? FORMA_PAGAMENTO_LABEL[vale.formaPrevista] : '—'}
+                          </TableCell>
+                        </TableRow>
+                      ))}
+                    </TableBody>
+                  </Table>
+                </div>
+              )}
 
               <p className="text-xs text-muted-foreground">
                 Marcar o dia conferido mexe só nos que estão "a conferir". O divergente continua
@@ -146,7 +195,7 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
 
           <Card>
             <CardHeader>
-              <CardTitle>O que explica diferença no caixa</CardTitle>
+              <CardTitle>Ocorrências</CardTitle>
             </CardHeader>
             <CardContent className="flex flex-col gap-5">
               <Bloco
@@ -167,26 +216,18 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
                 )}
               />
               <Bloco
-                titulo="Vale extra pago em mãos ao motoboy"
-                vazio="Nenhuma entrega distante nesse dia."
-                vales={fechamento.pagosEmMaos}
-                render={(v) => (
-                  <>
-                    <strong>{formatBRL(v.entregaPagaClienteCents)}</strong> que o cliente pagou direto
-                    ao motoboy — esse dinheiro nunca entrou na gaveta.
-                  </>
-                )}
-              />
-              <Bloco
                 titulo="Vales cancelados"
                 vazio="Nenhum cancelamento nesse dia."
                 vales={fechamento.cancelados}
                 render={(v) => (
                   <>
                     Compra de <strong>{formatBRL(v.valorCompraCents)}</strong> que não aconteceu
-                    {v.motivoCancelamento && (
-                      <em className="block text-muted-foreground">"{v.motivoCancelamento}"</em>
-                    )}
+                    {/* gestão precisa dos dois: o motivo diz o quê, o autor
+                        diz com quem falar sobre ele */}
+                    <span className="block text-foreground/70">
+                      Cancelado por <strong>{v.canceladoPorNome ?? '—'}</strong>
+                      {v.motivoCancelamento && <> — "{v.motivoCancelamento}"</>}
+                    </span>
                   </>
                 )}
               />

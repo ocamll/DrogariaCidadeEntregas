@@ -169,9 +169,19 @@ async function buscarEventosAuditoria(filtro: FiltroPeriodo): Promise<EventoAudi
   return (data as unknown as EventoAuditoriaRow[]).map(mapEvento)
 }
 
-export function useEventosAuditoria(filtro: FiltroPeriodo) {
+// `habilitado` existe porque este componente fica SEMPRE montado — ele é
+// quem desenha o botão do cabeçalho. Sem isso, a query mais cara do app
+// (eventos + join de entregas, lojas e profiles) rodava a cada carga de
+// página pra todo admin/gerente, mesmo que ninguém abrisse o dialog.
+//
+// `staleTime` de 1 minuto pra abrir e fechar o dialog em seguida não
+// disparar refetch: log de auditoria não muda de segundo em segundo, e a
+// fila offline invalida a chave quando algo de fato acontece.
+export function useEventosAuditoria(filtro: FiltroPeriodo, habilitado = true) {
   return useQuery({
     queryKey: ['eventos-auditoria', filtro],
     queryFn: () => buscarEventosAuditoria(filtro),
+    enabled: habilitado,
+    staleTime: 60_000,
   })
 }

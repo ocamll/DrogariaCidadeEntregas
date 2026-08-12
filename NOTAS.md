@@ -807,6 +807,157 @@ Confirmado com `sobra = 0` e todos os "⋮" dentro da borda do container em
 1142px e em 1024px. Abaixo de ~858px ainda rola — o `overflow-x-auto`
 continua ali de propósito, como rede, então nada fica inalcançável.
 
+## 23. Gerente deixa de ver as outras filiais
+
+Pergunta do usuário: "gestor e caixa só visualizam a própria filial, admin
+todas — isso já acontece?" Fui conferir nas policies em vez de responder
+de memória. **Metade.** Caixa sim; gerente não.
+
+A causa era uma função com nome enganoso: `is_gerente()` quer dizer
+"gerente OU admin", e era ela que liberava o cross-filial em toda policy
+de visibilidade. Gerente e admin enxergavam exatamente a mesma coisa — e
+não era teórico: a aba "Hoje" não tem filtro de filial, sai direto da RLS,
+então um gerente da Filial 02 via o movimento da Matriz na tela principal.
+
+Duas migrations. A troca é `is_gerente()` → `is_admin()` na cláusula de
+escopo, e **`is_gerente()` não some**: continua significando "capacidade
+de gestão", com um uso só (a trigger da conferência). Poder conferir não é
+enxergar outra filial.
+
+- `pagamentos` e `assinaturas` vieram de graça: elas não têm `loja_id`, o
+  escopo vem dos helpers `pode_ver_entrega`/`pode_ver_corrida`, então
+  trocar as duas funções cobriu as quatro policies delas.
+- `eventos` foi o único que exigiu desenho próprio (sem `loja_id`, só
+  `entrega_id`/`corrida_id`, ambos nullable) — os três papéis ficaram
+  explícitos na policy.
+- **Fechei escrita junto com leitura.** Enxergar nada e ainda poder
+  gravar em outra filial seria pior que o bug original.
+
+**O buraco que eu mesmo abri, e como quase passou.** Testei a escrita em
+Cadastros com um UPDATE e li "sem erro" como "a policy falhou" — quando no
+PostgREST **RLS bloqueando devolve zero linhas sem erro**, a mesma
+armadilha já documentada no cancelamento (item 17). Só não virou conclusão
+errada porque fui conferir o nome da agência no banco antes de escrever
+qualquer coisa: estava intacto, ou seja, tinha sido bloqueado.
+
+Mas investigar isso revelou o problema de verdade: **numa policy `for all`,
+`using` governa SELECT/UPDATE/DELETE e `with check` governa INSERT.** Eu
+tinha escrito `with check (tenant_id = ...)` copiando a forma da policy
+original — então UPDATE e DELETE fechavam e **o INSERT continuava aberto**.
+O buraco é pré-existente do schema inicial, mas eu o reproduzi em vez de
+fechar. O mesmo padrão estava em `entregas_update`/`corridas_update`: o
+`using` prendia à filial e o `with check` não, ou seja, dava pra pegar um
+vale da própria loja e gravar `loja_id` de outra filial. Corrigi os dois
+arquivos e o usuário rodou de novo (as duas migrations são `drop policy` +
+`create policy`, reaplicar é seguro).
+
+Testado como gerente de verdade (`gerentepainel@`, Matriz) — com admin
+todo teste de restrição passa por engano:
+
+| | resultado |
+|---|---|
+| entregas visíveis | 24, **nenhuma** de outra filial; V-000017 (Filial 02) sumiu |
+| pagamentos / assinaturas / eventos | 24 / 9 / 73, todos escopados |
+| INSERT em Cadastros | bloqueado, `42501`, nada criado |
+| UPDATE em Cadastros | 0 linhas afetadas, nome intacto |
+| UPDATE legítimo na própria filial | OK, 1 linha |
+| mover vale pra outra filial | bloqueado, `42501`, `loja_id` intacta |
+
+Antes de aplicar, conferi que nenhum perfil ativo está sem `loja_id` — se
+houvesse, `current_loja_id()` voltaria nulo e a pessoa passaria a não ver
+**nada**.
+
+Na tela: aba Cadastros só pro admin; Fechamento/Ocorrências/Relatórios
+continuam pro gerente (a RLS é que limita o conteúdo); filtro de filial do
+Histórico e da Auditoria virou exclusivo do admin; e no Fechamento o
+gerente vê a filial dele em texto no lugar do select — deixar "Todas as
+filiais" ali seria promessa falsa, porque escolher outra traria vazio e
+pareceria dia sem movimento em vez de acesso negado.
+
+## 24. O layout dos vales
+
+O usuário abriu com "as proporções estão estranhas" e eu **não conseguia
+ver a tela** (o screenshot exige o painel do navegador visível). Diagnostiquei
+pelo DOM, e o número que explicou tudo: as linhas variavam de 45 a 58px,
+porque o selo "Transferência" quebrava pra baixo do número do vale e
+inflava a largura mínima daquela coluna — 188px, a mais larga da tabela,
+por causa de 4 linhas em 24.
+
+Duas vezes eu montei um detector errado no meio do caminho: medi
+`td.getBoundingClientRect().height` pra saber se a célula quebrava, mas a
+célula **estica junto com a linha**, então acusava quebra em "—" e
+"Pendente". A medida certa foi o rect do **nó de texto** (via `Range`)
+comparado com o do selo. Fica a regra: pra saber se conteúdo quebrou,
+medir o conteúdo, nunca a caixa que o contém.
+
+O que ficou:
+
+- Selo ao lado do número, nunca embaixo (célula `nowrap`), e menor (77px),
+  pra parar de inflar a coluna inteira.
+- **Data em cima, hora embaixo, sempre** — duas linhas explícitas. Antes eu
+  deixava a célula quebrar sozinha, então dependia da largura sobrando e um
+  vale aparecia diferente do vizinho. Conferido linha a linha: 24 de 24 com
+  exatamente 2 linhas.
+- **Cliente e endereço empilhados na mesma coluna.** Separados custavam
+  ~360px pra dizer "pra quem e onde"; foi isso que pagou a coluna nova sem
+  trazer a rolagem de volta.
+- **"Registrado por"**, pedido do usuário: cada caixa tem login próprio, e
+  agora a lista responde quem lançou o vale sem abrir a auditoria. Vem por
+  join com `profiles`, não snapshot — se a pessoa trocar de nome, a lista
+  acompanha. Testei o embed **antes** de escrever o código, porque
+  `entregas` tem 4 colunas apontando pra `profiles` e sem hint dá
+  `PGRST201` (o mesmo erro do embed de `lojas` no item 6).
+- Status virou pastilha colorida, em tons claros pra não competir com o
+  vermelho da marca. Conferi no `getComputedStyle` que as classes venceram
+  o `variant` do Badge — o `tailwind-merge` resolve o conflito a favor da
+  className.
+
+Resultado em 1280 (a largura do usuário): **24 linhas de 53px, todas
+iguais**, sobra horizontal zero.
+
+## 25. Polimento pedido em lote
+
+Oito itens numa mensagem só. Os que valem registro:
+
+**O Fechamento tinha um bug de verdade.** A tela mostrava a contagem de
+pendentes e o botão "Marcar dia como conferido" — e nenhum vale. Dava pra
+conferir o dia inteiro sem ter olhado vale nenhum, que é o oposto do que
+conferência significa. Agora lista os vales a conferir (número, cliente,
+valor, forma prevista) usando **a mesma regra do botão**, pra a lista
+mostrar exatamente o que ele vai alcançar. Testado no dia 09/08: contador
+"A conferir: 6" e a lista com esses 6.
+
+**Cancelamento com autor e motivo** no painel de gestão. O motivo diz o
+quê, o autor diz com quem falar.
+
+**Documentos desalinhado** — eram duas tabelas independentes, uma com 5
+colunas e outra com 4, cada uma calculando larguras pelo próprio conteúdo.
+Viraram a mesma tabela com `table-fixed`, que é o que garante alinhamento:
+só igualar a contagem de colunas não bastaria, o layout automático ainda
+poria o "Cliente" de uma num x diferente do da outra. Medido: as duas
+começam em `73, 252, 588, 834, 991`. A coluna do meio existe nas duas — em
+receitas mostra "Receita" em vez de sumir.
+
+**O peso dos pop-ups tinha causa única:** o Registro de Auditoria fica
+**sempre montado** (é ele que desenha o botão do cabeçalho), então a query
+mais cara do app — eventos com join de entregas, lojas e profiles — rodava
+a cada carga de página pra todo admin/gerente, mesmo sem ninguém abrir.
+Agora só dispara quando o dialog abre. Confirmado pela rede: antes de
+abrir, zero chamada REST a `eventos`. Somei `staleTime` em auditoria e
+notificações (1 min) e em `useLojas` (5 min) — esse é chamado por quatro
+telas e refazia a query a cada montagem.
+
+O resto: cinza do endereço/hora de `oklch(0.556)` pro texto principal a
+70%; paginação de 25 nas duas listas; "O que explica diferença no caixa" →
+**"Ocorrências"**; bloco do vale extra removido (**e o tile do resumo
+junto** — era o mesmo dado, avisei o usuário); "Farmácia deve à agência" →
+**"A pagar à agência"**; seção "Por status" removida do relatório.
+`porStatus`/`porStatusFinanceiro` continuam sendo calculados de propósito:
+a soma dos status é o que prova que nenhum vale se perdeu na agregação,
+só não têm mais superfície na tela. E `pagosEmMaos`/`pagoEmMaosCents`
+continuam em `fechamento.ts` sem uso na UI — dá pra remover, mas deixei
+porque devolver a seção é mais barato assim.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -848,6 +999,12 @@ Sessão de 2026-08-11:
 26. transferência com valor de entrega + lista sem rolagem horizontal
     (item 22)
 
+Sessão de 2026-08-12:
+
+27. visibilidade por filial: gerente preso à própria loja (item 23)
+28. layout dos vales: selo, data em duas linhas, "Registrado por" (item 24)
+29. polimento de gestão: conferência, documentos, termos, pop-ups (item 25)
+
 ## Migrations aplicadas nesta sessão
 
 7. `20260809190000_eventos_idempotency_key.sql`
@@ -882,6 +1039,19 @@ Sessão de 2026-08-11:
     `divergente` quem já tinha `pagamentos.realizado`)
 21. `20260810210000_conferencia_so_gerente.sql` (trigger
     `fn_entrega_protege_conferencia`)
+
+Sessão de 2026-08-12 (item 23):
+
+22. `20260812120000_visibilidade_por_filial.sql` (`is_admin()` no escopo
+    de `entregas`/`corridas`/helpers/`eventos`, e `with check` espelhando
+    o `using` nos UPDATEs)
+23. `20260812120100_cadastros_so_admin.sql` (escrita em agências,
+    mototaxistas e convênios restrita ao admin, `is_admin()` nos dois
+    lados da policy)
+
+As duas foram rodadas **duas vezes** pelo usuário: a primeira versão
+deixava o INSERT aberto (ver item 23). Como são `drop policy` +
+`create policy`, reaplicar substitui sem resíduo.
 
 Fora migration: a Edge Function `criar-usuario` foi publicada pelo
 usuário via dashboard (Edge Functions → Via Editor). **Não há CLI do

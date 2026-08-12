@@ -36,7 +36,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <FilaOfflineIndicador />
           {(profile.papel === 'admin' || profile.papel === 'gerente') && (
             <>
-              <RegistroAuditoria />
+              <RegistroAuditoria profile={profile} />
               <Notificacoes profile={profile} />
             </>
           )}

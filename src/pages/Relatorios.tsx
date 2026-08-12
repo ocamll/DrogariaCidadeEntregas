@@ -25,12 +25,6 @@ const STATUS_LABEL: Record<string, string> = {
   cancelada: 'Cancelada',
 }
 
-const STATUS_FINANCEIRO_LABEL: Record<string, string> = {
-  na_ordem: 'Na ordem',
-  divergente: 'Divergente',
-  conferido: 'Conferido',
-}
-
 function localDateStr(d: Date): string {
   const yyyy = d.getFullYear()
   const mm = String(d.getMonth() + 1).padStart(2, '0')
@@ -137,48 +131,17 @@ export function Relatorios() {
             />
             <StatTile label="Valor de compra" valor={formatBRL(data.valorCompraCents)} />
             <StatTile label="Valor de entrega" valor={formatBRL(data.valorEntregaCents)} />
-            <StatTile
-              label="Farmácia deve à agência"
-              valor={formatBRL(data.valorFarmaciaDeveCents)}
-            />
+            <StatTile label="A pagar à agência" valor={formatBRL(data.valorFarmaciaDeveCents)} />
           </div>
 
-          <Card>
-            <CardHeader>
-              <CardTitle>Por status</CardTitle>
-            </CardHeader>
-            <CardContent>
-              {Object.keys(data.porStatus).length === 0 ? (
-                <p className="text-sm text-muted-foreground">Nenhum vale no período.</p>
-              ) : (
-                // Dois eixos lado a lado, não misturados: um vale pode estar
-                // entregue e com o dinheiro ainda por conferir. Somar tudo
-                // numa lista só sugeriria que são estados alternativos.
-                <div className="flex flex-col gap-3">
-                  <div className="flex flex-col gap-1">
-                    <p className="text-xs text-muted-foreground">Entrega</p>
-                    <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                      {Object.entries(data.porStatus).map(([status, quantidade]) => (
-                        <span key={status}>
-                          {STATUS_LABEL[status] ?? status}: <strong>{quantidade}</strong>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                  <div className="flex flex-col gap-1">
-                    <p className="text-xs text-muted-foreground">Financeiro</p>
-                    <div className="flex flex-wrap gap-x-6 gap-y-2 text-sm">
-                      {Object.entries(data.porStatusFinanceiro).map(([status, quantidade]) => (
-                        <span key={status}>
-                          {STATUS_FINANCEIRO_LABEL[status] ?? status}: <strong>{quantidade}</strong>
-                        </span>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-              )}
-            </CardContent>
-          </Card>
+          {/* O bloco "Por status" saiu a pedido do usuário (2026-08-12): a
+              contagem por status de entrega e por eixo financeiro não é o
+              que a gerência olha aqui. O que importava dele já tem lugar
+              próprio — "Vales cancelados" virou tile lá em cima, e o eixo
+              financeiro tem a aba Fechamento inteira. `porStatus` e
+              `porStatusFinanceiro` continuam vindo do relatório porque a
+              soma dos status é o que prova que nenhum vale se perdeu na
+              agregação; só não têm mais superfície na tela. */}
 
           <Card>
             <CardHeader>
@@ -246,7 +209,7 @@ function AgenciaTable({
           <TableHead>Entregues</TableHead>
           <TableHead>Insucessos</TableHead>
           <TableHead>Valor de entrega</TableHead>
-          <TableHead>Farmácia deve</TableHead>
+          <TableHead>A pagar</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -328,7 +291,7 @@ function GrupoTable({
           <TableHead>Entregues</TableHead>
           <TableHead>Insucessos</TableHead>
           <TableHead>Valor de entrega</TableHead>
-          <TableHead>Farmácia deve</TableHead>
+          <TableHead>A pagar</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>

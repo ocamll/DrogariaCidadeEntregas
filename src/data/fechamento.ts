@@ -1,6 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { buscarComTeto, type ListaComTeto } from '@/lib/paginacao'
+import { buscarComTeto } from '@/lib/paginacao'
 import type { FormaPagamento } from '@/data/pagamentos'
 
 // Apoio ao fechamento de caixa — o lado TELE da história, e só ele.
@@ -31,6 +31,9 @@ export type ValeFechamento = {
   formasRealizadas: Array<{ forma: FormaPagamento; valorCents: number }>
   justificativa: string | null
   motivoCancelamento: string | null
+  // quem cancelou. Gestão precisa dos dois lados — o motivo diz o quê, o
+  // autor diz com quem falar. Vem por join, não de snapshot no payload.
+  canceladoPorNome: string | null
   observacoes: string | null
 }
 
@@ -45,6 +48,11 @@ export type Fechamento = {
   // soma do que o cliente pagou direto ao motoboy — dinheiro que a
   // farmácia nunca viu, e a causa mais fácil de confundir com falta
   pagoEmMaosCents: number
+  // os vales que o gestor tem em mãos pra conferir agora. Antes a tela só
+  // mostrava a CONTAGEM de pendentes e um botão de marcar o dia inteiro —
+  // dava pra "conferir" sem ter olhado vale nenhum, que é o oposto do que
+  // conferência quer dizer.
+  aConferir: ValeFechamento[]
   divergencias: ValeFechamento[]
   pagosEmMaos: ValeFechamento[]
   cancelados: ValeFechamento[]
@@ -73,6 +81,7 @@ type ValeRow = {
   valor_entrega_cents: number
   entrega_paga_cliente_cents: number
   motivo_cancelamento: string | null
+  profiles: { nome: string } | null
   observacoes: string | null
   pagamentos: PagamentoRow[]
 }
@@ -94,6 +103,7 @@ function mapVale(row: ValeRow): ValeFechamento {
     // gravada uma vez por forma) — a primeira basta
     justificativa: realizados[0]?.observacao ?? null,
     motivoCancelamento: row.motivo_cancelamento,
+    canceladoPorNome: row.profiles?.nome ?? null,
     observacoes: row.observacoes,
   }
 }
@@ -105,13 +115,18 @@ async function buscarFechamento(filtro: FiltroFechamento): Promise<Fechamento> {
   const fim = new Date(`${filtro.data}T00:00:00`)
   fim.setDate(fim.getDate() + 1)
 
-  const { itens, temMais }: ListaComTeto<ValeRow> = await buscarComTeto(
+  // sem anotar o tipo aqui: o inferidor do supabase-js trata o embed
+  // to-one como array, e quem sabe a forma real é o cast de ValeRow[]
+  // logo abaixo (mesmo padrão dos outros arquivos em src/data).
+  const { itens, temMais } = await buscarComTeto(
     LIMITE_FECHAMENTO,
     (limite) => {
       let q = supabase
         .from('entregas')
         .select(
-          'id, numero_vale, cliente_nome, status_entrega, status_financeiro, valor_compra_cents, valor_entrega_cents, entrega_paga_cliente_cents, motivo_cancelamento, observacoes, pagamentos(forma, momento, valor_cents, observacao)'
+          // hint de FK obrigatório: entregas tem 4 colunas apontando pra
+          // profiles, e o embed sem hint devolve PGRST201 por ambiguidade.
+          'id, numero_vale, cliente_nome, status_entrega, status_financeiro, valor_compra_cents, valor_entrega_cents, entrega_paga_cliente_cents, motivo_cancelamento, profiles!entregas_cancelado_por_fkey(nome), observacoes, pagamentos(forma, momento, valor_cents, observacao)'
         )
         .eq('tipo', 'cliente')
         .gte('ocorrido_em_local', inicio.toISOString())
@@ -160,6 +175,12 @@ async function buscarFechamento(filtro: FiltroFechamento): Promise<Fechamento> {
     valorEntregaCents,
     valorFarmaciaDeveCents,
     pagoEmMaosCents,
+    // mesma regra do marcarDiaConferido abaixo, pra a lista mostrar
+    // exatamente o que o botão vai alcançar: nem cancelado (não virou
+    // venda) nem divergente (a marca fica de propósito).
+    aConferir: vales.filter(
+      (v) => v.statusEntrega !== 'cancelada' && v.statusFinanceiro === 'na_ordem'
+    ),
     divergencias: vales.filter((v) => v.formasRealizadas.length > 0),
     pagosEmMaos: vales.filter((v) => v.entregaPagaClienteCents > 0 && v.statusEntrega !== 'cancelada'),
     cancelados: vales.filter((v) => v.statusEntrega === 'cancelada'),

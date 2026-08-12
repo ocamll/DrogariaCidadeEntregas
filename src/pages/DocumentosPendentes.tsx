@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react'
 import type { AuthProfile } from '@/data/auth'
 import {
   useDocumentosConvenioPendentes,
@@ -24,6 +25,77 @@ function AvisoTemMais({ mostrar }: { mostrar: boolean }) {
   )
 }
 
+// As duas listas (convênio e receita) não têm os mesmos campos, mas têm as
+// mesmas PERGUNTAS: qual vale, de quem, desde quando, e o botão de dar
+// baixa. Antes eram duas tabelas independentes com contagem de colunas
+// diferente, então cada uma calculava as larguras por conta e as colunas
+// iguais não se alinhavam entre si.
+//
+// Aqui as duas usam a mesma grade, e `table-fixed` é o que garante o
+// alinhamento: sem ele, o layout automático ainda dimensionaria cada
+// tabela pelo próprio conteúdo e o "Cliente" de uma cairia num x
+// diferente do "Cliente" da outra. A coluna do meio existe nas duas —
+// quando não há convênio, mostra "—" em vez de sumir e desalinhar tudo.
+const LARGURAS = ['w-[16%]', 'w-[30%]', 'w-[22%]', 'w-[14%]', 'w-[18%]']
+
+type LinhaPendencia = {
+  id: string
+  numeroVale: string
+  clienteNome: string
+  meio: string
+  desde: string
+}
+
+function TabelaPendencias({
+  linhas,
+  rotuloMeio,
+  rotuloAcao,
+  onAcao,
+}: {
+  linhas: LinhaPendencia[]
+  rotuloMeio: string
+  rotuloAcao: string
+  onAcao: (id: string) => void
+}) {
+  return (
+    <Table className="table-fixed">
+      <TableHeader>
+        <TableRow>
+          <TableHead className={LARGURAS[0]}>Vale</TableHead>
+          <TableHead className={LARGURAS[1]}>Cliente</TableHead>
+          <TableHead className={LARGURAS[2]}>{rotuloMeio}</TableHead>
+          <TableHead className={LARGURAS[3]}>Desde</TableHead>
+          <TableHead className={LARGURAS[4]} />
+        </TableRow>
+      </TableHeader>
+      <TableBody>
+        {linhas.map((linha) => (
+          <TableRow key={linha.id}>
+            <TableCell className="tabular-nums">{linha.numeroVale}</TableCell>
+            <TableCell className="whitespace-normal break-words">{linha.clienteNome}</TableCell>
+            <TableCell className="whitespace-normal break-words">{linha.meio}</TableCell>
+            <TableCell className="tabular-nums">{formatarData(linha.desde)}</TableCell>
+            <TableCell>
+              <Button variant="outline" size="sm" onClick={() => onAcao(linha.id)}>
+                {rotuloAcao}
+              </Button>
+            </TableCell>
+          </TableRow>
+        ))}
+      </TableBody>
+    </Table>
+  )
+}
+
+function Secao({ titulo, children }: { titulo: string; children: ReactNode }) {
+  return (
+    <div className="flex flex-col gap-2">
+      <h3 className="text-sm font-medium">{titulo}</h3>
+      {children}
+    </div>
+  )
+}
+
 function DocumentosConvenio({ profile }: { profile: AuthProfile }) {
   const { data, isLoading, isError, error } = useDocumentosConvenioPendentes()
   const marcarRecebido = useMarcarDocumentoConvenioRecebido()
@@ -36,43 +108,25 @@ function DocumentosConvenio({ profile }: { profile: AuthProfile }) {
 
   return (
     <>
-    <AvisoTemMais mostrar={data.temMais} />
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Vale</TableHead>
-          <TableHead>Cliente</TableHead>
-          <TableHead>Convênio</TableHead>
-          <TableHead>Desde</TableHead>
-          <TableHead />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {data.itens.map((doc) => (
-          <TableRow key={doc.id}>
-            <TableCell>{doc.numeroVale}</TableCell>
-            <TableCell>{doc.clienteNome}</TableCell>
-            <TableCell>{doc.convenioNome ?? '—'}</TableCell>
-            <TableCell>{formatarData(doc.ocorridoEmLocal)}</TableCell>
-            <TableCell>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  marcarRecebido.mutate({
-                    entregaId: doc.id,
-                    recebidoPor: profile.id,
-                    ocorridoEmLocal: new Date().toISOString(),
-                  })
-                }
-              >
-                Marcar recebido
-              </Button>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+      <AvisoTemMais mostrar={data.temMais} />
+      <TabelaPendencias
+        rotuloMeio="Convênio"
+        rotuloAcao="Marcar recebido"
+        linhas={data.itens.map((doc) => ({
+          id: doc.id,
+          numeroVale: doc.numeroVale,
+          clienteNome: doc.clienteNome,
+          meio: doc.convenioNome ?? '—',
+          desde: doc.ocorridoEmLocal,
+        }))}
+        onAcao={(id) =>
+          marcarRecebido.mutate({
+            entregaId: id,
+            recebidoPor: profile.id,
+            ocorridoEmLocal: new Date().toISOString(),
+          })
+        }
+      />
     </>
   )
 }
@@ -89,41 +143,27 @@ function ReceitasPendentes({ profile }: { profile: AuthProfile }) {
 
   return (
     <>
-    <AvisoTemMais mostrar={data.temMais} />
-    <Table>
-      <TableHeader>
-        <TableRow>
-          <TableHead>Vale</TableHead>
-          <TableHead>Cliente</TableHead>
-          <TableHead>Desde</TableHead>
-          <TableHead />
-        </TableRow>
-      </TableHeader>
-      <TableBody>
-        {data.itens.map((receita) => (
-          <TableRow key={receita.id}>
-            <TableCell>{receita.numeroVale}</TableCell>
-            <TableCell>{receita.clienteNome}</TableCell>
-            <TableCell>{formatarData(receita.ocorridoEmLocal)}</TableCell>
-            <TableCell>
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() =>
-                  marcarRecebida.mutate({
-                    entregaId: receita.id,
-                    recebidoPor: profile.id,
-                    ocorridoEmLocal: new Date().toISOString(),
-                  })
-                }
-              >
-                Marcar devolvida
-              </Button>
-            </TableCell>
-          </TableRow>
-        ))}
-      </TableBody>
-    </Table>
+      <AvisoTemMais mostrar={data.temMais} />
+      <TabelaPendencias
+        rotuloMeio="Documento"
+        rotuloAcao="Marcar devolvida"
+        linhas={data.itens.map((receita) => ({
+          id: receita.id,
+          numeroVale: receita.numeroVale,
+          clienteNome: receita.clienteNome,
+          // receita não tem convênio: a coluna do meio existe só pra as
+          // duas tabelas continuarem alinhadas coluna a coluna.
+          meio: 'Receita',
+          desde: receita.ocorridoEmLocal,
+        }))}
+        onAcao={(id) =>
+          marcarRecebida.mutate({
+            entregaId: id,
+            recebidoPor: profile.id,
+            ocorridoEmLocal: new Date().toISOString(),
+          })
+        }
+      />
     </>
   )
 }
@@ -131,14 +171,12 @@ function ReceitasPendentes({ profile }: { profile: AuthProfile }) {
 export function DocumentosPendentes({ profile }: { profile: AuthProfile }) {
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium">Documentos de convênio</h3>
+      <Secao titulo="Documentos de convênio">
         <DocumentosConvenio profile={profile} />
-      </div>
-      <div className="flex flex-col gap-2">
-        <h3 className="text-sm font-medium">Receitas</h3>
+      </Secao>
+      <Secao titulo="Receitas">
         <ReceitasPendentes profile={profile} />
-      </div>
+      </Secao>
     </div>
   )
 }
