@@ -655,6 +655,38 @@ transição de estado exige garantir que a transição existe.** (Na
 segunda rodada a falha era real: a migration da trigger ainda não tinha
 rodado.)
 
+## 20. O projeto ganhou um repositório remoto
+
+Até aqui os 25 commits existiam **só nesta máquina**, dentro do OneDrive —
+o repo não tinha remote nenhum. Notei isso ao conferir o estado pro
+usuário dar clear, e ele pediu pra resolver.
+
+Criado em `github.com/ocamll/DrogariaCidadeEntregas`, **privado**, branch
+`main` (a local era `master`; renomeada, `master` apagada dos dois lados
+depois de conferir que as duas apontavam pro mesmo commit).
+
+**Varredura de segredo antes do push**, porque publicar é irreversível:
+`.env` está no `.gitignore` e nunca foi commitado (conferido no histórico
+inteiro); nenhuma chave JWT em arquivo rastreado; `service_role` só
+aparece em texto explicativo, nunca a chave.
+
+**Mas achei um problema que é meu:** eu tinha anotado neste arquivo as
+credenciais das contas de teste, com senha, como nota de retomada. Fazia
+sentido num arquivo local; não faz nenhum num repositório. São logins
+**válidos** de um Supabase de produção, um deles admin — e `2026` é uma
+senha de 4 caracteres. Antes de empurrar, confirmei pela API do GitHub
+que o repo estava mesmo privado (404 sem autenticação).
+
+**Pendência que fica pro usuário:** trocar essas senhas em Authentication
+→ Users. Isso resolve na raiz, inclusive pro histórico já gravado —
+reescrever histórico não vale a pena aqui, porque este arquivo referencia
+hashes de commit e a reescrita quebraria todas as referências. A regra
+pra frente está no CLAUDE.md, seção "Segredo nenhum no repositório".
+
+Sobrou também uma branch local `claude/sharp-haibt-2b1db4` de sessão
+anterior — não subiu, não atrapalha, e não apaguei porque não sei se tem
+algo dentro.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -683,8 +715,12 @@ rodado.)
 20. `353498f` — "Vales cancelados" como bloco próprio
 21. `516b6a7` — eixo financeiro no caso da divergência (item 18)
 22. `5686be2` — aba Fechamento + fluxo da conferência (item 19)
-23. atualização final do NOTAS.md — último commit desta sessão, hash
-    pelo `git log`
+23. `77efa59` — NOTAS.md com o eixo financeiro e o Fechamento
+24. repositório remoto + notas de segredo (item 20) — último commit
+    desta sessão, hash pelo `git log`
+
+Do 24 em diante os commits estão em `origin/main` — antes disso, tudo
+existia só nesta máquina.
 
 ## Migrations aplicadas nesta sessão
 
@@ -814,7 +850,12 @@ no `javascript_tool`).
 
 ## Coisas úteis pra retomar o trabalho
 
-**Credenciais de teste:** Admin `adminteste@drogcidade.sg` / senha `2026`.
+**Credenciais de teste** — ⚠️ **estas senhas estão num repositório, mesmo
+que privado.** Se ainda não foram trocadas no Supabase, trocar (ver item
+20 e a seção "Segredo nenhum no repositório" do CLAUDE.md). Depois de
+trocar, atualize aqui só o e-mail e guarde a senha nova **fora** do repo.
+
+Admin `adminteste@drogcidade.sg` / senha `2026`.
 Caixa `caixateste@drogcidade.sg` / senha `2026` (perfil "Camilo", papel
 `caixa`, **Filial 02**) — indispensável pra testar RLS, porque com admin
 todo teste de restrição passa por engano (ele enxerga tudo do tenant de

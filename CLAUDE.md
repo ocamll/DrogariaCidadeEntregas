@@ -36,6 +36,9 @@ Lista fechada. Não instalar dependência nova sem perguntar.
   (`criar-usuario` — a única coisa que roda no servidor, ver "Gestão de
   usuários" abaixo)
 - Deploy: Cloudflare Pages
+- Repositório: `github.com/ocamll/DrogariaCidadeEntregas` — **privado**, branch
+  `main`. Até 2026-08-10 o projeto só existia nesta máquina (dentro do
+  OneDrive), sem remote nenhum.
 
 ---
 
@@ -582,6 +585,30 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   não workaround temporário. Contas são criadas pelo painel de admin (o `email_confirm`
   já vem marcado pela Edge Function justamente por isso); só a **troca de senha**
   continua manual no Supabase.
+
+---
+
+## Segredo nenhum no repositório
+
+O repo é privado, mas isso não é desculpa pra relaxar: privado protege de
+estranho, não de acidente (repo vira público, alguém ganha acesso, um fork
+sai).
+
+- **`.env` está no `.gitignore` e nunca foi commitado.** Conferido no
+  histórico inteiro em 2026-08-10, antes do primeiro push.
+- **A `service_role` nunca entra aqui** — nem no código, nem em nota, nem
+  em exemplo. Ela vive só como variável de ambiente das Edge Functions.
+- **Credencial de conta real não vai em arquivo de projeto**, incluindo o
+  `NOTAS.md`. Isso já foi violado uma vez: as contas de teste
+  (`adminteste@…`, `caixateste@…` e as criadas pelo painel) foram anotadas
+  lá com senha, e subiram no primeiro push. São logins **válidos** de um
+  Supabase de produção, um deles admin. Se as senhas ainda não foram
+  trocadas, trocar em Authentication → Users resolve na raiz — inclusive
+  pro histórico já gravado, que não vale reescrever (o `NOTAS.md`
+  referencia hashes de commit).
+
+Se precisar anotar credencial pra retomar trabalho, o lugar é fora do
+repositório.
 
 ---
 
