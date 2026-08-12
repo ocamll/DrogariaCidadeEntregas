@@ -71,7 +71,11 @@ export function EntregasTable({
   return (
     <Table>
       <TableHeader>
-        <TableRow>
+        {/* Cabeçalho centralizado junto com o corpo. Centralizar só um dos
+            dois deixaria o título à esquerda e o dado no meio, que é a
+            mesma sensação de desalinho, só invertida. A TableHead do
+            shadcn nasce `text-left`, daí o override. */}
+        <TableRow className="[&>th]:text-center">
           <TableHead>Vale</TableHead>
           <TableHead>Cliente</TableHead>
           <TableHead>Compra</TableHead>
@@ -106,7 +110,7 @@ export function EntregasTable({
                ficavam centralizados — uns 8px abaixo do nome do cliente.
                Cada coluna começava numa altura diferente e a linha inteira
                parecia torta. Alinhados pelo topo, todos partem do mesmo Y. */
-            <TableRow key={entrega.id} className="[&>td]:align-top">
+            <TableRow key={entrega.id} className="[&>td]:align-top [&>td]:text-center">
               {/* nunca quebra: o selo fica ao lado do número, não embaixo */}
               <TableCell className="font-medium tabular-nums">
                 {entrega.numeroVale}

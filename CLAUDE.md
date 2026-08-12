@@ -673,6 +673,10 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   - **Linha de apoio não usa `text-muted-foreground`** — aquele cinza
     (`oklch(0.556)`) é claro demais pra informação que o caixa lê de fato.
     O padrão é o texto principal a 70%.
+  - **Colunas centralizadas, cabeçalho junto.** O dado não começa na
+    primeira letra do título; título e conteúdo dividem o mesmo centro.
+    Centralizar só um dos dois dá a mesma sensação de desalinho, invertida
+    — e o status, que é uma pastilha estreita, era o que mais denunciava.
   - **A linha inteira é `align-top`.** A `TableCell` do shadcn é
     `align-middle`, e como Cliente e Data ocupam duas linhas enquanto
     valor/status ocupam uma, os de uma linha ficavam centralizados — 9px
