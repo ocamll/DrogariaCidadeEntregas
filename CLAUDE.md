@@ -543,10 +543,15 @@ segunda consulta. Isso é regra, não detalhe: duas consultas podem divergir
 (dado entrou no meio, filtro diferente) e aí existem duas versões do
 acerto, sem ninguém pra desempatar.
 
-- **Duas planilhas.** "Acerto por agência" traz a linha da agência (o
-  subtotal que se confere com ela) e, recolhíveis abaixo, as linhas por
-  motoboy; "Vales" traz uma linha por vale, com filtro automático. É o que
-  permite contestar um número específico sem voltar ao sistema.
+- **O número de páginas segue o número de agências**, pela mesma regra do
+  chevron na tela. Uma agência no resultado (caso das filiais de uma
+  cidade só, onde uma única tele faz tudo) → **uma aba**: resumo por
+  motoboy no topo, total a pagar, e a lista de vales abaixo com filtro.
+  Separar em duas ali só obrigaria a ir e voltar, porque o arquivo inteiro
+  já é daquela agência. Mais de uma agência — o fechamento das 18 filiais
+  juntas, que o admin faz de 15 em 15 dias pra pagar as teles — → **duas
+  abas**: "Acerto por agência" (o subtotal que se confere com cada uma) e
+  "Vales" (o que sustenta cada número, pra contestar uma linha).
 - **Dinheiro vai como NÚMERO, com `numFmt` de moeda** — nunca como texto
   "R$ 9,00". Célula de texto transforma o arquivo numa imagem de tabela:
   não soma, não filtra, não serve pra conferir. A divisão por 100 acontece
