@@ -44,6 +44,8 @@ export function Relatorios() {
   const [filtro, setFiltro] = useState<FiltroPeriodo>({ dataInicio: hoje, dataFim: hoje })
   const [agenciasAbertas, setAgenciasAbertas] = useState<Set<string>>(new Set())
   const [motoboysAbertos, setMotoboysAbertos] = useState<Set<string>>(new Set())
+  const [exportando, setExportando] = useState(false)
+  const [erroExport, setErroExport] = useState<string | null>(null)
 
   const { data, isLoading, isError, error } = useRelatorio(filtro)
 
@@ -63,6 +65,21 @@ export function Relatorios() {
       else next.add(chave)
       return next
     })
+  }
+
+  async function exportar() {
+    if (!data) return
+    setExportando(true)
+    setErroExport(null)
+    try {
+      // import dinâmico lá dentro: o ExcelJS só desce quando alguém clica
+      const { exportarAcertoXlsx } = await import('@/lib/exportarAcerto')
+      await exportarAcertoXlsx(data, filtro)
+    } catch (e) {
+      setErroExport(`Não consegui gerar a planilha: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setExportando(false)
+    }
   }
 
   function aplicarHoje() {
@@ -109,7 +126,15 @@ export function Relatorios() {
         <Button variant="outline" onClick={aplicarEsteMes}>
           Este mês
         </Button>
+        {/* Exporta o que está na tela, não uma segunda consulta: o arquivo
+            e o relatório precisam contar a mesma história, senão vira duas
+            versões do acerto e alguém tem que decidir em qual acreditar. */}
+        <Button variant="outline" onClick={exportar} disabled={!data || exportando}>
+          {exportando ? 'Gerando…' : 'Exportar .xlsx'}
+        </Button>
       </div>
+
+      {erroExport && <p className="text-sm text-destructive">{erroExport}</p>}
 
       {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
       {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}

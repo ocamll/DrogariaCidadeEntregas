@@ -32,6 +32,15 @@ Lista fechada. Não instalar dependência nova sem perguntar.
 - TanStack Query (server state) + Dexie (fila offline em IndexedDB, +
   `dexie-react-hooks` pro `useLiveQuery` — pacote oficial da Dexie, não é lib nova)
 - `signature_pad` (captura de assinatura)
+- `exceljs` (exportação do acerto em .xlsx — aprovado em 2026-08-13).
+  Escolhido no lugar do SheetJS porque o pacote `xlsx` está descontinuado
+  no npm e a versão que o npm ainda serve (0.18.5) carrega o
+  CVE-2023-30533. O `npm audit` acusa um aviso moderado em `uuid`,
+  dependência transitiva: **não se aplica aqui** — é sobre `v3/v5/v6`
+  recebendo buffer, e o ExcelJS só chama `v4()`. `audit fix --force`
+  rebaixaria pra 3.4.0, quebrando a API. **Importado dinamicamente**: são
+  ~930 kB que só descem quando alguém clica em exportar (confirmado no
+  build, chunk separado).
 - Supabase: Postgres + Auth + Storage + Realtime + RLS + **uma** Edge Function
   (`criar-usuario` — a única coisa que roda no servidor, ver "Gestão de
   usuários" abaixo)
@@ -317,6 +326,15 @@ filiais).
 
 Se algum destes parecer necessário, **pare e pergunte antes de implementar.**
 
+**Exportação em .xlsx saiu desta lista em 2026-08-13**, por decisão
+explícita do usuário: o acerto mensal com a agência é pago fora do
+sistema, e ter que redigitar os números numa planilha é onde o erro
+aparece. Ver "Exportação do acerto" abaixo. **PDF e Google Drive
+continuam fora** — foram pedidos junto, mas o usuário optou por começar
+pela planilha; os dois seguem exigindo conversa antes (PDF desenhado
+custa outra biblioteca, e Drive custa projeto no Google Cloud, OAuth e
+gestão de token no navegador).
+
 ### Ideias futuras — fora do MVP atual, mas anotadas pra não esquecer
 
 (Nada aqui no momento. O painel de usuários, que era a única entrada desta
@@ -514,6 +532,33 @@ real, o espelho do bug do endereço distante.
 A tarifa é capturada no cadastro e vai no payload da fila offline, não
 lida na hora do sync: se ela mudar enquanto o vale espera pra
 sincronizar, o certo é gravar a de quando o vale foi criado.
+
+---
+
+## Exportação do acerto — a planilha que vai pra agência
+
+O acerto mensal é pago fora do sistema. O botão "Exportar .xlsx" na aba
+Relatórios gera o arquivo do período que **está na tela** — não uma
+segunda consulta. Isso é regra, não detalhe: duas consultas podem divergir
+(dado entrou no meio, filtro diferente) e aí existem duas versões do
+acerto, sem ninguém pra desempatar.
+
+- **Duas planilhas.** "Acerto por agência" traz a linha da agência (o
+  subtotal que se confere com ela) e, recolhíveis abaixo, as linhas por
+  motoboy; "Vales" traz uma linha por vale, com filtro automático. É o que
+  permite contestar um número específico sem voltar ao sistema.
+- **Dinheiro vai como NÚMERO, com `numFmt` de moeda** — nunca como texto
+  "R$ 9,00". Célula de texto transforma o arquivo numa imagem de tabela:
+  não soma, não filtra, não serve pra conferir. A divisão por 100 acontece
+  só aqui, na fronteira de exibição; a aritmética continua em centavos
+  inteiros (regra 1).
+- **`montarWorkbook` é separado de `exportarAcertoXlsx`** de propósito: dá
+  pra montar o arquivo e ler de volta pra conferir o conteúdo, sem
+  depender do efeito colateral de download do navegador. Foi assim que a
+  exportação foi testada.
+- Só entram vales **com corrida atribuída** — é o que compõe o acerto com
+  a agência. Vale pendente sem corrida aparece no resumo da tela, não no
+  arquivo.
 
 ---
 

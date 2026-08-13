@@ -11,6 +11,10 @@ export type RelatorioVale = {
   tipo: 'cliente' | 'transferencia'
   statusEntrega: string
   valorEntregaCents: number
+  // parte paga em mãos pelo cliente. Só a exportação usa hoje — na tela o
+  // "A pagar" aparece somado por motoboy/agência, mas na planilha a linha
+  // do vale precisa fechar sozinha com o total do grupo.
+  entregaPagaClienteCents: number
   ocorridoEmLocal: string
 }
 
@@ -119,6 +123,7 @@ function acumularGrupo(mapa: Map<string, RelatorioGrupo>, id: string, nome: stri
     tipo: row.tipo,
     statusEntrega: row.status_entrega,
     valorEntregaCents: row.valor_entrega_cents,
+    entregaPagaClienteCents: row.entrega_paga_cliente_cents,
     ocorridoEmLocal: row.ocorrido_em_local,
   })
   mapa.set(id, atual)
