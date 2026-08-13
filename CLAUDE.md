@@ -535,6 +535,39 @@ sincronizar, o certo é gravar a de quando o vale foi criado.
 
 ---
 
+## Cidade, filial e agência
+
+Confirmado com o usuário em 2026-08-13. Em cada cidade **uma** agência de
+tele atende **todas** as filiais dali: São Gabriel/RS tem Matriz, Filial
+02, 04 e 10, e uma única agência faz as corridas de todas. Uma agência de
+Alegrete não pode aparecer para uma filial de São Gabriel.
+
+- **`cidades` é tabela, não texto em `lojas`/`agencias`.** Com string, a
+  associação dependeria de dois textos baterem exatamente ("São Gabriel" ≠
+  "Sao Gabriel"), e um acento errado desassociaria a agência em silêncio —
+  no que decide dinheiro. Com FK, ou está associado ou não está.
+- **Não existe constraint de "uma agência por cidade".** A regra é a
+  operação de hoje, não uma invariante; travá-la no banco criaria uma
+  migration de desfazer no dia em que uma cidade tiver duas. Quem se
+  adapta é a tela.
+- **A tela some com o nível, nunca com a informação.** Uma agência no
+  resultado → o nome dela aparece com os totais e os motoboys logo abaixo,
+  **sem chevron** (o clique não separaria nada). Mais de uma → volta a
+  tabela "Por agência" com chevron. O mesmo predicado governa a planilha
+  exportada: uma agência → uma aba; mais de uma → duas.
+- **`corridas.agencia_id` continua sendo a verdade** de quem fez cada
+  corrida. Cidade serve pra filtrar e organizar, nunca pra reescrever o
+  passado — se uma agência mudar de cidade, os acertos antigos continuam
+  certos.
+- **Cidade é obrigatória no cadastro de agência** mesmo o schema aceitando
+  null: agência sem cidade não entra no dropdown de "Nova corrida" de
+  filial nenhuma, ou seja, seria cadastrada e invisível. A lista de
+  Cadastros marca em vermelho quem estiver assim.
+- **Criar cidade é manual via SQL**, como loja — é ainda mais raro que
+  abrir filial.
+
+---
+
 ## Exportação do acerto — a planilha que vai pra agência
 
 O acerto mensal é pago fora do sistema. O botão "Exportar .xlsx" na aba
@@ -549,9 +582,14 @@ acerto, sem ninguém pra desempatar.
   motoboy no topo, total a pagar, e a lista de vales abaixo com filtro.
   Separar em duas ali só obrigaria a ir e voltar, porque o arquivo inteiro
   já é daquela agência. Mais de uma agência — o fechamento das 18 filiais
-  juntas, que o admin faz de 15 em 15 dias pra pagar as teles — → **duas
+  juntas, quando o admin olha as cidades todas de uma vez — → **duas
   abas**: "Acerto por agência" (o subtotal que se confere com cada uma) e
   "Vales" (o que sustenta cada número, pra contestar uma linha).
+- **O pagamento é quinzenal em qualquer caso**, com uma agência ou com
+  várias — não é a quantidade de agências que define o ciclo. O período
+  vem do filtro De/Até, então uma quinzena é só um intervalo como outro
+  qualquer; o que muda entre os dois casos é só quantas agências caem no
+  mesmo arquivo.
 - **Dinheiro vai como NÚMERO, com `numFmt` de moeda** — nunca como texto
   "R$ 9,00". Célula de texto transforma o arquivo numa imagem de tabela:
   não soma, não filtra, não serve pra conferir. A divisão por 100 acontece

@@ -11,22 +11,44 @@ import { inserirEventoIdempotente } from '@/data/eventos'
 const LIMITE_DROPDOWN = 500
 const LIMITE_OPERACIONAL = 500
 
-export type Agencia = { id: string; nome: string }
+export type Agencia = { id: string; nome: string; cidadeId: string | null }
+
+type AgenciaRow = { id: string; nome: string; cidade_id: string | null }
 
 async function buscarAgencias(): Promise<Agencia[]> {
   const { data, error } = await supabase
     .from('agencias')
-    .select('id, nome')
+    .select('id, nome, cidade_id')
     .eq('ativo', true)
     .order('nome')
     .limit(LIMITE_DROPDOWN)
 
   if (error) throw error
-  return data as unknown as Agencia[]
+  return (data as unknown as AgenciaRow[]).map((row) => ({
+    id: row.id,
+    nome: row.nome,
+    cidadeId: row.cidade_id,
+  }))
 }
 
 export function useAgencias() {
   return useQuery({ queryKey: ['agencias'], queryFn: buscarAgencias })
+}
+
+// Em cada cidade uma agência de tele atende todas as filiais dali, e uma
+// agência de outra cidade não pode aparecer pra elas — é isso que este
+// filtro garante na hora de abrir a corrida.
+//
+// Agência sem cidade fica de fora: no dado real toda agência tem cidade
+// (o cadastro exige), e deixá-la passar traria de volta justamente a
+// mistura que a cidade veio resolver. Ela aparece marcada "sem cidade" em
+// Cadastros, que é onde o problema se conserta.
+export function useAgenciasDaCidade(cidadeId: string | null | undefined) {
+  const query = useAgencias()
+  return {
+    ...query,
+    data: cidadeId ? query.data?.filter((a) => a.cidadeId === cidadeId) : query.data,
+  }
 }
 
 export type Mototaxista = { id: string; nome: string; agenciaId: string | null }

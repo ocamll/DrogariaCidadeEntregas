@@ -4,6 +4,24 @@ import { buscarPaginado } from '@/lib/paginacao'
 
 export type FiltroPeriodo = { dataInicio: string; dataFim: string }
 
+// Filtros do relatório. '' significa "todas" nos dois — é o padrão, e é o
+// que o admin usa pra fechar as filiais todas de uma vez.
+//
+// `lojaId` vai no servidor (é coluna de `entregas`); `agenciaId` é
+// aplicado aqui, antes da agregação, porque vem do embed de `corridas` e
+// filtrar embed no PostgREST exigiria inner join. Filtrar antes de somar
+// é o que mantém os totais coerentes com a lista: se filtrasse depois, os
+// cartões de cima contariam vales que a tabela de baixo não mostra.
+export type FiltroRelatorio = FiltroPeriodo & {
+  lojaId: string
+  agenciaId: string
+}
+
+export const FILTRO_RELATORIO_VAZIO: Omit<FiltroRelatorio, 'dataInicio' | 'dataFim'> = {
+  lojaId: '',
+  agenciaId: '',
+}
+
 export type RelatorioVale = {
   id: string
   numeroVale: string
@@ -173,7 +191,7 @@ function acumularAgencia(
 // Agregação client-side (sem view/RPC nova) — volume do MVP não justifica
 // isso ainda. Entregas sem corrida (ainda pendentes) não entram nos
 // agrupamentos por motoboy/agência, só no resumo geral.
-async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
+async function buscarRelatorio(filtro: FiltroRelatorio): Promise<Relatorio> {
   const inicio = new Date(`${filtro.dataInicio}T00:00:00`)
   const fim = new Date(`${filtro.dataFim}T00:00:00`)
   fim.setDate(fim.getDate() + 1)
@@ -183,18 +201,27 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
   // a realidade sem nenhum aviso. `id` entra na ordenação como desempate
   // pra paginação ser estável (vales com o mesmo ocorrido_em_local não
   // podem trocar de página entre um request e outro).
-  const rows = (await buscarPaginado((de, ate) =>
-    supabase
+  const todas = (await buscarPaginado((de, ate) => {
+    let q = supabase
       .from('entregas')
       .select(
         'id, numero_vale, cliente_nome, tipo, valor_compra_cents, valor_entrega_cents, entrega_paga_cliente_cents, status_entrega, status_financeiro, ocorrido_em_local, corridas(mototaxista_id, agencia_id, mototaxistas(nome), agencias(nome))'
       )
       .gte('ocorrido_em_local', inicio.toISOString())
       .lt('ocorrido_em_local', fim.toISOString())
+    if (filtro.lojaId) q = q.eq('loja_id', filtro.lojaId)
+    return q
       .order('ocorrido_em_local', { ascending: false })
       .order('id', { ascending: false })
       .range(de, ate)
-  )) as unknown as EntregaRelatorioRow[]
+  })) as unknown as EntregaRelatorioRow[]
+
+  // agência vem do embed de corridas, então filtra aqui — antes de somar
+  // qualquer coisa, pra o resumo de cima e a tabela de baixo contarem os
+  // mesmos vales.
+  const rows = filtro.agenciaId
+    ? todas.filter((row) => row.corridas?.agencia_id === filtro.agenciaId)
+    : todas
 
   const porStatus: Record<string, number> = {}
   const porStatusFinanceiro: Record<string, number> = {}
@@ -264,7 +291,7 @@ async function buscarRelatorio(filtro: FiltroPeriodo): Promise<Relatorio> {
   }
 }
 
-export function useRelatorio(filtro: FiltroPeriodo) {
+export function useRelatorio(filtro: FiltroRelatorio) {
   return useQuery({
     queryKey: ['relatorio', filtro],
     queryFn: () => buscarRelatorio(filtro),

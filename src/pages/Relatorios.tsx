@@ -1,6 +1,16 @@
 import { Fragment, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
-import { useRelatorio, type FiltroPeriodo, type RelatorioAgencia, type RelatorioGrupo } from '@/data/relatorios'
+import type { AuthProfile } from '@/data/auth'
+import {
+  useRelatorio,
+  FILTRO_RELATORIO_VAZIO,
+  type FiltroRelatorio,
+  type RelatorioAgencia,
+  type RelatorioGrupo,
+} from '@/data/relatorios'
+import { useLojas } from '@/data/lojas'
+import { useCidades, rotuloCidade } from '@/data/cidades'
+import { useAgenciasDaCidade } from '@/data/corridas'
 import { formatBRL } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -16,6 +26,10 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+
+// mesmo estilo dos outros selects nativos do app (Fechamento, Histórico)
+const SELECT_CLASSNAME =
+  'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
 
 const STATUS_LABEL: Record<string, string> = {
   pendente: 'Pendente',
@@ -38,10 +52,23 @@ function chaveMotoboy(agenciaChave: string, motoboyChave: string): string {
   return `${agenciaChave}::${motoboyChave}`
 }
 
-export function Relatorios() {
+export function Relatorios({ profile }: { profile: AuthProfile }) {
   const hoje = localDateStr(new Date())
-  const [form, setForm] = useState<FiltroPeriodo>({ dataInicio: hoje, dataFim: hoje })
-  const [filtro, setFiltro] = useState<FiltroPeriodo>({ dataInicio: hoje, dataFim: hoje })
+  const inicial: FiltroRelatorio = { dataInicio: hoje, dataFim: hoje, ...FILTRO_RELATORIO_VAZIO }
+  const [form, setForm] = useState<FiltroRelatorio>(inicial)
+  const [filtro, setFiltro] = useState<FiltroRelatorio>(inicial)
+
+  // Só o admin escolhe filial: gerente e caixa já estão presos à própria
+  // pela RLS, e um select que devolve sempre a mesma coisa é ruído.
+  const podeFiltrarFilial = profile.papel === 'admin'
+  const { data: lojas } = useLojas()
+  const { data: cidades } = useCidades()
+  // agência acompanha a filial escolhida — uma tele de outra cidade não
+  // atende esta filial, então não deve nem aparecer como opção.
+  const cidadeDaFilial = form.lojaId
+    ? (lojas?.find((l) => l.id === form.lojaId)?.cidadeId ?? null)
+    : null
+  const { data: agencias } = useAgenciasDaCidade(cidadeDaFilial)
   const [agenciasAbertas, setAgenciasAbertas] = useState<Set<string>>(new Set())
   const [motoboysAbertos, setMotoboysAbertos] = useState<Set<string>>(new Set())
   const [exportando, setExportando] = useState(false)
@@ -82,20 +109,22 @@ export function Relatorios() {
     }
   }
 
+  // os atalhos mexem só no período e preservam filial/agência: quem
+  // escolheu uma filial e clica "Este mês" quer o mês daquela filial.
+  function aplicarPeriodo(dataInicio: string, dataFim: string) {
+    const proximo = { ...form, dataInicio, dataFim }
+    setForm(proximo)
+    setFiltro(proximo)
+  }
+
   function aplicarHoje() {
     const h = localDateStr(new Date())
-    setForm({ dataInicio: h, dataFim: h })
-    setFiltro({ dataInicio: h, dataFim: h })
+    aplicarPeriodo(h, h)
   }
 
   function aplicarEsteMes() {
     const agora = new Date()
-    const proximo = {
-      dataInicio: localDateStr(new Date(agora.getFullYear(), agora.getMonth(), 1)),
-      dataFim: localDateStr(agora),
-    }
-    setForm(proximo)
-    setFiltro(proximo)
+    aplicarPeriodo(localDateStr(new Date(agora.getFullYear(), agora.getMonth(), 1)), localDateStr(agora))
   }
 
   return (
@@ -119,6 +148,47 @@ export function Relatorios() {
             onChange={(e) => setForm({ ...form, dataFim: e.target.value })}
           />
         </div>
+        {podeFiltrarFilial && (
+          <>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="r-filial">Filial</Label>
+              <select
+                id="r-filial"
+                className={SELECT_CLASSNAME}
+                value={form.lojaId}
+                // trocar de filial zera a agência: a que estava escolhida
+                // pode ser de outra cidade e não atender a nova.
+                onChange={(e) => setForm({ ...form, lojaId: e.target.value, agenciaId: '' })}
+              >
+                <option value="">Todas as filiais</option>
+                {lojas?.map((loja) => (
+                  <option key={loja.id} value={loja.id}>
+                    {loja.nome}
+                    {loja.cidadeId
+                      ? ` — ${rotuloCidade(cidades?.find((c) => c.id === loja.cidadeId))}`
+                      : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-1">
+              <Label htmlFor="r-agencia">Agência</Label>
+              <select
+                id="r-agencia"
+                className={SELECT_CLASSNAME}
+                value={form.agenciaId}
+                onChange={(e) => setForm({ ...form, agenciaId: e.target.value })}
+              >
+                <option value="">Todas as agências</option>
+                {agencias?.map((agencia) => (
+                  <option key={agencia.id} value={agencia.id}>
+                    {agencia.nome}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </>
+        )}
         <Button onClick={() => setFiltro(form)}>Aplicar</Button>
         <Button variant="outline" onClick={aplicarHoje}>
           Hoje
@@ -222,6 +292,40 @@ function AgenciaTable({
 }) {
   if (agencias.length === 0) {
     return <p className="text-sm text-muted-foreground">Nenhuma corrida com agência no período.</p>
+  }
+
+  // Uma agência só no resultado é o caso das filiais de uma cidade: lá uma
+  // única tele faz todas as corridas, então esconder os motoboys atrás de
+  // um chevron seria um clique que não separa nada. O nome da agência
+  // continua na tela — some o clique, não a informação.
+  const agenciaUnica = agencias.length === 1
+  if (agenciaUnica) {
+    const agencia = agencias[0]
+    const prefixo = `${agencia.chave}::`
+    const abertosNessaAgencia = new Set(
+      [...motoboysAbertos].filter((c) => c.startsWith(prefixo)).map((c) => c.slice(prefixo.length))
+    )
+    return (
+      <div className="flex flex-col gap-3">
+        <div className="flex flex-wrap items-baseline justify-between gap-x-6 gap-y-1 rounded-lg border bg-muted/30 p-3">
+          <span className="font-medium">{agencia.nome}</span>
+          <span className="text-sm text-foreground/70">
+            {agencia.totalVales} vales · {agencia.entregues} entregues · {agencia.insucessos}{' '}
+            insucessos · entrega {formatBRL(agencia.valorEntregaCents)} ·{' '}
+            <strong className="text-foreground">
+              a pagar {formatBRL(agencia.valorFarmaciaDeveCents)}
+            </strong>
+          </span>
+        </div>
+        <GrupoTable
+          grupos={agencia.porMototaxista}
+          nomeColuna="Motoboy"
+          vazio="Nenhum motoboy nessa agência no período."
+          expandidos={abertosNessaAgencia}
+          onToggle={(motoboyChave) => onToggleMotoboy(chaveMotoboy(agencia.chave, motoboyChave))}
+        />
+      </div>
+    )
   }
 
   return (

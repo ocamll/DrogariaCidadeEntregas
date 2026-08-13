@@ -23,19 +23,39 @@ export type AgenciaCadastro = {
   nome: string
   cnpj: string | null
   contato: string | null
+  // cidade que a agência atende. É o que impede uma tele de Alegrete de
+  // aparecer pra uma filial de São Gabriel — ver "Cidade, filial e
+  // agência" no CLAUDE.md.
+  cidadeId: string | null
+  ativo: boolean
+}
+
+type AgenciaCadastroRow = {
+  id: string
+  nome: string
+  cnpj: string | null
+  contato: string | null
+  cidade_id: string | null
   ativo: boolean
 }
 
 async function buscarAgenciasCadastro(): Promise<AgenciaCadastro[]> {
   const { data, error } = await supabase
     .from('agencias')
-    .select('id, nome, cnpj, contato, ativo')
+    .select('id, nome, cnpj, contato, cidade_id, ativo')
     .order('ativo', { ascending: false })
     .order('nome')
     .limit(LIMITE_CADASTRO)
 
   if (error) throw error
-  return data as unknown as AgenciaCadastro[]
+  return (data as unknown as AgenciaCadastroRow[]).map((row) => ({
+    id: row.id,
+    nome: row.nome,
+    cnpj: row.cnpj,
+    contato: row.contato,
+    cidadeId: row.cidade_id,
+    ativo: row.ativo,
+  }))
 }
 
 export function useAgenciasCadastro() {
@@ -48,6 +68,7 @@ export type SalvarAgenciaInput = {
   nome: string
   cnpj: string | null
   contato: string | null
+  cidadeId: string
 }
 
 // insert quando não tem id, update quando tem — uma função só, mesmo botão
@@ -56,7 +77,12 @@ async function salvarAgencia(input: SalvarAgenciaInput) {
   if (input.id) {
     const { error } = await supabase
       .from('agencias')
-      .update({ nome: input.nome, cnpj: input.cnpj, contato: input.contato })
+      .update({
+        nome: input.nome,
+        cnpj: input.cnpj,
+        contato: input.contato,
+        cidade_id: input.cidadeId,
+      })
       .eq('id', input.id)
     if (error) throw error
     return
@@ -67,6 +93,7 @@ async function salvarAgencia(input: SalvarAgenciaInput) {
     nome: input.nome,
     cnpj: input.cnpj,
     contato: input.contato,
+    cidade_id: input.cidadeId,
   })
   if (error) throw error
 }

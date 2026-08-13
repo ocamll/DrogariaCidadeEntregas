@@ -99,7 +99,7 @@ export function Painel({ profile }: { profile: AuthProfile }) {
             )}
             {isGestao && (
               <TabsContent value="relatorios" className="pt-3">
-                <Relatorios />
+                <Relatorios profile={profile} />
               </TabsContent>
             )}
             {isAdmin && (

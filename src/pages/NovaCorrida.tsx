@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import SignaturePad from 'signature_pad'
 import type { AuthProfile } from '@/data/auth'
+import { useCidadeDaLoja } from '@/data/lojas'
 import {
-  useAgencias,
+  useAgenciasDaCidade,
   useMototaxistas,
   useEntregasPendentesSemCorrida,
   type NovaCorridaComAssinatura,
@@ -41,7 +42,11 @@ function NovaCorridaForm({
   lojaId: string
   onVoltar: () => void
 }) {
-  const { data: agencias, isLoading: carregandoAgencias } = useAgencias()
+  // só agências da cidade desta filial: em cada cidade uma tele atende
+  // todas as filiais dali, e uma agência de outra cidade não pode aparecer
+  // aqui (ver "Cidade, filial e agência" no CLAUDE.md).
+  const cidadeId = useCidadeDaLoja(lojaId)
+  const { data: agencias, isLoading: carregandoAgencias } = useAgenciasDaCidade(cidadeId)
   const { data: mototaxistas, isLoading: carregandoMoto } = useMototaxistas()
   const { data: entregas, isLoading: carregandoEntregas } = useEntregasPendentesSemCorrida()
 

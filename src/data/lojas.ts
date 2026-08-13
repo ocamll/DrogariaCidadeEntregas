@@ -8,6 +8,9 @@ export type Loja = {
   // banco e não no código porque muda com o tempo e não deve exigir
   // deploy — ver migration 20260810180000.
   tarifaEntregaCents: number
+  // cidade da filial: é ela que decide quais agências de tele podem
+  // atender esta loja (ver useAgenciasDaCidade).
+  cidadeId: string | null
 }
 
 // A farmácia real tem 17 filiais — o teto é folga, não expectativa. Mas
@@ -15,12 +18,17 @@ export type Loja = {
 // escolheu; aqui o número é nosso e está à vista.
 const LIMITE_LOJAS = 200
 
-type LojaRow = { id: string; nome: string; tarifa_entrega_cents: number }
+type LojaRow = {
+  id: string
+  nome: string
+  tarifa_entrega_cents: number
+  cidade_id: string | null
+}
 
 async function buscarLojas(): Promise<Loja[]> {
   const { data, error } = await supabase
     .from('lojas')
-    .select('id, nome, tarifa_entrega_cents')
+    .select('id, nome, tarifa_entrega_cents, cidade_id')
     .eq('ativo', true)
     .order('nome')
     .limit(LIMITE_LOJAS)
@@ -30,6 +38,7 @@ async function buscarLojas(): Promise<Loja[]> {
     id: row.id,
     nome: row.nome,
     tarifaEntregaCents: row.tarifa_entrega_cents,
+    cidadeId: row.cidade_id,
   }))
 }
 
@@ -52,4 +61,11 @@ export function useTarifaDaLoja(lojaId: string | null): number | null {
   const { data } = useLojas()
   if (!lojaId || !data) return null
   return data.find((loja) => loja.id === lojaId)?.tarifaEntregaCents ?? null
+}
+
+// Cidade da filial — quem decide quais agências podem atendê-la.
+export function useCidadeDaLoja(lojaId: string | null): string | null {
+  const { data } = useLojas()
+  if (!lojaId || !data) return null
+  return data.find((loja) => loja.id === lojaId)?.cidadeId ?? null
 }
