@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { AuthProfile } from '@/data/auth'
 import { ListaEntregas } from '@/pages/ListaEntregas'
 import { HistoricoEntregas } from '@/pages/HistoricoEntregas'
+import { ListaTransferencias } from '@/pages/ListaTransferencias'
 import { DocumentosPendentes } from '@/pages/DocumentosPendentes'
 import { Fechamento } from '@/pages/Fechamento'
 import { Ocorrencias } from '@/pages/Ocorrencias'
@@ -67,6 +68,7 @@ export function Painel({ profile }: { profile: AuthProfile }) {
             <TabsList>
               <TabsTrigger value="hoje">Hoje</TabsTrigger>
               <TabsTrigger value="historico">Histórico</TabsTrigger>
+              <TabsTrigger value="transferencias">Transferências</TabsTrigger>
               <TabsTrigger value="documentos">Documentos</TabsTrigger>
               {isGestao && <TabsTrigger value="fechamento">Fechamento</TabsTrigger>}
               {isGestao && <TabsTrigger value="ocorrencias">Ocorrências</TabsTrigger>}
@@ -78,6 +80,9 @@ export function Painel({ profile }: { profile: AuthProfile }) {
             </TabsContent>
             <TabsContent value="historico" className="pt-3">
               <HistoricoEntregas profile={profile} />
+            </TabsContent>
+            <TabsContent value="transferencias" className="pt-3">
+              <ListaTransferencias profile={profile} />
             </TabsContent>
             <TabsContent value="documentos" className="pt-3">
               <DocumentosPendentes profile={profile} />

@@ -686,6 +686,14 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   cartão: `1` `2` `3` `4` `5` → `0,01` → `0,12` → `1,23` → `12,34` → `123,45`. Ele
   nunca digita `,` nem `.`, então não existe como confundir os dois. O estado do
   componente pai guarda a string de dígitos crua, não o texto formatado.
+- **Transferência tem aba própria** (2026-08-12). "Hoje" e "Histórico"
+  filtram `tipo = 'cliente'`; a aba "Transferências" filtra o contrário e
+  não corta por dia — o volume é baixo, então a mesma lista paginada serve
+  de movimento do dia e de histórico. Lá as colunas de venda (Compra e
+  Pagamento) são escondidas via `ocultarVenda`, porque seriam "—" em 100%
+  das linhas. Query key própria (`transferencias`), então **toda
+  invalidação que mexe nos dois tipos precisa citar as duas** — corrida,
+  fechamento de corrida, cancelamento e o Realtime já citam.
 - **A lista de vales não rola pra o lado.** Do número do vale ao "⋮" tem que
   caber na largura da tela — o caixa está com fila no balcão e não vai
   arrastar tabela pro lado pra achar o menu de ações. A `Table` do shadcn põe

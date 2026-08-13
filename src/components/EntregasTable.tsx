@@ -66,10 +66,15 @@ export function EntregasTable({
   entregas,
   profile,
   mostrarData = false,
+  // Na aba de transferências as colunas de venda (Compra e Pagamento) são
+  // "—" em 100% das linhas: transferência não é compra e não cria
+  // pagamento. Escondê-las devolve largura pras que dizem alguma coisa.
+  ocultarVenda = false,
 }: {
   entregas: EntregaRecente[]
   profile: AuthProfile
   mostrarData?: boolean
+  ocultarVenda?: boolean
 }) {
   if (entregas.length === 0) {
     return <p className="text-sm text-muted-foreground">Nenhum vale encontrado.</p>
@@ -94,9 +99,9 @@ export function EntregasTable({
               a sobra vai pras demais em vez de inchar justamente a que
               tem o texto mais comprido. */}
           <TableHead className="w-56">Cliente</TableHead>
-          <TableHead className={COLUNA_CENTRO}>Compra</TableHead>
+          {!ocultarVenda && <TableHead className={COLUNA_CENTRO}>Compra</TableHead>}
           <TableHead className={COLUNA_CENTRO}>Entrega</TableHead>
-          <TableHead className={COLUNA_CENTRO}>Pagamento</TableHead>
+          {!ocultarVenda && <TableHead className={COLUNA_CENTRO}>Pagamento</TableHead>}
           <TableHead className={COLUNA_CENTRO}>Status</TableHead>
           <TableHead className={COLUNA_CENTRO}>Usuário</TableHead>
           <TableHead className={COLUNA_CENTRO}>
@@ -151,7 +156,11 @@ export function EntregasTable({
                   // selo herda o espaço de baseline e deixava a linha da
                   // transferência 2px mais alta que as demais.
                   <div className="flex">
-                    <Badge variant="secondary" className="px-1.5 text-[10px]">
+                    {/* mesmo corpo de texto do nome do cliente (`text-sm
+                        font-medium`), que é a linha que ele substitui —
+                        `h-auto` porque a altura fixa do Badge foi feita
+                        pro text-xs e cortaria o texto maior. */}
+                    <Badge variant="secondary" className="h-auto py-0.5 text-sm font-medium">
                       Transferência
                     </Badge>
                   </div>
@@ -163,16 +172,22 @@ export function EntregasTable({
               {/* Transferência não tem venda (compra fica '—'), mas TEM valor
                   de entrega: quem leva o produto entre filiais é o motoboy da
                   agência, e ela cobra a tarifa por isso. */}
-              <TableCell className={`tabular-nums ${COLUNA_CENTRO}`}>
-                {transferencia ? '—' : formatBRL(entrega.valorCompraCents)}
-              </TableCell>
+              {!ocultarVenda && (
+                <TableCell className={`tabular-nums ${COLUNA_CENTRO}`}>
+                  {transferencia ? '—' : formatBRL(entrega.valorCompraCents)}
+                </TableCell>
+              )}
               <TableCell className={`tabular-nums ${COLUNA_CENTRO}`}>
                 {formatBRL(entrega.valorEntregaCents)}
               </TableCell>
-              <TableCell className={`${COLUNA_TEXTO} ${COLUNA_CENTRO}`}>
-                {textoPagamento}
-                {divergiu && <span className="ml-1 text-xs text-muted-foreground">(divergiu)</span>}
-              </TableCell>
+              {!ocultarVenda && (
+                <TableCell className={`${COLUNA_TEXTO} ${COLUNA_CENTRO}`}>
+                  {textoPagamento}
+                  {divergiu && (
+                    <span className="ml-1 text-xs text-muted-foreground">(divergiu)</span>
+                  )}
+                </TableCell>
+              )}
               <TableCell className={COLUNA_CENTRO}>
                 <Badge
                   variant="secondary"

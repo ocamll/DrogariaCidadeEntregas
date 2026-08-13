@@ -204,6 +204,8 @@ export function useCancelarEntrega() {
     mutationFn: cancelarEntrega,
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['entregas-hoje'] })
+      // transferência também pode ser cancelada, e ela vive na aba própria
+      queryClient.invalidateQueries({ queryKey: ['transferencias'] })
       queryClient.invalidateQueries({ queryKey: ['entregas-historico'] })
       queryClient.invalidateQueries({ queryKey: ['entregas-pendentes-sem-corrida'] })
       // O Registro de Auditoria fica sempre montado (o componente é quem
@@ -290,6 +292,10 @@ function mapEntregaRecente(row: EntregaRecenteRow): EntregaRecente {
 // monta menos dropdown por vez, que é o que pesa nesta tabela.
 export const TAMANHO_PAGINA_HOJE = 25
 
+// `tipo = 'cliente'`: transferência tem aba própria desde 2026-08-12.
+// São duas leituras diferentes da mesma tabela — o caixa que confere o
+// movimento do dia não quer o vale de transferência no meio, e quem
+// procura uma transferência não quer varrer as entregas de cliente.
 async function buscarEntregasDeHoje(pagina: number): Promise<PaginaEntregas> {
   const inicioDoDia = new Date()
   inicioDoDia.setHours(0, 0, 0, 0)
@@ -298,6 +304,7 @@ async function buscarEntregasDeHoje(pagina: number): Promise<PaginaEntregas> {
   const { data, error, count } = await supabase
     .from('entregas')
     .select(ENTREGA_RECENTE_SELECT, { count: 'exact' })
+    .eq('tipo', 'cliente')
     .gte('ocorrido_em_local', inicioDoDia.toISOString())
     .order('registrado_em', { ascending: false })
     .order('id', { ascending: false })
@@ -373,6 +380,8 @@ async function buscarHistoricoEntregas(
   let query = supabase
     .from('entregas')
     .select(ENTREGA_RECENTE_SELECT, { count: 'exact' })
+    // só entrega de cliente — transferência tem aba própria
+    .eq('tipo', 'cliente')
     .order('registrado_em', { ascending: false })
     .order('id', { ascending: false })
     .range(de, de + TAMANHO_PAGINA_HISTORICO - 1)
@@ -405,6 +414,39 @@ async function buscarHistoricoEntregas(
   }
 }
 
+// Lista de transferências — todas, não só as de hoje. O volume é baixo
+// (uma filial pede produto pra outra algumas vezes por semana), então uma
+// lista paginada única serve de "hoje" e de histórico ao mesmo tempo, sem
+// precisar de filtro de período nem de busca própria.
+async function buscarTransferencias(pagina: number): Promise<PaginaEntregas> {
+  const de = (pagina - 1) * TAMANHO_PAGINA_HOJE
+
+  const { data, error, count } = await supabase
+    .from('entregas')
+    .select(ENTREGA_RECENTE_SELECT, { count: 'exact' })
+    .eq('tipo', 'transferencia')
+    .order('registrado_em', { ascending: false })
+    .order('id', { ascending: false })
+    .range(de, de + TAMANHO_PAGINA_HOJE - 1)
+
+  if (error) throw error
+
+  const total = count ?? 0
+  return {
+    entregas: (data as unknown as EntregaRecenteRow[]).map(mapEntregaRecente),
+    total,
+    totalPaginas: Math.max(1, Math.ceil(total / TAMANHO_PAGINA_HOJE)),
+  }
+}
+
+export function useTransferencias(pagina: number) {
+  return useQuery({
+    queryKey: ['transferencias', pagina],
+    queryFn: () => buscarTransferencias(pagina),
+    placeholderData: keepPreviousData,
+  })
+}
+
 export function useHistoricoEntregas(filtros: FiltrosHistorico, pagina: number) {
   return useQuery({
     queryKey: ['entregas-historico', filtros, pagina],
@@ -430,6 +472,9 @@ export function useEntregasRealtime() {
         { event: '*', schema: 'public', table: 'entregas' },
         () => {
           queryClient.invalidateQueries({ queryKey: ['entregas-hoje'] })
+          // a aba de transferências vive da mesma tabela e também precisa
+          // acompanhar ao vivo (PC ↔ tablet)
+          queryClient.invalidateQueries({ queryKey: ['transferencias'] })
         }
       )
       .subscribe()

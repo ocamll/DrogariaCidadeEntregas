@@ -20,9 +20,12 @@ import { notificarFaltaReceita } from '@/data/documentos'
 // apareceu: cancelei um vale e ele não surgiu na tela.
 const QUERY_KEYS_POR_TIPO: Record<TipoOperacaoFila, string[]> = {
   entrega: ['entregas-hoje', 'eventos-auditoria'],
-  transferencia: ['entregas-hoje', 'eventos-auditoria'],
+  // transferência não aparece mais em 'entregas-hoje' (aba própria desde
+  // 2026-08-12), mas a corrida e o fechamento mexem nos dois tipos.
+  transferencia: ['transferencias', 'eventos-auditoria'],
   corrida: [
     'entregas-hoje',
+    'transferencias',
     'entregas-pendentes-sem-corrida',
     'entregas-historico',
     'eventos-auditoria',
@@ -36,6 +39,7 @@ const QUERY_KEYS_POR_TIPO: Record<TipoOperacaoFila, string[]> = {
   ],
   fechamento_corrida: [
     'entregas-hoje',
+    'transferencias',
     'entregas-historico',
     'corridas-abertas',
     'notificacoes-hoje',
