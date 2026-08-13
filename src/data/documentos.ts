@@ -189,3 +189,67 @@ export async function notificarFaltaReceita(input: NotificarFaltaReceitaInput) {
     ocorridoEmLocal: input.ocorridoEmLocal,
   })
 }
+
+// --- notificar que o papel não voltou, da própria aba Documentos --------
+//
+// Até 2026-08-13 a aba só tinha o caminho feliz: "recebido"/"devolvida".
+// Quem conferia a fila e descobria que o convênio não voltou assinado não
+// tinha o que fazer ali — e pra receita a saída existia, mas escondida no
+// menu "⋮" do vale, na outra aba. Descobrir o problema num lugar e ter que
+// registrá-lo em outro é o mesmo descolamento que a conferência do
+// fechamento tinha.
+//
+// NÃO tira o item da fila, por decisão do usuário: convênio e receita
+// costumam aparecer dias depois, e a pendência só se encerra com o papel
+// na mão. A notificação é o registro pra gestão, não o encerramento.
+// Por isso também não escreve `status_documental = 'extraviado'` — aquele
+// valor existe no schema desde o início e continua sem quem o escreva.
+//
+// Mutation direta, sem fila offline: é o padrão desta aba (tela de
+// conferência, não fluxo de balcão correndo).
+export type NotificarDocumentoInput = {
+  tenantId: string
+  entregaId: string
+  justificativa: string
+  registradoPor: string
+  autorNome: string
+  eventoIdempotencyKey: string
+  ocorridoEmLocal: string
+}
+
+export async function notificarDocumentoConvenioNaoRetornou(input: NotificarDocumentoInput) {
+  await inserirEventoIdempotente({
+    tenantId: input.tenantId,
+    entregaId: input.entregaId,
+    tipo: 'falta_documento_convenio',
+    idempotencyKey: input.eventoIdempotencyKey,
+    payload: {
+      justificativa: input.justificativa,
+      autor_nome: input.autorNome,
+    },
+    registradoPor: input.registradoPor,
+    ocorridoEmLocal: input.ocorridoEmLocal,
+  })
+}
+
+function useNotificar(escrita: (input: NotificarDocumentoInput) => Promise<void>) {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: escrita,
+    onSuccess: () => {
+      // a fila não muda (o item continua pendente) — o que muda é o que a
+      // gestão enxerga
+      queryClient.invalidateQueries({ queryKey: ['notificacoes-hoje'] })
+      queryClient.invalidateQueries({ queryKey: ['notificacoes-todas'] })
+      queryClient.invalidateQueries({ queryKey: ['eventos-auditoria'] })
+    },
+  })
+}
+
+export function useNotificarDocumentoConvenio() {
+  return useNotificar(notificarDocumentoConvenioNaoRetornou)
+}
+
+export function useNotificarFaltaReceita() {
+  return useNotificar(notificarFaltaReceita)
+}

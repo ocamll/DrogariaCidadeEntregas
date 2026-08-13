@@ -19,6 +19,7 @@ export type TipoEvento =
   | 'status_alterado'
   | 'pagamento_alterado'
   | 'falta_receita'
+  | 'falta_documento_convenio'
   | 'insucesso_detalhado'
   | 'entrega_cancelada'
   | (string & {})
@@ -28,6 +29,7 @@ export const TIPO_EVENTO_LABEL: Record<string, string> = {
   status_alterado: 'Status alterado',
   pagamento_alterado: 'Divergência de pagamento',
   falta_receita: 'Falta de receita',
+  falta_documento_convenio: 'Documento de convênio não retornou',
   insucesso_detalhado: 'Insucesso detalhado',
   entrega_cancelada: 'Vale cancelado',
 }
@@ -118,6 +120,11 @@ function resumoEDetalhe(row: EventoAuditoriaRow): { resumo: string; detalhe: str
     }
     case 'falta_receita':
       return { resumo: 'Receita não retornou com o motoboy', detalhe: row.payload.justificativa ?? null }
+    case 'falta_documento_convenio':
+      return {
+        resumo: 'Documento de convênio não voltou assinado',
+        detalhe: row.payload.justificativa ?? null,
+      }
     case 'insucesso_detalhado':
       return { resumo: 'Insucesso — motivo "outro"', detalhe: row.payload.motivo_detalhe ?? null }
     case 'entrega_cancelada':

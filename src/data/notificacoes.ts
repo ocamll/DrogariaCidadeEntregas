@@ -3,13 +3,17 @@ import { supabase } from '@/lib/supabase'
 import { FORMA_PAGAMENTO_LABEL, type FormaPagamento } from '@/data/pagamentos'
 import { formatBRL } from '@/lib/money'
 
-// Leitura agregada dos eventos que viram "notificação" pra gestão — 3
-// tipos hoje (pagamento_alterado, falta_receita, insucesso_detalhado),
-// escritos cada um no seu domínio (pagamentos.ts, documentos.ts,
-// corridas.ts) mas lidos juntos aqui porque quem vê o cabeçalho não quer
-// saber a origem, só "o que precisa de atenção".
+// Leitura agregada dos eventos que viram "notificação" pra gestão — 4
+// tipos hoje (pagamento_alterado, falta_receita, falta_documento_convenio,
+// insucesso_detalhado), escritos cada um no seu domínio (pagamentos.ts,
+// documentos.ts, corridas.ts) mas lidos juntos aqui porque quem vê o
+// cabeçalho não quer saber a origem, só "o que precisa de atenção".
 
-export type TipoNotificacao = 'pagamento_alterado' | 'falta_receita' | 'insucesso_detalhado'
+export type TipoNotificacao =
+  | 'pagamento_alterado'
+  | 'falta_receita'
+  | 'falta_documento_convenio'
+  | 'insucesso_detalhado'
 
 export type Notificacao = {
   id: number
@@ -30,7 +34,9 @@ type PayloadPagamentoAlterado = {
   autor_nome: string
 }
 
-type PayloadFaltaReceita = {
+// falta_receita e falta_documento_convenio compartilham a forma: os dois
+// são "o papel não voltou", com justificativa escrita por quem conferiu.
+type PayloadFaltaPapel = {
   justificativa: string
   autor_nome: string
 }
@@ -45,7 +51,7 @@ type EventoNotificacaoRow = {
   id: number
   tipo: TipoNotificacao
   entrega_id: string | null
-  payload: PayloadPagamentoAlterado | PayloadFaltaReceita | PayloadInsucessoDetalhado
+  payload: PayloadPagamentoAlterado | PayloadFaltaPapel | PayloadInsucessoDetalhado
   ocorrido_em: string
   entregas: { numero_vale: string; cliente_nome: string } | null
 }
@@ -67,9 +73,17 @@ function resumoEJustificativa(row: EventoNotificacaoRow): { resumo: string; just
       }
     }
     case 'falta_receita': {
-      const payload = row.payload as PayloadFaltaReceita
+      const payload = row.payload as PayloadFaltaPapel
       return {
         resumo: 'Receita não retornou com o motoboy.',
+        justificativa: payload.justificativa,
+        autorNome: payload.autor_nome,
+      }
+    }
+    case 'falta_documento_convenio': {
+      const payload = row.payload as PayloadFaltaPapel
+      return {
+        resumo: 'Documento de convênio não voltou assinado.',
         justificativa: payload.justificativa,
         autorNome: payload.autor_nome,
       }
@@ -100,7 +114,12 @@ function mapNotificacao(row: EventoNotificacaoRow): Notificacao {
   }
 }
 
-const TIPOS_NOTIFICACAO: TipoNotificacao[] = ['pagamento_alterado', 'falta_receita', 'insucesso_detalhado']
+const TIPOS_NOTIFICACAO: TipoNotificacao[] = [
+  'pagamento_alterado',
+  'falta_receita',
+  'falta_documento_convenio',
+  'insucesso_detalhado',
+]
 const NOTIFICACAO_SELECT = 'id, tipo, entrega_id, payload, ocorrido_em, entregas(numero_vale, cliente_nome)'
 
 // Teto nosso, não o `max-rows` do servidor. Vale pras duas consultas

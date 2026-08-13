@@ -239,7 +239,8 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       tocado — o teste dos 25s não regrediu. Aba "Documentos" (visível pra
       qualquer usuário, não só gerência — quem recebe o papel de volta é o
       caixa do balcão) lista pendências de convênio e de receita com botão
-      de marcar recebido/devolvida, mutation direta sem fila offline
+      de marcar recebido/devolvida **e de "Não voltou"** (ver "Papel que
+      não volta"), mutation direta sem fila offline
       (`src/data/documentos.ts`). Retorno de corrida: motivo "outro" do
       insucesso ganhou textarea obrigatória, grava em `entregas.observacoes`
       (coluna que já existia, nunca usada antes) e evento
@@ -513,6 +514,35 @@ real, o espelho do bug do endereço distante.
 A tarifa é capturada no cadastro e vai no payload da fila offline, não
 lida na hora do sync: se ela mudar enquanto o vale espera pra
 sincronizar, o certo é gravar a de quando o vale foi criado.
+
+---
+
+## Papel que não volta — convênio e receita
+
+Confirmado com o usuário em 2026-08-13. Até então a aba "Documentos" só
+tinha o caminho feliz ("Marcar recebido"/"Marcar devolvida"): quem
+conferia a fila e descobria que o convênio voltou sem assinatura, ou que
+a receita não veio, não tinha o que fazer ali. Para receita existia meia
+saída — o evento `falta_receita`, mas escondido no menu "⋮" do vale, na
+outra aba. Para convênio não existia nada.
+
+- **Cada linha da fila tem "Não voltou"**, com justificativa obrigatória
+  (mesmo princípio do cancelamento e da divergência: sem o porquê, a
+  gestão recebe "sumiu" e não tem o que fazer com isso). Grava
+  `falta_receita` ou `falta_documento_convenio`, que entram em
+  Notificações, na aba Ocorrências e no Registro de Auditoria junto com os
+  outros.
+- **Notificar NÃO tira o item da fila.** Decisão do usuário: convênio e
+  receita costumam aparecer dias depois, e a pendência só se encerra com o
+  papel na mão. A notificação é registro, não encerramento — quem some da
+  fila é quem foi marcado como recebido.
+- **Por isso `status_documental = 'extraviado'` continua sem quem
+  escreva.** O valor existe no schema desde o início; encerrar a pendência
+  ao notificar seria o caso dele, e foi justamente o que se decidiu não
+  fazer. Se um dia mudar, ele está lá.
+- A chave de idempotência do evento nasce ao **abrir** o dialog, não ao
+  confirmar: se o insert falhar e a pessoa tentar de novo com o dialog
+  aberto, é a mesma ocorrência e não pode virar dois eventos.
 
 ---
 
