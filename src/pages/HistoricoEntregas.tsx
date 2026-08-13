@@ -55,7 +55,11 @@ export function HistoricoEntregas({ profile }: { profile: AuthProfile }) {
 
   return (
     <div className="flex flex-col gap-4">
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-6">
+      {/* Dois grupos, não um só: em cima o que se digita procurando um vale
+          específico; embaixo o período com os botões junto, porque filtrar
+          por data é a busca que mais se repete e ter que descer até uma
+          fileira separada de botões custava um passo a cada tentativa. */}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
         <div className="flex flex-col gap-1">
           <Label htmlFor="f-vale">Número do vale</Label>
           <Input
@@ -94,26 +98,6 @@ export function HistoricoEntregas({ profile }: { profile: AuthProfile }) {
             onKeyDown={onEnter}
           />
         </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="f-data-inicio">De</Label>
-          <Input
-            id="f-data-inicio"
-            type="date"
-            value={form.dataInicio}
-            onChange={(e) => setForm({ ...form, dataInicio: e.target.value })}
-            onKeyDown={onEnter}
-          />
-        </div>
-        <div className="flex flex-col gap-1">
-          <Label htmlFor="f-data-fim">Até</Label>
-          <Input
-            id="f-data-fim"
-            type="date"
-            value={form.dataFim}
-            onChange={(e) => setForm({ ...form, dataFim: e.target.value })}
-            onKeyDown={onEnter}
-          />
-        </div>
         {podeFiltrarFilial && (
           <div className="flex flex-col gap-1">
             <Label htmlFor="f-filial">Filial</Label>
@@ -134,7 +118,29 @@ export function HistoricoEntregas({ profile }: { profile: AuthProfile }) {
         )}
       </div>
 
-      <div className="flex gap-2">
+      {/* `items-end` alinha os botões pela base dos campos: como o label
+          fica acima do input, sem isso eles subiriam pra altura do rótulo. */}
+      <div className="flex flex-wrap items-end gap-3">
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="f-data-inicio">De</Label>
+          <Input
+            id="f-data-inicio"
+            type="date"
+            value={form.dataInicio}
+            onChange={(e) => setForm({ ...form, dataInicio: e.target.value })}
+            onKeyDown={onEnter}
+          />
+        </div>
+        <div className="flex flex-col gap-1">
+          <Label htmlFor="f-data-fim">Até</Label>
+          <Input
+            id="f-data-fim"
+            type="date"
+            value={form.dataFim}
+            onChange={(e) => setForm({ ...form, dataFim: e.target.value })}
+            onKeyDown={onEnter}
+          />
+        </div>
         <Button onClick={aplicarFiltros}>Filtrar</Button>
         <Button variant="outline" onClick={limparFiltros}>
           Limpar
