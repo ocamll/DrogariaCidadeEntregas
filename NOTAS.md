@@ -1180,6 +1180,36 @@ Conferido depois: zero corridas sem agência, zero pagamentos órfãos, e os
 totais caindo **exatamente** R$ 14,00 — o número fechando é o que prova
 que nada mais foi junto.
 
+## 32. O envio ao Drive quebrou na segunda vez
+
+Funcionou no primeiro teste e falhou depois, com "não consegui autorizar
+no Google". O que mudou entre um e outro foi só o tempo: o token de ~1h
+tinha vencido, então o segundo envio precisou abrir a janela de
+autorização de novo — e aí apareceu o problema.
+
+**Causa provável, e é de ordem das operações.** O fluxo era: clique →
+carrega bibliotecas → gera a planilha → gera o PDF → **só então** pede o
+token. São centenas de milissegundos e vários `await`; a essa altura o
+navegador não trata mais o pop-up como resposta ao clique e bloqueia. Na
+primeira vez passou porque a janela já tinha sido aberta no fluxo
+inicial, quando ainda não havia arquivo pra gerar.
+
+Corrigido invertendo a ordem — autorizar primeiro, gerar depois — e
+pré-carregando o script do Google quando a aba Relatórios monta, pra o
+clique não gastar o "gesto do usuário" esperando rede.
+
+**E o `error_callback` estava engolindo a causa:** devolvia "não consegui
+autorizar" pra qualquer tipo de erro. Agora separa pop-up bloqueado,
+janela fechada pelo usuário e recusa do Google — três casos que pedem
+ações diferentes.
+
+**Não confirmei o diagnóstico.** O fluxo depende de consentimento OAuth,
+que é autenticação e eu não faço em nome do usuário; ataquei a causa
+mecânica mais provável. Se voltar a falhar, a mensagem nova identifica
+qual dos três casos é — e aí o conserto é dirigido, não chute.
+
+**Pendente de teste do usuário.**
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -1243,6 +1273,8 @@ Sessão de 2026-08-13 (itens 26 a 31):
 41. `63d988c` — planilha adaptativa ao número de agências, com cor
 42. `8bd4efe` — cidade amarrando filial e agência
 43. `e51e190` — PDF do acerto + envio ao Google Drive
+44. `4eda537` — fecha o registro dos itens 26 a 31 no NOTAS e CLAUDE
+45. `e642e96` — autorização do Drive antes de gerar os arquivos (item 32)
 
 Do 30 em diante os commits foram feitos pelo usuário no terminal: o
 classificador do modo automático bloqueou `git commit`/`push` a partir de
@@ -1354,6 +1386,11 @@ chave:
       variáveis do Cloudflare Pages **com rebuild depois** (o Vite embute
       no build), e a URL do Pages nas origens autorizadas do Google. Se
       faltar qualquer um, funciona no localhost e falha no ar.
+- [ ] **Testar o envio ao Drive depois da correção do item 32.** O
+      primeiro envio funcionou; o segundo falhou por bloqueio de pop-up
+      (diagnóstico provável, não confirmado). A correção está no ar e
+      espera um teste real — se falhar de novo, a mensagem agora diz qual
+      dos três casos é.
 
 Ideia pequena anotada e não feita: **atalho de quinzena** no relatório
 (1ª/2ª quinzena ao lado de Hoje/Este mês), já que o pagamento das teles

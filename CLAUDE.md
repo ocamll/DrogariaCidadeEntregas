@@ -639,6 +639,13 @@ O desenho é deliberadamente mínimo, e cada peça tem motivo:
 - **Token só na memória, sem refresh token.** Vale ~1h e morre no reload.
   Guardar refresh token no navegador seria expor credencial de longa
   duração no cliente — pior que pedir autorização de novo.
+- **Pedir o token é a PRIMEIRA coisa depois do clique**, antes de gerar
+  planilha e PDF. Gerar os dois leva centenas de milissegundos, e um
+  pop-up aberto depois disso já não conta como resposta ao gesto do
+  usuário: o navegador bloqueia. Foi assim que o envio quebrou quando o
+  token da sessão anterior venceu. Pelo mesmo motivo o script do Google é
+  pré-carregado quando a aba Relatórios monta (`prepararDrive`) — o
+  clique não pode gastar o gesto esperando rede.
 - **O Client ID é público** e mora em `VITE_GOOGLE_CLIENT_ID` (vai no
   bundle de qualquer jeito). **O "client secret" não é usado neste fluxo e
   não deve existir neste projeto** — vale a mesma regra da `service_role`.
