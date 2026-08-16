@@ -1,4 +1,4 @@
-import { Fragment, useState } from 'react'
+import { Fragment, useEffect, useState } from 'react'
 import { ChevronDown, ChevronRight } from 'lucide-react'
 import type { AuthProfile } from '@/data/auth'
 import {
@@ -11,7 +11,7 @@ import {
 import { useLojas } from '@/data/lojas'
 import { useCidades, rotuloCidade } from '@/data/cidades'
 import { useAgenciasDaCidade } from '@/data/corridas'
-import { driveConfigurado } from '@/lib/googleDrive'
+import { driveConfigurado, prepararDrive } from '@/lib/googleDrive'
 import { formatBRL } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -81,6 +81,12 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
 
   const { data, isLoading, isError, error } = useRelatorio(filtro)
 
+  // deixa o script do Google baixado de antemão, pra o clique não gastar
+  // o gesto do usuário esperando rede (ver prepararDrive)
+  useEffect(() => {
+    prepararDrive()
+  }, [])
+
   function toggleAgencia(chave: string) {
     setAgenciasAbertas((prev) => {
       const next = new Set(prev)
@@ -148,11 +154,17 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
     setErroExport(null)
     setEnviadoAoDrive(null)
     try {
-      const [{ gerarXlsx }, { gerarPdf }, { enviarAoDrive, NOME_DA_PASTA, nomeDaSubpasta }] =
-        await Promise.all([
+      // AUTORIZA PRIMEIRO. Gerar a planilha e o PDF leva centenas de
+      // milissegundos, e um pop-up aberto depois disso já não conta como
+      // resposta ao clique — o navegador bloqueia. Foi exatamente o que
+      // aconteceu quando o token da sessão anterior venceu.
+      const { autorizarDrive, enviarAoDrive, NOME_DA_PASTA, nomeDaSubpasta } =
+        await import('@/lib/googleDrive')
+      await autorizarDrive()
+
+      const [{ gerarXlsx }, { gerarPdf }] = await Promise.all([
         import('@/lib/exportarAcerto'),
         import('@/lib/exportarAcertoPdf'),
-        import('@/lib/googleDrive'),
       ])
       const arquivos = [
         await gerarXlsx(data, filtro),

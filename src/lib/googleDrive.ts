@@ -44,6 +44,26 @@ export function driveConfigurado(): boolean {
   return !!CLIENT_ID
 }
 
+// Carrega o script do Google ANTES de alguém clicar. Sem isso, o clique
+// gasta o "crédito de gesto do usuário" esperando o script baixar, e o
+// navegador bloqueia o pop-up de autorização por não reconhecê-lo mais
+// como ação direta de quem clicou.
+export function prepararDrive(): void {
+  if (!CLIENT_ID) return
+  void carregarGoogleIdentity().catch(() => {
+    // silencioso de propósito: se falhar aqui, o clique tenta de novo e
+    // aí sim o erro aparece pro usuário, com contexto.
+  })
+}
+
+// Pedir o token é a PRIMEIRA coisa depois do clique, antes de gerar
+// qualquer arquivo. Gerar a planilha e o PDF leva centenas de
+// milissegundos, e o pop-up aberto depois disso já não conta como
+// resposta ao gesto do usuário — o navegador bloqueia.
+export async function autorizarDrive(): Promise<void> {
+  await obterToken()
+}
+
 let scriptCarregado: Promise<void> | null = null
 
 function carregarGoogleIdentity(): Promise<void> {
@@ -91,14 +111,17 @@ async function obterToken(): Promise<string> {
         tokenEmMemoria = { valor: resposta.access_token, expiraEm: Date.now() + 59 * 60 * 1000 }
         resolve(resposta.access_token)
       },
+      // Mensagem por tipo: "não consegui autorizar" sozinho não diz o que
+      // fazer, e os três casos abaixo pedem ações diferentes.
       error_callback: (erro) => {
-        reject(
-          new Error(
-            erro?.type === 'popup_closed'
-              ? 'Você fechou a janela do Google antes de autorizar.'
-              : 'Não consegui autorizar no Google.'
-          )
-        )
+        const tipo = erro?.type ?? 'desconhecido'
+        const mensagens: Record<string, string> = {
+          popup_closed: 'Você fechou a janela do Google antes de autorizar.',
+          popup_failed_to_open:
+            'O navegador bloqueou a janela do Google. Libera o pop-up para este site e tenta de novo.',
+          unknown: 'O Google recusou a autorização. Confere se sua conta está em "Usuários de teste" no console.',
+        }
+        reject(new Error(mensagens[tipo] ?? `Não consegui autorizar no Google (${tipo}).`))
       },
     })
     cliente.requestAccessToken({ prompt: '' })
