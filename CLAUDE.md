@@ -41,6 +41,11 @@ Lista fechada. Não instalar dependência nova sem perguntar.
   rebaixaria pra 3.4.0, quebrando a API. **Importado dinamicamente**: são
   ~930 kB que só descem quando alguém clica em exportar (confirmado no
   build, chunk separado).
+- `jspdf` + `jspdf-autotable` (PDF do acerto — aprovados em 2026-08-13).
+  Também **importados dinamicamente**, em chunk próprio. A instalação
+  trouxe uma vulnerabilidade **alta** em `nanoid`, resolvida com
+  `npm audit fix` (não-quebrante) — não confundir com o aviso do `uuid`
+  acima, que é outro e não se aplica.
 - Supabase: Postgres + Auth + Storage + Realtime + RLS + **uma** Edge Function
   (`criar-usuario` — a única coisa que roda no servidor, ver "Gestão de
   usuários" abaixo)
@@ -78,6 +83,13 @@ Não são preferências. Violar qualquer uma é bug.
 7. **Entrega com assinatura capturada é imutável** nos campos de valor, cliente e
    número do vale. Correção é evento novo apontando para o original, nunca `UPDATE`
    silencioso. Há trigger no banco garantindo isso — não tente contorná-la.
+
+   **Ressalva pendente (2026-08-11):** o usuário decidiu que vale assinado
+   **não recebe alteração nenhuma**, nem por evento novo. Ou seja, a
+   segunda frase desta regra descreve uma saída que ele não quer que
+   exista. Ele ficou de explicar o porquê; até lá, **não construir nem
+   propor** a correção por evento. Quando a explicação vier, esta regra
+   precisa ser reescrita.
 
 8. **Dois relógios.** Gravar `ocorrido_em_local` (relógio do dispositivo, enviado
    pelo cliente) e `registrado_em` (`now()` do servidor). Nunca usar só um. O PC do
@@ -316,30 +328,32 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
 ### Fora — não construir, não sugerir, não "já que estou aqui"
 
 Onboarding de tenant, tela de cadastro de farmácia, cobrança, subdomínio, portal da
-agência, geração de PDF, integração com Trier, leitura de QR de NF-e, app nativo,
+agência, integração com Trier, leitura de QR de NF-e, app nativo,
 notificação WhatsApp, GPS, tarifário por bairro, dashboard com gráfico, conciliação
 de cartão por NSU, PIN de mototaxista, encadeamento de hash, tela de fechamento
-mensal, exportação automática para Drive, tela de cadastro de loja/filial nova
-pela UI (continua manual via SQL, filial é rara — **não confundir com suporte
-a múltiplas lojas, que já existe** de ponta a ponta; a farmácia real tem 17
-filiais).
+mensal, tela de cadastro de loja/filial/cidade nova
+pela UI (continua manual via SQL, filial é rara e cidade mais ainda —
+**não confundir com suporte a múltiplas lojas, que já existe** de ponta a
+ponta; a farmácia real tem 17 filiais).
 
 Se algum destes parecer necessário, **pare e pergunte antes de implementar.**
 
-**Exportação em .xlsx saiu desta lista em 2026-08-13**, por decisão
-explícita do usuário: o acerto mensal com a agência é pago fora do
-sistema, e ter que redigitar os números numa planilha é onde o erro
-aparece. Ver "Exportação do acerto" abaixo. **PDF e Google Drive
-continuam fora** — foram pedidos junto, mas o usuário optou por começar
-pela planilha; os dois seguem exigindo conversa antes (PDF desenhado
-custa outra biblioteca, e Drive custa projeto no Google Cloud, OAuth e
-gestão de token no navegador).
+**Exportação em .xlsx, PDF e Google Drive saíram desta lista em
+2026-08-13**, por decisão explícita do usuário: o acerto com a agência é
+pago fora do sistema, e ter que redigitar os números numa planilha é onde
+o erro aparece. Os três estão construídos — ver "Exportação do acerto"
+abaixo.
 
 ### Ideias futuras — fora do MVP atual, mas anotadas pra não esquecer
 
-(Nada aqui no momento. O painel de usuários, que era a única entrada desta
-lista, foi construído — ver "Gestão de usuários" abaixo. **Loja continua
-manual**, porque filial é rara e não vale a complexidade extra só por ela.)
+- **Atalho de quinzena no relatório** (1ª/2ª quinzena ao lado de "Hoje" e
+  "Este mês"). O pagamento das teles é quinzenal e hoje as datas são
+  digitadas à mão. Anotado em 2026-08-13, não construído.
+
+**Loja e cidade continuam manuais** (SQL), porque filial é rara e cidade
+mais ainda — não vale a complexidade de uma tela pra isso. O painel de
+usuários, que já esteve nesta lista, foi construído (ver "Gestão de
+usuários").
 
 ---
 
@@ -568,40 +582,74 @@ Alegrete não pode aparecer para uma filial de São Gabriel.
 
 ---
 
-## Exportação do acerto — a planilha que vai pra agência
+## Exportação do acerto — planilha, PDF e Drive
 
-O acerto mensal é pago fora do sistema. O botão "Exportar .xlsx" na aba
-Relatórios gera o arquivo do período que **está na tela** — não uma
-segunda consulta. Isso é regra, não detalhe: duas consultas podem divergir
-(dado entrou no meio, filtro diferente) e aí existem duas versões do
-acerto, sem ninguém pra desempatar.
+O acerto é pago fora do sistema, **de 15 em 15 dias**. A aba Relatórios
+tem três botões: "Exportar .xlsx", "Exportar PDF" e "Enviar ao Drive".
 
-- **O número de páginas segue o número de agências**, pela mesma regra do
-  chevron na tela. Uma agência no resultado (caso das filiais de uma
-  cidade só, onde uma única tele faz tudo) → **uma aba**: resumo por
-  motoboy no topo, total a pagar, e a lista de vales abaixo com filtro.
-  Separar em duas ali só obrigaria a ir e voltar, porque o arquivo inteiro
-  já é daquela agência. Mais de uma agência — o fechamento das 18 filiais
-  juntas, quando o admin olha as cidades todas de uma vez — → **duas
-  abas**: "Acerto por agência" (o subtotal que se confere com cada uma) e
-  "Vales" (o que sustenta cada número, pra contestar uma linha).
-- **O pagamento é quinzenal em qualquer caso**, com uma agência ou com
-  várias — não é a quantidade de agências que define o ciclo. O período
-  vem do filtro De/Até, então uma quinzena é só um intervalo como outro
-  qualquer; o que muda entre os dois casos é só quantas agências caem no
-  mesmo arquivo.
+**Os três saem do que ESTÁ NA TELA**, nunca de uma segunda consulta. Isso
+é regra, não detalhe: duas consultas podem divergir (dado entrou no meio,
+filtro diferente) e aí existem duas versões do acerto, sem ninguém pra
+desempatar. Pelo mesmo motivo, quem baixa e quem manda pro Drive chamam a
+mesma função geradora — o que vai pra nuvem é byte a byte o que o usuário
+baixaria.
+
+- **A planilha é UMA página, sempre.** Já foi duas abas (resumo e vales) e
+  o usuário achou desconexo: quem confere o pagamento pula do subtotal pro
+  vale que o compõe o tempo todo, e trocar de aba quebra esse vaivém. O
+  que muda entre uma agência e várias é só a existência da coluna
+  "Agência" nas duas tabelas.
+- **O PDF é o documento que acompanha o pagamento** — feito pra imprimir,
+  assinar e arquivar. Por isso carrega o que um papel solto precisa pra se
+  explicar sozinho meses depois: logo, período, **data e hora de emissão,
+  quem emitiu, e quais filtros valiam**. Esse último evita a pergunta
+  "esse acerto é de qual filial?" na frente da agência.
+- **O quinzenal não muda o formato.** O período vem do filtro De/Até, então
+  uma quinzena é só um intervalo como outro qualquer; o que muda entre uma
+  cidade e várias é só quantas agências caem no mesmo arquivo.
+- **Imagem no PDF precisa de `'FAST'` no `addImage`.** Sem isso o jsPDF
+  grava o bitmap cru e a logo de 8 kB vira ~165 kB dentro do arquivo, que
+  ainda sobem pro Drive a cada envio.
 - **Dinheiro vai como NÚMERO, com `numFmt` de moeda** — nunca como texto
   "R$ 9,00". Célula de texto transforma o arquivo numa imagem de tabela:
   não soma, não filtra, não serve pra conferir. A divisão por 100 acontece
   só aqui, na fronteira de exibição; a aritmética continua em centavos
   inteiros (regra 1).
-- **`montarWorkbook` é separado de `exportarAcertoXlsx`** de propósito: dá
-  pra montar o arquivo e ler de volta pra conferir o conteúdo, sem
-  depender do efeito colateral de download do navegador. Foi assim que a
-  exportação foi testada.
+- **`montarWorkbook`/`montarPdf` são separados de quem baixa**, de
+  propósito: dá pra gerar o arquivo e ler de volta pra conferir o
+  conteúdo, sem depender do efeito colateral de download do navegador.
+  Foi assim que as exportações foram testadas — a planilha lendo o zip
+  (`xl/worksheets/sheetN.xml`) e o PDF pelos bytes.
 - Só entram vales **com corrida atribuída** — é o que compõe o acerto com
   a agência. Vale pendente sem corrida aparece no resumo da tela, não no
   arquivo.
+
+### Google Drive — a única integração externa
+
+O botão "Enviar ao Drive" sobe a planilha e o PDF para
+`Drogaria Cidade Entregas - Acertos › Acertos dd-mm-aaaa a dd-mm-aaaa`.
+Reenviar o mesmo período cai na mesma subpasta em vez de duplicar.
+
+O desenho é deliberadamente mínimo, e cada peça tem motivo:
+
+- **Escopo `drive.file`, nunca `drive`.** O app enxerga só os arquivos que
+  ele mesmo criou — não consegue ler o resto do Drive de ninguém. É também
+  o que torna seguro procurar a pasta pelo nome: a busca não alcança uma
+  pasta homônima do usuário, então não há como "adotar" a pasta errada.
+- **Token só na memória, sem refresh token.** Vale ~1h e morre no reload.
+  Guardar refresh token no navegador seria expor credencial de longa
+  duração no cliente — pior que pedir autorização de novo.
+- **O Client ID é público** e mora em `VITE_GOOGLE_CLIENT_ID` (vai no
+  bundle de qualquer jeito). **O "client secret" não é usado neste fluxo e
+  não deve existir neste projeto** — vale a mesma regra da `service_role`.
+- **Em produção são dois passos**, e faltar qualquer um faz funcionar no
+  localhost e falhar no ar: a variável nas env vars do Cloudflare Pages
+  **com rebuild depois** (o Vite embute no build), e a URL do Pages nas
+  origens JavaScript autorizadas do cliente OAuth.
+- **"O app não concluiu o processo de verificação" quase nunca é sobre
+  verificação.** Com o app em modo de teste, o Google recusa qualquer
+  conta fora de *Usuários de teste*. `drive.file` é escopo não sensível e
+  não exige verificação.
 
 ---
 

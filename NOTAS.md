@@ -1,10 +1,18 @@
-# Notas da sessão — 2026-08-09 e 2026-08-10
+# Notas de trabalho — 2026-08-09 a 2026-08-13
 
 Registro de trabalho, não é documentação permanente do projeto (isso é o
-CLAUDE.md). Decisões duráveis desta sessão já foram incorporadas lá; aqui
-fica o que é mais "estado da sessão" — útil pra retomar, mas não é regra.
+CLAUDE.md). Decisões duráveis já foram incorporadas lá; aqui fica o que é
+mais "estado da sessão" — útil pra retomar, mas não é regra.
 
-Sessão longa, várias frentes seguidas. Ordem cronológica abaixo.
+Cinco dias de trabalho, várias frentes seguidas. Ordem cronológica abaixo:
+itens 1 a 20 são de 09 e 10/08, 21 e 22 de 11/08, 23 a 25 de 12/08, e 26 a
+31 de 12 e 13/08.
+
+**Onde o projeto está:** funcionalmente completo. A checklist "Dentro" do
+MVP fechou no item 6, e por cima dela entraram cancelamento, fechamento de
+caixa, gestão de usuários, tarifa/vales, permissões por filial, cidade,
+exportação em .xlsx e PDF, e envio ao Google Drive. O que falta pro uso
+real não é código — ver "Estado em 2026-08-13" na seção de pendências.
 
 ## 1. Fila offline nas outras 4 escritas
 
@@ -968,6 +976,210 @@ só não têm mais superfície na tela. E `pagosEmMaos`/`pagoEmMaosCents`
 continuam em `fechamento.ts` sem uso na UI — dá pra remover, mas deixei
 porque devolver a seção é mais barato assim.
 
+## 26. Fechando o layout da lista de vales
+
+Sequência de ajustes pedidos um a um, todos na mesma tabela. Vale junto
+porque a lição é a mesma: **cada correção de layout revelou a próxima**, e
+o que parecia gosto pessoal tinha causa medível.
+
+- **Colunas tortas** — a `TableCell` do shadcn é `align-middle`, e numa
+  linha onde Cliente e Data ocupam duas linhas e valor/status ocupam uma,
+  os de uma linha ficavam centralizados. Medido: 9px de desalinho entre a
+  primeira e a última coluna. `[&>td]:align-top` resolveu (1px, que é
+  diferença de medição, não visual).
+- **Dado começando na primeira letra do título** — centralizei corpo e
+  cabeçalho juntos. Centralizar só um dos dois dá a mesma sensação,
+  invertida.
+- **Cliente voltou pra esquerda** a pedido, e aí apareceu a armadilha:
+  `[&>th]:text-center` na linha tem especificidade MAIOR que um
+  `text-left` na célula, então a exceção perdia pra regra que deveria
+  contrariar. Virou classe por célula.
+- **Endereço longo afastando a linha** — com a tabela em `w-full`, a
+  sobra é repartida proporcionalmente e quem mais recebe é a coluna de
+  maior conteúdo. Como Cliente é a única alinhada à esquerda, a sobra
+  virava vão morto à direita do texto (90px com um endereço de teste).
+  Largura fixa (`w-56`) resolveu na origem. **Duas alternativas que
+  pareciam boas e ficaram piores**: teto de `max-width` no bloco interno
+  (a coluna caiu de 382 pra 306, mas o vão continuou — quem cria o vão é
+  a célula, não o conteúdo) e uma coluna `w-full` no fim pra absorver a
+  sobra (aproximou tudo, mas espremeu as demais até o *mínimo* e o
+  endereço passou a quebrar em 4 linhas).
+- **Selo "Transferência" mudou de coluna** — ao lado do número do vale ele
+  inflava a largura mínima daquela coluna (206px) por causa de poucas
+  linhas, e todo vale normal herdava o espaço vazio. Foi pra coluna
+  Cliente, na linha do nome — que na transferência guardaria só a filial
+  de destino, já dita na rota logo abaixo. Precisou de `flex` no wrapper:
+  como item de linha de texto o selo herda espaço de baseline e deixava a
+  linha 2px mais alta.
+- "Registrado por" virou **"Usuário"**, e os botões do painel foram
+  reordenados (Transferência → Retorno → Nova corrida → Nova entrega).
+
+**Nota de método que se repetiu três vezes:** pra saber se uma célula
+quebrou, medir `td.getBoundingClientRect().height` NÃO serve — a célula
+estica junto com a linha, então o detector acusa quebra em "—" e
+"Pendente". O certo é o rect do nó de texto, via `Range`. Errei isso duas
+vezes antes de perceber.
+
+## 27. Transferência: direção invertida e aba própria
+
+**O sistema gravava a direção ao contrário**, e isso passou despercebido
+desde que a transferência foi criada. O fluxo real: a filial que está SEM
+o produto é quem pede; o motoboy vai primeiro na que TEM, pega, entrega na
+que pediu, e é lá que assina e recolhe o vale.
+
+A filial escolhida no select ia pra `loja_destino_id` como se fosse
+destino, quando é a **fornecedora** — e a rota saía invertida em todas as
+9 transferências já lançadas.
+
+O que já estava certo e não mudou: `loja_id` é a filial que pede, dona do
+vale, quem recebe, assina e paga a tele. Por isso a tarifa sai dela e a
+RLS/relatório escopam nela. O erro estava só no outro lado da relação.
+
+Coluna renomeada pra `loja_origem_id` (migration `20260812130000`), junto
+com o CHECK que também dizia "destino". Nome que afirma o oposto do que a
+coluna guarda é o tipo de coisa que faz alguém inverter a lógica de novo
+daqui a seis meses.
+
+**Cinco das nove transferências ficaram com a rota antiga de propósito**:
+já tinham assinatura, e a trigger de imutabilidade congela cliente e valor
+(regra 7). Contornar é proibido, e eram vales de teste.
+
+Na mesma frente, **aba "Transferências"**: "Hoje" e "Histórico" passaram a
+filtrar `tipo = 'cliente'` e a aba nova filtra o contrário, sem corte por
+dia (o volume é baixo, então a mesma lista serve de movimento e de
+histórico). Lá as colunas de venda somem via `ocultarVenda` — seriam "—"
+em 100% das linhas. Consequência que morde: a aba tem query key própria,
+então **toda invalidação que mexe nos dois tipos precisa citar as duas
+chaves**; corrida, fechamento, cancelamento e o Realtime foram
+atualizados juntos.
+
+## 28. Papel que não volta
+
+Pergunta do usuário: vale de convênio e vale com receita geram pendência
+em Documentos, mas na hora de conferir só dá pra marcar recebido — se o
+convênio volta sem assinatura ou a receita não vem, não há como notificar.
+
+Estava certo. A aba só tinha o caminho feliz. Pra receita existia meia
+saída (o evento `falta_receita`), mas escondida no menu "⋮" do vale, na
+outra aba — descobrir o problema num lugar e ter que registrá-lo em outro
+é o mesmo descolamento que a conferência do fechamento tinha. Pra convênio
+não existia nada.
+
+Cada linha da fila ganhou **"Não voltou"** com justificativa obrigatória,
+gravando `falta_receita` ou o tipo novo `falta_documento_convenio`, que
+entram em Notificações, Ocorrências e Auditoria.
+
+**Notificar NÃO tira o item da fila** — decisão do usuário: convênio e
+receita costumam aparecer dias depois, e a pendência só se encerra com o
+papel na mão. Por isso `status_documental = 'extraviado'` **continua sem
+quem escreva**: encerrar ao notificar seria o caso dele, e foi justamente
+o que se decidiu não fazer.
+
+## 29. Exportação do acerto: .xlsx, PDF e Google Drive
+
+O acerto é pago fora do sistema e redigitar números numa planilha é onde o
+erro aparece. Saiu em três etapas, com o usuário decidindo cada uma.
+
+**Planilha (.xlsx).** ExcelJS, não SheetJS: o pacote `xlsx` está
+descontinuado no npm e a versão que o npm serve carrega o CVE-2023-30533.
+O `npm audit` acusa um aviso moderado em `uuid` (transitivo) que **não se
+aplica** — é sobre `v3/v5/v6` recebendo buffer e o ExcelJS só chama `v4()`,
+conferido no código da dependência; `audit fix --force` rebaixaria pra
+3.4.0 e quebraria a API.
+
+**Dinheiro vai como NÚMERO com `numFmt` de moeda, nunca texto.** Célula de
+texto transforma o arquivo numa imagem de tabela: não soma, não filtra,
+não serve pra conferir com a agência.
+
+**Uma página, sempre.** Começou com duas abas (resumo e vales); o usuário
+achou desconexo, porque quem confere pula do subtotal pro vale que o
+compõe o tempo todo. Ficou uma folha só, e o que muda entre uma agência e
+várias é só a existência da coluna "Agência".
+
+**PDF.** jsPDF + jspdf-autotable. Feito pra ser impresso, assinado e
+arquivado, então carrega o que um papel solto precisa pra se explicar
+sozinho meses depois: logo, período, **data e hora de emissão, quem
+emitiu, e quais filtros valiam**. Esse último é o que evita a pergunta
+"esse acerto é de qual filial?" na frente da agência.
+
+Dois achados: a instalação trouxe uma vulnerabilidade **alta** no `nanoid`
+(corrigida com `npm audit fix`, não-quebrante), e o PDF saía com 180 kB
+porque o jsPDF grava imagem sem compressão por padrão — com `'FAST'` no
+`addImage`, 27 kB.
+
+**Google Drive.** A única integração externa do projeto. Desenho escolhido
+pra ser o menos invasivo possível:
+
+- escopo **`drive.file`**, não `drive`: o app enxerga só os arquivos que
+  ele mesmo criou. É também o que torna seguro procurar a pasta pelo nome
+  — não há risco de "adotar" uma pasta homônima do usuário.
+- **token só na memória**, sem refresh token. Vale ~1h e morre no reload.
+  Guardar refresh token no navegador seria expor credencial de longa
+  duração no cliente.
+- o **Client ID é público** (vai no bundle, mora em `VITE_GOOGLE_CLIENT_ID`).
+  O "client secret" não é usado neste fluxo e não deve existir aqui.
+- estrutura `Drogaria Cidade Entregas - Acertos › Acertos dd-mm-aaaa a
+  dd-mm-aaaa › arquivos`. Reenviar o mesmo período cai na mesma subpasta.
+
+**Um erro de configuração que vale registrar** porque a mensagem do Google
+engana: "o app não concluiu o processo de verificação" quase sempre quer
+dizer que a conta não está em *Usuários de teste*, não que falte
+verificação. `drive.file` é escopo não sensível e não exige verificação.
+
+**Como testei sem poder baixar:** `montarWorkbook`/`montarPdf` ficaram
+separados de quem baixa, então dá pra gerar o arquivo e ler de volta. A
+planilha foi conferida lendo o zip (`xl/worksheets/sheetN.xml`) e o PDF
+pelos bytes (`%PDF-`, `/XObject` da logo, textos e valores). O clique real
+no link de download **trava o renderer com o painel do navegador oculto** —
+não é bug do app; neutralizando só o clique do link, a exportação completa
+normalmente.
+
+## 30. Cidade amarrando filial e agência
+
+Em cada cidade **uma** agência de tele atende **todas** as filiais dali.
+Uma agência de Alegrete não pode aparecer pra uma filial de São Gabriel —
+e o sistema não sabia disso.
+
+`cidades` virou tabela, não `cidade text` nas duas pontas: com string, a
+associação dependeria de dois textos baterem exatamente ("São Gabriel" ≠
+"Sao Gabriel"), e um acento errado desassociaria a agência em silêncio, no
+que decide dinheiro.
+
+**Não criei constraint de "uma agência por cidade"**, e isso é decisão, não
+esquecimento: o usuário disse "por enquanto vamos supor que é assim", e
+travar no banco criaria uma migration de desfazer no dia em que a
+suposição cair. Quem se adapta é a tela — **o mesmo predicado (uma agência
+no resultado?) governa o chevron do relatório e o formato da planilha**.
+
+A tela some com o NÍVEL, nunca com a informação: com uma agência só, o
+nome dela continua aparecendo com os totais e os motoboys logo abaixo,
+sem chevron. O clique some, o dado não.
+
+Testado criando Alegrete/RS com a agência "Alegretense Tele" — ativa,
+cadastrada, e ausente do dropdown de uma filial de São Gabriel. Sem uma
+segunda cidade no banco essa regra não era testável.
+
+## 31. Exclusão de dados de teste — exceção consciente à regra 4
+
+O grupo "(sem agência)" do relatório era uma corrida antiga sem
+`agencia_id` e dois vales. Levantei que **`DELETE` em `entregas`/`corridas`
+é proibido pela regra 4** e propus o contrário: apontar a corrida pra
+agência do próprio motoboy, o que faria o grupo sumir *e* devolveria os
+R$ 14,00 pro acerto.
+
+O usuário reafirmou com razão explícita: a regra protege trilha de
+auditoria de entrega **real**, e aquilo era dado de teste antes do
+primeiro deploy. Decisão dele, executada por ele no SQL Editor (o app não
+tem policy de DELETE, então o cliente não conseguiria nem se quisesse).
+
+**A regra 4 continua escrita como está no CLAUDE.md** — a partir do deploy
+ela volta a ser inviolável. Se em produção aparecer corrida sem agência, o
+caminho é o que propus, não o delete.
+
+Conferido depois: zero corridas sem agência, zero pagamentos órfãos, e os
+totais caindo **exatamente** R$ 14,00 — o número fechando é o que prova
+que nada mais foi junto.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -1014,6 +1226,27 @@ Sessão de 2026-08-12:
 27. visibilidade por filial: gerente preso à própria loja (item 23)
 28. layout dos vales: selo, data em duas linhas, "Registrado por" (item 24)
 29. polimento de gestão: conferência, documentos, termos, pop-ups (item 25)
+
+Sessão de 2026-08-13 (itens 26 a 31):
+
+30. `e550cfe` — centraliza as colunas da lista
+31. `82388e2` — Cliente à esquerda, resto centralizado
+32. `1c27a7b` — alinhamento pelo topo + coluna "Usuário"
+33. `f2312a1` — largura fixa da coluna Cliente
+34. `b8ca7a8` — reordena os botões do painel
+35. `7f13586` — selo de transferência na coluna Cliente
+36. `7cba864` — corrige a direção da transferência
+37. `a0b9a4d` — aba própria das transferências
+38. `f5e3117` — Filtrar/Limpar junto do período no histórico
+39. `e20cbb4` — notificar documento/receita que não voltou
+40. `c29fb21` — exportação do acerto em .xlsx
+41. `63d988c` — planilha adaptativa ao número de agências, com cor
+42. `8bd4efe` — cidade amarrando filial e agência
+43. `e51e190` — PDF do acerto + envio ao Google Drive
+
+Do 30 em diante os commits foram feitos pelo usuário no terminal: o
+classificador do modo automático bloqueou `git commit`/`push` a partir de
+certo ponto da sessão.
 
 ## Migrations aplicadas nesta sessão
 
@@ -1063,6 +1296,19 @@ As duas foram rodadas **duas vezes** pelo usuário: a primeira versão
 deixava o INSERT aberto (ver item 23). Como são `drop policy` +
 `create policy`, reaplicar substitui sem resíduo.
 
+Sessão de 2026-08-13:
+
+24. `20260812130000_transferencia_direcao.sql` (renomeia
+    `loja_destino_id` → `loja_origem_id`, renomeia o CHECK, e corrige a
+    rota dos vales de transferência que ainda não foram assinados — os
+    assinados ficam de fora pela trigger de imutabilidade)
+25. `20260813120000_cidades.sql` (tabela `cidades` + RLS, `cidade_id` em
+    `lojas` e `agencias`, seed de São Gabriel/RS associando o que já
+    existia)
+
+Fora migration, um `DELETE` manual no SQL Editor apagando a corrida sem
+agência e seus dois vales — exceção consciente à regra 4, ver item 31.
+
 Fora migration: a Edge Function `criar-usuario` foi publicada pelo
 usuário via dashboard (Edge Functions → Via Editor). **Não há CLI do
 Supabase configurada neste projeto** — mandei o comando `supabase
@@ -1088,16 +1334,41 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
+### Estado em 2026-08-13 — o que separa o projeto do uso real
+
+Nada disso é código. O sistema está funcional; o que falta é a virada de
+chave:
+
+- [ ] **Dados reais das filiais.** Hoje o banco tem Matriz e Filial 02
+      fictícias; a farmácia tem 17. Falta a lista de filiais com suas
+      cidades pra montar o SQL (loja e cidade são inserção manual, por
+      decisão antiga — ver CLAUDE.md).
+- [ ] **Agência real.** O dado de teste é "Ágil Motos"; em São Gabriel a
+      agência é a Gabrielense.
+- [ ] **Limpeza dos dados de teste** (lista atualizada no fim).
+- [ ] **Trocar as senhas de teste no Supabase** — pendente desde
+      2026-08-10 e o único item com risco real esperando. `adminteste@` e
+      `caixateste@` com senha `2026`, num Supabase de produção, e o
+      histórico do repositório registra isso.
+- [ ] **Passos de produção do Drive**: `VITE_GOOGLE_CLIENT_ID` nas
+      variáveis do Cloudflare Pages **com rebuild depois** (o Vite embute
+      no build), e a URL do Pages nas origens autorizadas do Google. Se
+      faltar qualquer um, funciona no localhost e falha no ar.
+
+Ideia pequena anotada e não feita: **atalho de quinzena** no relatório
+(1ª/2ª quinzena ao lado de Hoje/Este mês), já que o pagamento das teles
+segue esse ciclo e hoje as datas são digitadas à mão.
+
 **Dos 3 buracos que levantei quando o usuário perguntou que ideias
 existiam além das obrigatórias, 2 foram feitos** (cancelamento no item
 17, eixo financeiro nos itens 18-19). Sobrou um:
 
-- [ ] **Correção de entrega já assinada.** A regra 7 diz que correção é
-      evento novo apontando pro original, nunca `UPDATE` silencioso. O
-      trigger no banco bloqueia o UPDATE (testado, funciona) — mas a
-      outra metade nunca foi construída. Hoje, se o caixa precisa
-      corrigir valor de um vale já assinado, ele bate num erro de
-      constraint e acabou: a regra descreve a saída, a saída não existe.
+- [x] ~~**Correção de entrega já assinada.**~~ **Não construir.** Em
+      2026-08-11 o usuário decidiu que vale já assinado **não recebe
+      alteração nenhuma** — nem por evento novo. A regra 7 do CLAUDE.md
+      ainda descreve a saída por evento apontando pro original, então
+      **a documentação e a decisão divergem**: falta o usuário explicar o
+      porquê pra eu acertar a regra. Até lá, não propor nem implementar.
       Mesmo formato do buraco do cancelamento antes do item 17.
 
 ## Gaps conhecidos, não resolvidos
@@ -1125,6 +1396,18 @@ existiam além das obrigatórias, 2 foram feitos** (cancelamento no item
   caixa) vive no Trier. Está documentado no CLAUDE.md e escrito na
   própria tela. Se um dia entrar o total do Trier, aí dá pra fazer a
   conta; sem esse dado, **não inventar o número**.
+- **`status_documental = 'extraviado'` continua sem quem escreva** —
+  agora por decisão explícita (item 28): notificar que o papel não voltou
+  não encerra a pendência, porque convênio e receita aparecem dias
+  depois. O valor segue no schema pro dia em que a decisão mudar.
+- **`eventos.status_alterado` não tem `ocorrido_em_local`** — de
+  propósito desde o item 8; pode vir de UPDATE em lote sem relógio de
+  dispositivo confiável por linha.
+- **5 transferências antigas com a rota invertida** (item 27) — já
+  assinadas, congeladas pela regra 7. São de teste e somem na limpeza.
+- **`npm audit` acusa 2 moderadas em `uuid`** via ExcelJS. Avaliado no
+  item 29: não se aplica ao caminho usado (só `v4()`), e o `--force`
+  quebraria a API. Não "consertar" sem reler aquilo.
 
 ## Nota pra próxima sessão sobre testes de UI no navegador
 
@@ -1262,3 +1545,22 @@ existir, então não desative sem saber disso.
 Se quiser começar "limpo" pra operação real, isso teria que ser removido
 manualmente via SQL Editor — o app não tem (e não deveria ter) um jeito de
 apagar isso pela interface.
+
+**Acrescentado em 12 e 13 de agosto:**
+
+- `V-000024`, `V-000026`, `V-000032`, `V-000033` — transferências de
+  teste, as primeiras **com valor** (900) e depois as primeiras com a
+  **direção corrigida**.
+- `V-000034` — transferência criada no teste da direção nova
+  (Matriz pedindo à Filial 02).
+- `V-000036` (Teste Notificar Documento) — criado com convênio + receita
+  pra testar o "Não voltou"; tem dois eventos de ocorrência associados.
+- Alguns vales de cliente criados nos testes de filtro e paginação.
+- **Cidade "Alegrete/RS" e agência "Alegretense Tele"** — criadas por mim
+  pra provar que uma tele de outra cidade não aparece pra São Gabriel.
+  Sem uma segunda cidade essa regra não era testável. **Vale manter até
+  você validar o comportamento multi-cidade**; depois disso, some junto.
+- Cidade **São Gabriel/RS** e as associações de `cidade_id` vieram do
+  seed da migration — essas são dado real e ficam.
+- **V-1001 e V-1002 foram APAGADOS** (item 31), junto com a corrida sem
+  agência. São os únicos registros que deixaram de existir no projeto.
