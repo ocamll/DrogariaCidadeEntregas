@@ -19,6 +19,8 @@
     "dexie": "^4.4.4",
     "dexie-react-hooks": "^4.4.0",
     "exceljs": "^4.4.0",
+    "jspdf": "^4.2.1",
+    "jspdf-autotable": "^5.0.8",
     "lucide-react": "^1.29.0",
     "radix-ui": "^1.6.7",
     "react": "^19.2.8",

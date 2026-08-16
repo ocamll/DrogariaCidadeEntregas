@@ -11,6 +11,7 @@ import {
 import { useLojas } from '@/data/lojas'
 import { useCidades, rotuloCidade } from '@/data/cidades'
 import { useAgenciasDaCidade } from '@/data/corridas'
+import { driveConfigurado } from '@/lib/googleDrive'
 import { formatBRL } from '@/lib/money'
 import { cn } from '@/lib/utils'
 import { Button } from '@/components/ui/button'
@@ -71,8 +72,12 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
   const { data: agencias } = useAgenciasDaCidade(cidadeDaFilial)
   const [agenciasAbertas, setAgenciasAbertas] = useState<Set<string>>(new Set())
   const [motoboysAbertos, setMotoboysAbertos] = useState<Set<string>>(new Set())
-  const [exportando, setExportando] = useState(false)
+  // guarda QUAL formato está sendo gerado, pra só aquele botão mudar de
+  // rótulo — com um booleano só, clicar em .xlsx deixava o PDF em
+  // "Gerando…" também.
+  const [exportando, setExportando] = useState<'xlsx' | 'pdf' | 'drive' | null>(null)
   const [erroExport, setErroExport] = useState<string | null>(null)
+  const [enviadoAoDrive, setEnviadoAoDrive] = useState<string | null>(null)
 
   const { data, isLoading, isError, error } = useRelatorio(filtro)
 
@@ -94,18 +99,74 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
     })
   }
 
-  async function exportar() {
+  // O que o PDF impresso precisa pra se explicar sozinho: quem emitiu e
+  // quais filtros valiam. O filtro aplicado é o `filtro`, não o `form` —
+  // o formulário pode ter mudado sem ninguém clicar em "Aplicar", e o
+  // papel tem que descrever o que está na tela.
+  function contextoDoAcerto() {
+    return {
+      emitidoPor: profile.nome,
+      filialNome: filtro.lojaId
+        ? (lojas?.find((l) => l.id === filtro.lojaId)?.nome ?? null)
+        : null,
+      agenciaNome: filtro.agenciaId
+        ? (agencias?.find((a) => a.id === filtro.agenciaId)?.nome ?? null)
+        : null,
+    }
+  }
+
+  // os dois formatos saem do MESMO `data` que está na tela — nunca de uma
+  // segunda consulta. Duas consultas podem divergir, e aí existem duas
+  // versões do acerto sem ninguém pra desempatar.
+  async function exportar(formato: 'xlsx' | 'pdf') {
     if (!data) return
-    setExportando(true)
+    setExportando(formato)
     setErroExport(null)
     try {
-      // import dinâmico lá dentro: o ExcelJS só desce quando alguém clica
-      const { exportarAcertoXlsx } = await import('@/lib/exportarAcerto')
-      await exportarAcertoXlsx(data, filtro)
+      // import dinâmico lá dentro: a biblioteca só desce quando alguém clica
+      if (formato === 'xlsx') {
+        const { exportarAcertoXlsx } = await import('@/lib/exportarAcerto')
+        await exportarAcertoXlsx(data, filtro)
+      } else {
+        const { exportarAcertoPdf } = await import('@/lib/exportarAcertoPdf')
+        await exportarAcertoPdf(data, filtro, contextoDoAcerto())
+      }
     } catch (e) {
-      setErroExport(`Não consegui gerar a planilha: ${e instanceof Error ? e.message : String(e)}`)
+      const nome = formato === 'xlsx' ? 'a planilha' : 'o PDF'
+      setErroExport(`Não consegui gerar ${nome}: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
-      setExportando(false)
+      setExportando(null)
+    }
+  }
+
+  // Manda os DOIS arquivos: quem confere com a agência quer o PDF, quem
+  // confere os números quer a planilha, e separar em dois botões só
+  // multiplicaria a janela de autorização do Google.
+  async function enviarParaDrive() {
+    if (!data) return
+    setExportando('drive')
+    setErroExport(null)
+    setEnviadoAoDrive(null)
+    try {
+      const [{ gerarXlsx }, { gerarPdf }, { enviarAoDrive, NOME_DA_PASTA, nomeDaSubpasta }] =
+        await Promise.all([
+        import('@/lib/exportarAcerto'),
+        import('@/lib/exportarAcertoPdf'),
+        import('@/lib/googleDrive'),
+      ])
+      const arquivos = [
+        await gerarXlsx(data, filtro),
+        await gerarPdf(data, filtro, contextoDoAcerto()),
+      ]
+      const enviados = await enviarAoDrive(arquivos, filtro)
+      const subpasta = nomeDaSubpasta(filtro.dataInicio, filtro.dataFim)
+      setEnviadoAoDrive(
+        `${enviados.length} arquivos enviados para ${NOME_DA_PASTA} › ${subpasta}.`
+      )
+    } catch (e) {
+      setErroExport(`Não consegui enviar ao Drive: ${e instanceof Error ? e.message : String(e)}`)
+    } finally {
+      setExportando(null)
     }
   }
 
@@ -199,12 +260,23 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
         {/* Exporta o que está na tela, não uma segunda consulta: o arquivo
             e o relatório precisam contar a mesma história, senão vira duas
             versões do acerto e alguém tem que decidir em qual acreditar. */}
-        <Button variant="outline" onClick={exportar} disabled={!data || exportando}>
-          {exportando ? 'Gerando…' : 'Exportar .xlsx'}
+        <Button variant="outline" onClick={() => exportar('xlsx')} disabled={!data || !!exportando}>
+          {exportando === 'xlsx' ? 'Gerando…' : 'Exportar .xlsx'}
         </Button>
+        <Button variant="outline" onClick={() => exportar('pdf')} disabled={!data || !!exportando}>
+          {exportando === 'pdf' ? 'Gerando…' : 'Exportar PDF'}
+        </Button>
+        {/* só aparece se o ambiente tem o Client ID configurado — sem ele
+            o botão existiria só pra dar erro ao ser clicado */}
+        {driveConfigurado() && (
+          <Button variant="outline" onClick={enviarParaDrive} disabled={!data || !!exportando}>
+            {exportando === 'drive' ? 'Enviando…' : 'Enviar ao Drive'}
+          </Button>
+        )}
       </div>
 
       {erroExport && <p className="text-sm text-destructive">{erroExport}</p>}
+      {enviadoAoDrive && <p className="text-sm text-foreground/70">{enviadoAoDrive}</p>}
 
       {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
       {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
