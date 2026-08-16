@@ -1,18 +1,19 @@
-# Notas de trabalho — 2026-08-09 a 2026-08-13
+# Notas de trabalho — 2026-08-09 a 2026-08-16
 
 Registro de trabalho, não é documentação permanente do projeto (isso é o
 CLAUDE.md). Decisões duráveis já foram incorporadas lá; aqui fica o que é
 mais "estado da sessão" — útil pra retomar, mas não é regra.
 
-Cinco dias de trabalho, várias frentes seguidas. Ordem cronológica abaixo:
-itens 1 a 20 são de 09 e 10/08, 21 e 22 de 11/08, 23 a 25 de 12/08, e 26 a
-31 de 12 e 13/08.
+Vários dias de trabalho, várias frentes seguidas. Ordem cronológica
+abaixo: itens 1 a 20 são de 09 e 10/08, 21 e 22 de 11/08, 23 a 25 de
+12/08, 26 a 30 de 12 e 13/08, e 31 e 32 de 16/08 — com a parte de PDF e
+Google Drive do item 29 também sendo de 16/08.
 
 **Onde o projeto está:** funcionalmente completo. A checklist "Dentro" do
 MVP fechou no item 6, e por cima dela entraram cancelamento, fechamento de
 caixa, gestão de usuários, tarifa/vales, permissões por filial, cidade,
 exportação em .xlsx e PDF, e envio ao Google Drive. O que falta pro uso
-real não é código — ver "Estado em 2026-08-13" na seção de pendências.
+real não é código — ver "Estado em 2026-08-16" na seção de pendências.
 
 ## 1. Fila offline nas outras 4 escritas
 
@@ -1257,7 +1258,8 @@ Sessão de 2026-08-12:
 28. layout dos vales: selo, data em duas linhas, "Registrado por" (item 24)
 29. polimento de gestão: conferência, documentos, termos, pop-ups (item 25)
 
-Sessão de 2026-08-13 (itens 26 a 31):
+Sessões de 2026-08-12 e 2026-08-13 (itens 26 a 30) e de 2026-08-16
+(item 29 na parte de PDF/Drive, itens 31 e 32):
 
 30. `e550cfe` — centraliza as colunas da lista
 31. `82388e2` — Cliente à esquerda, resto centralizado
@@ -1272,9 +1274,12 @@ Sessão de 2026-08-13 (itens 26 a 31):
 40. `c29fb21` — exportação do acerto em .xlsx
 41. `63d988c` — planilha adaptativa ao número de agências, com cor
 42. `8bd4efe` — cidade amarrando filial e agência
+Os de 43 em diante são de 16/08:
+
 43. `e51e190` — PDF do acerto + envio ao Google Drive
 44. `4eda537` — fecha o registro dos itens 26 a 31 no NOTAS e CLAUDE
 45. `e642e96` — autorização do Drive antes de gerar os arquivos (item 32)
+46. `cd024c9` — registra o item 32 no NOTAS e CLAUDE
 
 Do 30 em diante os commits foram feitos pelo usuário no terminal: o
 classificador do modo automático bloqueou `git commit`/`push` a partir de
@@ -1328,7 +1333,7 @@ As duas foram rodadas **duas vezes** pelo usuário: a primeira versão
 deixava o INSERT aberto (ver item 23). Como são `drop policy` +
 `create policy`, reaplicar substitui sem resíduo.
 
-Sessão de 2026-08-13:
+Sessões de 2026-08-12 e 2026-08-13:
 
 24. `20260812130000_transferencia_direcao.sql` (renomeia
     `loja_destino_id` → `loja_origem_id`, renomeia o CHECK, e corrige a
@@ -1366,7 +1371,7 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### Estado em 2026-08-13 — o que separa o projeto do uso real
+### Estado em 2026-08-16 — o que separa o projeto do uso real
 
 Nada disso é código. O sistema está funcional; o que falta é a virada de
 chave:
@@ -1485,6 +1490,28 @@ todo teste de restrição passa por engano (ele enxerga tudo do tenant de
 qualquer jeito). Lojas "Matriz" e "Filial 02" (mais 15 filiais reais que
 ainda não têm registro no banco — ver seção 6 acima). Agência "Ágil
 Motos", motoboys João Silva e Pedro Souza.
+
+**`AGENTS.md` na raiz, sem rastreamento no git.** É uma **cópia do
+CLAUDE.md** (910 linhas contra as ~960 atuais), com data de 13/08 às
+23:55 — fora de qualquer sessão de trabalho minha naquele dia, cuja
+última alteração foi às 10:46. O conteúdo corresponde ao CLAUDE.md como
+ele estava no fim daquele dia.
+
+Não fui eu que criei; nunca escrevi nesse arquivo. `AGENTS.md` é a
+convenção que **outras ferramentas de IA** usam pra ler instruções de
+projeto (o Codex, da OpenAI, entre elas), então o mais provável é que
+alguma outra ferramenta rodando nesta pasta tenha gerado a cópia. Não
+existe nenhum outro rastro de ferramenta no diretório (só `.claude/`).
+
+Decisão pendente do usuário: colocar no `.gitignore` (se for de uma
+ferramenta que ele usa), apagar (é cópia, não tem nada exclusivo), ou
+transformar num arquivo curto apontando pro CLAUDE.md. **Como está, é uma
+segunda fonte de verdade que já nasceu desatualizada.**
+
+**Cuidado com datas ao escrever aqui:** em 16/08 eu registrei o trabalho
+do dia como sendo de 13/08, porque me baseei no contexto da conversa em
+vez do relógio. Corrigido depois conferindo `git log --date` e o
+`mtime` dos arquivos. Se for datar alguma coisa, conferir na fonte.
 
 **Node.js nesta máquina:** instalado em `C:\Program Files\nodejs`, **não
 está no PATH** desta sessão/terminal. `npm`/`node` só funcionam com

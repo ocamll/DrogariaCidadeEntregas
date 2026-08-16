@@ -41,7 +41,7 @@ Lista fechada. Não instalar dependência nova sem perguntar.
   rebaixaria pra 3.4.0, quebrando a API. **Importado dinamicamente**: são
   ~930 kB que só descem quando alguém clica em exportar (confirmado no
   build, chunk separado).
-- `jspdf` + `jspdf-autotable` (PDF do acerto — aprovados em 2026-08-13).
+- `jspdf` + `jspdf-autotable` (PDF do acerto — aprovados em 2026-08-16).
   Também **importados dinamicamente**, em chunk próprio. A instalação
   trouxe uma vulnerabilidade **alta** em `nanoid`, resolvida com
   `npm audit fix` (não-quebrante) — não confundir com o aviso do `uuid`
@@ -338,17 +338,17 @@ ponta; a farmácia real tem 17 filiais).
 
 Se algum destes parecer necessário, **pare e pergunte antes de implementar.**
 
-**Exportação em .xlsx, PDF e Google Drive saíram desta lista em
-2026-08-13**, por decisão explícita do usuário: o acerto com a agência é
-pago fora do sistema, e ter que redigitar os números numa planilha é onde
-o erro aparece. Os três estão construídos — ver "Exportação do acerto"
-abaixo.
+**Exportação em .xlsx saiu desta lista em 2026-08-13, e PDF e Google
+Drive em 2026-08-16**, por decisão explícita do usuário: o acerto com a
+agência é pago fora do sistema, e ter que redigitar os números numa
+planilha é onde o erro aparece. Os três estão construídos — ver
+"Exportação do acerto" abaixo.
 
 ### Ideias futuras — fora do MVP atual, mas anotadas pra não esquecer
 
 - **Atalho de quinzena no relatório** (1ª/2ª quinzena ao lado de "Hoje" e
   "Este mês"). O pagamento das teles é quinzenal e hoje as datas são
-  digitadas à mão. Anotado em 2026-08-13, não construído.
+  digitadas à mão. Anotado em 2026-08-16, não construído.
 
 **Loja e cidade continuam manuais** (SQL), porque filial é rara e cidade
 mais ainda — não vale a complexidade de uma tela pra isso. O painel de
