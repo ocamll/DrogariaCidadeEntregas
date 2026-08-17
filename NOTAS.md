@@ -1854,9 +1854,13 @@ secret `ROMANEIO_KEYS`.
       farmácia e não com app de celular (app é bem mais tolerante), e
       antes de laminar, se for laminar. Se falhar, o primeiro ajuste é
       imprimir maior — não mexer no formato do token.
-- [ ] **Apagar a pasta `.chaves-offline/`.** A chave privada ainda está
-      lá, dentro do OneDrive, e o secret já está configurado no Supabase.
-      Ela não serve mais pra nada.
+- [x] ~~Apagar a pasta `.chaves-offline/`~~ — feito em 2026-08-17. A
+      chave privada não existe mais nesta máquina; ela vive só no secret
+      `ROMANEIO_KEYS` da Edge Function. **Consequência prática:** não há
+      mais como recuperá-la daqui. Rotacionar passa a ser gerar um par
+      NOVO com `scripts/gerar-chaves-offline.mjs` e acrescentar ao
+      secret — mantendo a antiga lá enquanto houver saída offline
+      pendente, senão o que foi selado antes da troca não abre mais.
 - [ ] **Dispensar o romaneio `R-000002`** na fila offline (botão "Já
       anotei, dispensar"). É um conflito de teste, nascido do bug da FK
       do item 40 — os mesmos vales tentando sair duas vezes.
