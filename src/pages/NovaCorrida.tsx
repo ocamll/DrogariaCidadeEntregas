@@ -17,6 +17,8 @@ import {
   identificarNoCache,
   sincronizarCacheDeCredenciais,
   definirPin,
+  autenticarCredencial,
+  MOTIVO_FALHA_PIN_LABEL,
   pinAceitavel,
   publicIdDoToken,
 } from '@/data/credenciais'
@@ -79,6 +81,20 @@ function NovaCorridaFluxo({
   const [credencial, setCredencial] = useState<Credencial | null>(null)
   const [pin, setPin] = useState('')
   const [pinConfirmacao, setPinConfirmacao] = useState('')
+
+  // O PIN precisa ser conferido ANTES de a tela liberar as assinaturas.
+  //
+  // A primeira versão só checava `pinAceitavel(pin)`, que valida FORMATO
+  // (6 dígitos, não sequência, não repetido) e nada mais — a verificação
+  // de verdade só acontecia no "Confirmar saída", lá no fim. O servidor
+  // recusava certo, mas a tela liberava tudo e o caixa só descobria o PIN
+  // errado depois de colher as duas assinaturas. Pra quem está no balcão
+  // isso é indistinguível de "qualquer PIN é aceito", e com razão.
+  //
+  //   null      → ainda não conferido
+  //   'ok'      → servidor confirmou a identidade
+  //   'offline' → sem rede; vai ser conferido só na sincronização
+  const [pinConferido, setPinConferido] = useState<null | 'ok' | 'offline'>(null)
   const [erro, setErro] = useState<string | null>(null)
   const [ocupado, setOcupado] = useState<string | null>(null)
   const [resultado, setResultado] = useState<Resultado | null>(null)
@@ -111,6 +127,7 @@ function NovaCorridaFluxo({
     setCredencial(null)
     setToken('')
     setPin('')
+    setPinConferido(null)
   }
 
   function montarEntrada(): EntradaCanonica {
@@ -216,8 +233,51 @@ function NovaCorridaFluxo({
       await definirPin(token, pin)
       setCredencial((c) => (c ? { ...c, temPin: true } : c))
       setPinConfirmacao('')
+      // Zera o campo e NÃO marca como conferido: acabou de criar, mas
+      // ainda tem que digitar de novo e passar pelo servidor — é o que
+      // prova que quem digitou lembra do que escolheu.
       setPin('')
+      setPinConferido(null)
     } catch (e) {
+      setErro(e instanceof Error ? e.message : String(e))
+    } finally {
+      setOcupado(null)
+    }
+  }
+
+  // Confere o PIN contra o servidor ANTES de liberar as assinaturas.
+  //
+  // Usa `autenticarCredencial` e não `autorizarSaida` de propósito: a
+  // autorização vale 2 minutos e está amarrada ao document_hash, então
+  // emiti-la aqui a faria expirar enquanto o motoboy assina. Aqui só se
+  // pergunta "é ele?"; a autorização de uso único nasce no confirmar,
+  // fresca. São duas passadas de bcrypt (~600ms no total), o que é
+  // barato perto de colher duas assinaturas e descobrir o erro depois.
+  async function handleConferirPin() {
+    setErro(null)
+    const problema = pinAceitavel(pin)
+    if (problema) return setErro(problema)
+
+    if (!navigator.onLine) {
+      setPinConferido('offline')
+      return
+    }
+
+    setOcupado('conferindo')
+    try {
+      const r = await autenticarCredencial(token, pin)
+      if (r.ok) {
+        setPinConferido('ok')
+        return
+      }
+      setPinConferido(null)
+      setErro(
+        r.motivo === 'bloqueado' && r.bloqueadoAte
+          ? `${MOTIVO_FALHA_PIN_LABEL.bloqueado} Libera às ${new Date(r.bloqueadoAte).toLocaleTimeString('pt-BR')}.`
+          : MOTIVO_FALHA_PIN_LABEL[r.motivo]
+      )
+    } catch (e) {
+      setPinConferido(null)
       setErro(e instanceof Error ? e.message : String(e))
     } finally {
       setOcupado(null)
@@ -230,6 +290,10 @@ function NovaCorridaFluxo({
     if (!credencial) return setErro('Falta bipar o cartão do motoboy.')
     if (!credencial.temPin) return setErro('Este motoboy ainda precisa criar o PIN dele.')
     if (pinAceitavel(pin)) return setErro('Falta o PIN do motoboy.')
+    // Redundante com `podeConfirmar` (o botão já estaria desabilitado),
+    // e fica de propósito: é a última barreira antes de gastar as
+    // assinaturas, e formato válido nunca substituiu identidade.
+    if (pinConferido === null) return setErro('Confirma a identidade do motoboy antes.')
     if (!caixaPad.current || caixaPad.current.isEmpty()) return setErro('Falta a sua assinatura.')
     if (!motoboyPad.current || motoboyPad.current.isEmpty()) {
       return setErro('Falta a assinatura do motoboy.')
@@ -376,12 +440,17 @@ function NovaCorridaFluxo({
     setCredencial(null)
     setPin('')
     setPinConfirmacao('')
+    setPinConferido(null)
     caixaPad.current?.clear()
     motoboyPad.current?.clear()
   }
 
+  // `pinConferido` e não `pinAceitavel(pin)`: formato bem escrito não é
+  // identidade confirmada. Offline o valor é 'offline', que também
+  // libera — mas aí a tela diz, com todas as letras, que a verificação
+  // ficou pra sincronização.
   const podeConfirmar =
-    escolhidos.length > 0 && credencial !== null && credencial.temPin && !pinAceitavel(pin)
+    escolhidos.length > 0 && credencial !== null && credencial.temPin && pinConferido !== null
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -458,6 +527,7 @@ function NovaCorridaFluxo({
                       setCredencial(null)
                       setToken('')
                       setPin('')
+                      setPinConferido(null)
                     }}
                   >
                     Trocar
@@ -495,16 +565,72 @@ function NovaCorridaFluxo({
                 ) : (
                   <div className="flex flex-col gap-2">
                     <Label htmlFor="pin">PIN do motoboy</Label>
-                    <Input
-                      id="pin"
-                      type="password"
-                      inputMode="numeric"
-                      maxLength={6}
-                      placeholder="••••••"
-                      className="max-w-40 tracking-[0.5em]"
-                      value={pin}
-                      onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
-                    />
+                    <div className="flex items-center gap-2">
+                      <Input
+                        id="pin"
+                        type="password"
+                        inputMode="numeric"
+                        maxLength={6}
+                        placeholder="••••••"
+                        className="max-w-40 tracking-[0.5em]"
+                        value={pin}
+                        disabled={pinConferido !== null}
+                        onChange={(e) => {
+                          setPin(e.target.value.replace(/\D/g, ''))
+                          setPinConferido(null)
+                        }}
+                        // Enter confirma: o motoboy digita e aperta, sem
+                        // procurar botão com o caixa esperando.
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') void handleConferirPin()
+                        }}
+                      />
+                      {pinConferido === null ? (
+                        // Botão explícito, e não verificação automática ao
+                        // completar 6 dígitos: cada tentativa errada conta
+                        // pro bloqueio progressivo, e quem se atrapalha
+                        // digitando queimaria o bloqueio do motoboy sem ter
+                        // errado o PIN de verdade.
+                        <Button
+                          type="button"
+                          variant="outline"
+                          disabled={!!pinAceitavel(pin) || ocupado === 'conferindo'}
+                          onClick={() => void handleConferirPin()}
+                        >
+                          {ocupado === 'conferindo' ? 'Conferindo…' : 'Confirmar identidade'}
+                        </Button>
+                      ) : (
+                        <Button
+                          type="button"
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => {
+                            setPin('')
+                            setPinConferido(null)
+                          }}
+                        >
+                          Trocar PIN
+                        </Button>
+                      )}
+                    </div>
+
+                    {pinConferido === 'ok' && (
+                      <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
+                        ✓ Identidade confirmada — {credencial.motoboyNome}
+                      </p>
+                    )}
+                    {/* Sem rede não há como conferir: o HMAC e o bcrypt
+                        vivem no servidor. O PIN vai selado no envelope e é
+                        validado na sincronização — se estiver errado, a
+                        saída não sela e vira ocorrência pra gestão. A tela
+                        precisa dizer isso antes, não depois. */}
+                    {pinConferido === 'offline' && (
+                      <p className="text-sm text-amber-700 dark:text-amber-400">
+                        PIN guardado, mas <strong>não conferido</strong> — sem internet não dá pra
+                        validar agora. Se estiver errado, a saída não vai ser selada e a gestão
+                        precisa resolver.
+                      </p>
+                    )}
                   </div>
                 )}
               </div>
