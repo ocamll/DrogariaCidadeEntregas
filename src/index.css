@@ -128,3 +128,23 @@
     @apply font-sans;
     }
 }
+/* Impressão do cartão de credencial do motoboy.
+   Só existe um alvo imprimível no app inteiro (#print-cartao, dentro do
+   dialog de credencial emitida), então a regra é: esconde tudo, mostra
+   ele, e tira do fluxo o resto — inclusive o overlay do Dialog, que de
+   outro jeito imprimiria uma folha cinza por cima. */
+@media print {
+  body * {
+    visibility: hidden;
+  }
+  #print-cartao,
+  #print-cartao * {
+    visibility: visible;
+  }
+  #print-cartao {
+    position: absolute;
+    top: 0;
+    left: 0;
+    border: none;
+  }
+}

@@ -1,7 +1,7 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
 import type { AuthProfile } from '@/data/auth'
 import type { NovaEntrega } from '@/data/entregas'
-import { enfileirarOperacao } from '@/data/filaOffline'
+import { enfileirarOperacao, donoDaFila } from '@/data/filaOffline'
 import { FORMA_PAGAMENTO_OPTIONS, type FormaPagamento } from '@/data/pagamentos'
 import { useConveniosCadastro } from '@/data/cadastros'
 import { uuidv7 } from '@/lib/uuid'
@@ -148,7 +148,7 @@ function CadastroEntregaForm({
     // libera a tela pro próximo cliente — sincroniza em segundo plano. O
     // número do vale só existe depois de sincronizar (é o banco que gera),
     // por isso não aparece aqui; confere na lista "Hoje" depois.
-    void enfileirarOperacao('entrega', payload.id, payload)
+    void enfileirarOperacao('entrega', donoDaFila(profile), payload, { chave: payload.id })
     setStatus({ kind: 'ok', texto: `Entrega de ${payload.clienteNome} salva — sincronizando…` })
 
     resetForm()

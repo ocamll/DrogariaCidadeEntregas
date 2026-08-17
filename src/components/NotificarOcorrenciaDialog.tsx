@@ -8,7 +8,7 @@ import {
   type MarcarDivergenciaInput,
 } from '@/data/pagamentos'
 import type { NotificarFaltaReceitaInput } from '@/data/documentos'
-import { enfileirarOperacao } from '@/data/filaOffline'
+import { enfileirarOperacao, donoDaFila } from '@/data/filaOffline'
 import { uuidv7 } from '@/lib/uuid'
 import { centsFromDigits, formatBRL } from '@/lib/money'
 import { CampoMoeda } from '@/components/CampoMoeda'
@@ -163,7 +163,6 @@ function DivergenciaPagamentoForm({
       return
     }
 
-    const operacaoId = uuidv7()
     const payload: MarcarDivergenciaInput = {
       tenantId: profile.tenantId,
       entregaId,
@@ -184,7 +183,7 @@ function DivergenciaPagamentoForm({
 
     // grava local e fecha o dialog na hora (mesmo padrão do cadastro de
     // entrega) — sincroniza em segundo plano.
-    void enfileirarOperacao('divergencia', operacaoId, payload)
+    void enfileirarOperacao('divergencia', donoDaFila(profile), payload)
     onConcluido()
   }
 
@@ -300,7 +299,6 @@ function FaltaReceitaForm({
       return
     }
 
-    const operacaoId = uuidv7()
     const payload: NotificarFaltaReceitaInput = {
       tenantId: profile.tenantId,
       entregaId,
@@ -311,7 +309,7 @@ function FaltaReceitaForm({
       ocorridoEmLocal: new Date().toISOString(),
     }
 
-    void enfileirarOperacao('falta_receita', operacaoId, payload)
+    void enfileirarOperacao('falta_receita', donoDaFila(profile), payload)
     onConcluido()
   }
 

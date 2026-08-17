@@ -32,6 +32,17 @@ export const TIPO_EVENTO_LABEL: Record<string, string> = {
   falta_documento_convenio: 'Documento de convênio não retornou',
   insucesso_detalhado: 'Insucesso detalhado',
   entrega_cancelada: 'Vale cancelado',
+  // Credencial física do motoboy. Estes não têm entrega nem corrida, então
+  // a policy eventos_select já os deixa só pro admin — que é quem os gera.
+  // Nenhum deles carrega PIN, hash de PIN ou token: só o credencial_id.
+  credencial_emitida: 'Cartão emitido',
+  credencial_revogada: 'Cartão revogado',
+  credencial_pin_definido: 'PIN criado pelo motoboy',
+  credencial_pin_redefinido: 'PIN redefinido pelo admin',
+  credencial_pin_incorreto: 'PIN incorreto',
+  credencial_bloqueada: 'Credencial bloqueada por tentativas',
+  romaneio_selado: 'Romaneio selado',
+  conflito_sincronizacao: 'Conflito de sincronização',
 }
 
 export type EventoAuditoria = {
@@ -101,6 +112,18 @@ type EventoAuditoriaRow = {
   profiles: { nome: string } | null
 }
 
+// Eventos de credencial não têm entrega, então as colunas Vale e Cliente
+// da tabela ficam vazias — é o resumo que precisa dizer de quem é o
+// cartão. Só os 4 últimos do public_id, igual à tela de Cadastros: o
+// suficiente pra casar com o papel, e nunca o token.
+//
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function resumoCredencial(payload: any): string {
+  const nome = payload?.motoboy_nome ?? 'motoboy desconhecido'
+  const publicId = payload?.public_id
+  return publicId ? `${nome} · cartão ••••${String(publicId).slice(-4)}` : nome
+}
+
 // resumo/detalhe por tipo — cobre os 6 conhecidos; qualquer tipo novo que
 // apareça no futuro (mudança de código, teste manual etc.) ainda mostra
 // alguma coisa em vez de quebrar a tela.
@@ -131,6 +154,35 @@ function resumoEDetalhe(row: EventoAuditoriaRow): { resumo: string; detalhe: str
       // o rótulo do tipo já diz "Vale cancelado" — aqui vale dizer o que
       // ele acrescenta: em que ponto do ciclo o cancelamento aconteceu.
       return { resumo: 'Cancelado antes de entrar em corrida', detalhe: row.payload.motivo ?? null }
+    case 'credencial_emitida':
+    case 'credencial_revogada':
+    case 'credencial_pin_definido':
+    case 'credencial_pin_redefinido':
+      return { resumo: resumoCredencial(row.payload), detalhe: null }
+    case 'credencial_pin_incorreto':
+    case 'credencial_bloqueada':
+      return {
+        resumo: resumoCredencial(row.payload),
+        detalhe: `${row.payload?.tentativas ?? '?'} tentativa(s) seguida(s)`,
+      }
+    case 'romaneio_selado':
+      return {
+        resumo: `${row.payload?.numero ?? 'Romaneio'} · ${row.payload?.vales ?? '?'} vale(s) · ${
+          row.payload?.modo === 'online' ? 'saída online' : 'sincronizada depois'
+        }`,
+        // Os primeiros 16 caracteres bastam pra conferir contra o PDF ou
+        // o QR sem transformar a linha da tabela numa parede de hex.
+        detalhe: row.payload?.final_hash ? `hash ${String(row.payload.final_hash).slice(0, 16)}…` : null,
+      }
+    case 'conflito_sincronizacao': {
+      const motivos = Array.isArray(row.payload?.conflitos)
+        ? [...new Set(row.payload.conflitos.map((c: { motivo?: string }) => c?.motivo))].join(', ')
+        : null
+      return {
+        resumo: `${row.payload?.numero ?? 'Romaneio'} não pôde ser selado`,
+        detalhe: motivos,
+      }
+    }
     default:
       return { resumo: row.tipo, detalhe: row.payload ? JSON.stringify(row.payload) : null }
   }

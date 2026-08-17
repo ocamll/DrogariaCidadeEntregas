@@ -7,7 +7,7 @@ import {
   type FecharCorridaInput,
   type InsucessoMotivo,
 } from '@/data/corridas'
-import { enfileirarOperacao } from '@/data/filaOffline'
+import { enfileirarOperacao, donoDaFila } from '@/data/filaOffline'
 import { uuidv7 } from '@/lib/uuid'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -175,7 +175,7 @@ function FecharCorridaForm({
 
     // grava local e volta pra lista na hora (mesmo padrão do cadastro de
     // entrega) — sincroniza em segundo plano.
-    void enfileirarOperacao('fechamento_corrida', payload.corridaId, payload)
+    void enfileirarOperacao('fechamento_corrida', donoDaFila(profile), payload, { dependeDeChave: payload.corridaId })
     onFechada(`Corrida de ${corrida.mototaxistaNome} fechada — sincronizando…`)
   }
 

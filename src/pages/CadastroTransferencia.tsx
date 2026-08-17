@@ -1,7 +1,7 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
 import type { AuthProfile } from '@/data/auth'
 import type { NovaTransferencia } from '@/data/entregas'
-import { enfileirarOperacao } from '@/data/filaOffline'
+import { enfileirarOperacao, donoDaFila } from '@/data/filaOffline'
 import { useLojas, useTarifaDaLoja } from '@/data/lojas'
 import { formatBRL } from '@/lib/money'
 import { uuidv7 } from '@/lib/uuid'
@@ -94,7 +94,7 @@ function CadastroTransferenciaForm({
 
     // grava local e libera a tela na hora (mesmo padrão do cadastro de
     // entrega) — o número do vale só existe depois de sincronizar.
-    void enfileirarOperacao('transferencia', payload.id, payload)
+    void enfileirarOperacao('transferencia', donoDaFila(profile), payload, { chave: payload.id })
     setStatus({
       kind: 'ok',
       texto: `Transferência de ${payload.lojaOrigemNome} para ${payload.lojaSolicitanteNome} salva — sincronizando…`,

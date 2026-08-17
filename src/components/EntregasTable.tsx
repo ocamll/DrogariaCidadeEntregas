@@ -1,6 +1,10 @@
+import { Fragment, useState } from 'react'
+import { ChevronRight, ChevronDown } from 'lucide-react'
 import type { AuthProfile } from '@/data/auth'
 import type { EntregaRecente } from '@/data/entregas'
 import { FORMA_PAGAMENTO_LABEL } from '@/data/pagamentos'
+import { useCustodiaDosVales } from '@/data/romaneios'
+import { CustodiaDoValeDetalhe } from '@/components/Custodia'
 import { formatBRL } from '@/lib/money'
 import { Badge } from '@/components/ui/badge'
 import { EntregaAcoesMenu } from '@/components/EntregaAcoesMenu'
@@ -76,6 +80,20 @@ export function EntregasTable({
   mostrarData?: boolean
   ocultarVenda?: boolean
 }) {
+  // Uma query pra a lista inteira, nunca uma por linha — ver
+  // useCustodiaDosVales. Vale sem romaneio simplesmente não aparece no
+  // mapa, e aí a linha não ganha chevron.
+  const { data: custodias } = useCustodiaDosVales(entregas.map((e) => e.id))
+  const [expandido, setExpandido] = useState<string | null>(null)
+
+  // A tabela não pode crescer: do número do vale ao "⋮" tem que caber na
+  // tela (ver CLAUDE.md — a rolagem horizontal já foi bug uma vez, e a
+  // largura mínima é medida em pixel). Por isso a custódia NÃO ganhou
+  // coluna própria: o chevron entra dentro da coluna Vale, que é curta e
+  // `nowrap`, e o detalhe abre numa linha inteira abaixo. Custo de
+  // largura: ~14px, contra os ~120px que uma coluna custaria.
+  const colunas = ocultarVenda ? 7 : 9
+
   if (entregas.length === 0) {
     return <p className="text-sm text-muted-foreground">Nenhum vale encontrado.</p>
   }
@@ -126,20 +144,39 @@ export function EntregasTable({
             year: '2-digit',
           })
           const hora = quando.toLocaleTimeString('pt-BR', { hour: '2-digit', minute: '2-digit' })
+          const custodia = custodias?.get(entrega.id)
+          const aberto = expandido === entrega.id
           return (
-            /* `align-top` em toda célula da linha: a TableCell do shadcn é
+            <Fragment key={entrega.id}>
+            {/* `align-top` em toda célula da linha: a TableCell do shadcn é
                `align-middle`, e numa linha onde Cliente e Data ocupam duas
                linhas e Compra/Entrega/Status ocupam uma, os de uma linha
                ficavam centralizados — uns 8px abaixo do nome do cliente.
                Cada coluna começava numa altura diferente e a linha inteira
-               parecia torta. Alinhados pelo topo, todos partem do mesmo Y. */
-            <TableRow key={entrega.id} className="[&>td]:align-top">
+               parecia torta. Alinhados pelo topo, todos partem do mesmo Y. */}
+            <TableRow className="[&>td]:align-top">
               {/* só o número. O selo de transferência vive na coluna
                   Cliente: aqui ele dobrava a largura mínima da coluna por
                   causa de poucas linhas, e todo vale normal herdava esse
                   espaço vazio. */}
               <TableCell className={`font-medium tabular-nums ${COLUNA_CENTRO}`}>
-                {entrega.numeroVale}
+                {custodia ? (
+                  <button
+                    type="button"
+                    className="inline-flex items-center gap-0.5 hover:underline"
+                    onClick={() => setExpandido(aberto ? null : entrega.id)}
+                    title={`Custódia — romaneio ${custodia.numero}`}
+                  >
+                    {aberto ? (
+                      <ChevronDown className="size-3.5 shrink-0" />
+                    ) : (
+                      <ChevronRight className="size-3.5 shrink-0" />
+                    )}
+                    {entrega.numeroVale}
+                  </button>
+                ) : (
+                  entrega.numeroVale
+                )}
               </TableCell>
               {/* A largura vem do `w-56` no cabeçalho desta coluna — o
                   endereço longo quebra em duas linhas em vez de esticar a
@@ -227,6 +264,18 @@ export function EntregasTable({
                 />
               </TableCell>
             </TableRow>
+            {aberto && custodia && (
+              <TableRow>
+                {/* Linha inteira, sem `whitespace-nowrap` e sem competir
+                    por largura com as colunas de cima — é o que permite
+                    mostrar assinatura, IP, geolocalização e hash sem
+                    reabrir a discussão de largura da tabela. */}
+                <TableCell colSpan={colunas} className="whitespace-normal p-2">
+                  <CustodiaDoValeDetalhe custodia={custodia} />
+                </TableCell>
+              </TableRow>
+            )}
+            </Fragment>
           )
         })}
       </TableBody>
