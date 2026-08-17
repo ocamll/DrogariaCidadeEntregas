@@ -95,6 +95,30 @@ export type ResultadoSelo =
 // commita, porque uma retirada física aconteceu de verdade e essa prova
 // não pode sumir num rollback. Erro de verdade (autorização inválida,
 // romaneio sem vale) continua vindo como `throw`.
+
+// Recusa do SERVIDOR, e não falha de rede. A diferença decide o que a
+// tela faz: rede caiu é caso de fila (a retirada física aconteceu e a
+// operação sincroniza depois); o servidor ter recusado NÃO é — precisa
+// aparecer na hora, porque insistir só repete o mesmo resultado, e a
+// tela dizendo "registrada offline" mandaria o caixa embora achando que
+// deu certo.
+//
+// O PostgREST devolve erro com `code` (o SQLSTATE); uma falha de fetch
+// não tem. É o que separa os dois.
+export class ErroDoServidor extends Error {
+  codigo: string | undefined
+  constructor(mensagem: string, codigo?: string) {
+    super(mensagem)
+    this.name = 'ErroDoServidor'
+    this.codigo = codigo
+  }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function ehRecusaDoServidor(error: any): boolean {
+  return typeof error?.code === 'string' && error.code.length > 0
+}
+
 export async function selarRomaneio(input: {
   romaneioId: string
   corridaId: string
@@ -123,7 +147,10 @@ export async function selarRomaneio(input: {
     p_ocorrido_em_local: input.ocorridoEmLocal,
     p_geolocalizacao: input.geolocalizacao,
   })
-  if (error) throw error
+  if (error) {
+    if (ehRecusaDoServidor(error)) throw new ErroDoServidor(error.message, error.code)
+    throw error
+  }
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const r = data as any

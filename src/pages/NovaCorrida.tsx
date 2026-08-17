@@ -8,6 +8,7 @@ import {
   prepararRomaneio,
   autorizarSaida,
   selarRomaneio,
+  ErroDoServidor,
   documentHashLocal,
   capturarGeolocalizacao,
   type SaidaOfflineInput,
@@ -415,10 +416,20 @@ function NovaCorridaFluxo({
           )
           limpar()
           return
-        } catch {
-          // Caiu no meio do selo online. A retirada física pode ter
-          // acontecido, então NÃO se perde: vai pra fila com os mesmos
-          // ids, e o reenvio é no-op se por acaso já tiver selado.
+        } catch (e) {
+          // Recusa do servidor NÃO vira "registrada offline". Mandar pra
+          // fila aqui faria o caixa ir embora achando que deu certo, e a
+          // fila repetiria o mesmo erro pra sempre — foi exatamente o que
+          // aconteceu no primeiro uso real, com um erro de FK aparecendo
+          // como se fosse falta de internet.
+          if (e instanceof ErroDoServidor) {
+            setResultado({ kind: 'erro', texto: e.message })
+            setOcupado(null)
+            return
+          }
+          // Falha de rede no meio do selo: aí sim. A retirada física pode
+          // ter acontecido, então NÃO se perde — vai pra fila com os
+          // mesmos ids, e o reenvio é no-op se por acaso já tiver selado.
         }
       }
 
