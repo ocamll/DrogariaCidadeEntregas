@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { AuthProfile } from '@/data/auth'
 import { useMototaxistasCadastro, useAgenciasCadastro } from '@/data/cadastros'
 import {
@@ -21,20 +21,18 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 
-// Code 128 gasta 11 módulos por caractere mais 35 de start/checksum/stop.
-// O token tem 36 caracteres — DCM1(4) + . + public_id(10) + . + segredo(20)
-// —, então são 431 módulos, e é isso que decide a largura física do papel.
-// Conferido contra o `bwipjs.raw()` de verdade, não só pela fórmula. Ver a
-// nota de dimensionamento na migration 20260816130000: foi essa conta que
-// fez o segredo ser de 20 caracteres e não de 32.
-const MODULOS_DO_CARTAO = 36 * 11 + 35
+// Dimensões do cartão CR80 (85,6 × 54mm), com 5mm de margem física de
+// cada lado. As zonas de silêncio de 10X ficam DENTRO desta largura.
+const LARGURA_MM = 75
+const ALTURA_BARRA_MM = 16
 
-// 0,19mm por módulo é o piso comum de leitores laser 1D. Abaixo disso o
-// código imprime bonito e não lê, que é a pior falha possível aqui —
-// alguém descobre no balcão, com o motoboy esperando.
+// Piso comum de leitor laser 1D. Com o token v2 (numérico, 266 módulos)
+// a conta dá ~0,26mm por módulo — bem acima disto. Era o v1
+// alfanumérico que não cabia: 431 módulos, 0,174mm.
 const MODULO_MINIMO_MM = 0.19
 
-export function CredenciaisCadastro({ profile }: { profile: AuthProfile }) {
+// eslint-disable-next-line @typescript-eslint/no-unused-vars
+export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfile }) {
   const { data: motoboys, isLoading, isError, error } = useMototaxistasCadastro()
   const { data: agencias } = useAgenciasCadastro()
   // O erro desta query precisa aparecer na tela, e não é zelo: sem isso,
@@ -212,7 +210,6 @@ export function CredenciaisCadastro({ profile }: { profile: AuthProfile }) {
         <CartaoEmitidoDialog
           emitida={emitida.dados}
           motoboyNome={emitida.motoboyNome}
-          farmaciaNome={profile.lojaNome ?? 'Drogaria Cidade'}
           onFechar={() => setEmitida(null)}
         />
       )}
@@ -242,66 +239,96 @@ export function CredenciaisCadastro({ profile }: { profile: AuthProfile }) {
 //
 // Esta tela é a ÚNICA vez que o token existe fora do papel. O banco
 // guarda só o HMAC, então fechar sem imprimir significa emitir outro —
-// não há "ver de novo". O aviso na tela diz isso com todas as letras.
+// não há "ver de novo".
+//
+// Dimensionado pro CR80 (85,6 × 54mm), com 5mm de margem física de cada
+// lado. Ver a nota de dimensionamento na migration 20260817120000: é ela
+// que explica por que o token é numérico.
 // =====================================================================
 
 function CartaoEmitidoDialog({
   emitida,
   motoboyNome,
-  farmaciaNome,
   onFechar,
 }: {
   emitida: CredencialEmitida
   motoboyNome: string
-  farmaciaNome: string
   onFechar: () => void
 }) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
+  const [svg, setSvg] = useState<string | null>(null)
   const [erroBarras, setErroBarras] = useState<string | null>(null)
-  const [larguraMm, setLarguraMm] = useState(90)
-
-  const moduloMm = larguraMm / MODULOS_DO_CARTAO
-  const legivel = moduloMm >= MODULO_MINIMO_MM
+  const [moduloMm, setModuloMm] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelado = false
 
-    async function desenhar() {
+    async function gerar() {
       try {
-        // Import dinâmico, mesmo padrão do exceljs e do jspdf: são ~197 kB
-        // que só descem quando alguém abre esta tela, e o caixa nunca abre.
+        // Import dinâmico, mesmo padrão do exceljs e do jspdf: ~930 kB que
+        // só descem quando um admin abre esta tela.
         const bwipjs = await import('bwip-js/browser')
-        if (cancelado || !canvasRef.current) return
+        if (cancelado) return
 
-        bwipjs.default.toCanvas(canvasRef.current, {
+        const base = {
           bcid: 'code128',
           text: emitida.token,
-          scale: 3,
-          height: 14,
           includetext: false,
-          paddingwidth: 4,
-          paddingheight: 4,
-          // Sem isto o fundo sai transparente (conferido no navegador), e
-          // aí o que aparece atrás das barras depende do tema e de o
-          // usuário ter "imprimir cor de fundo" ligado. Branco explícito
-          // tira as duas variáveis: leitor de código de barras precisa de
-          // contraste, não de sorte.
+          // 10 módulos de zona de silêncio de cada lado — o mínimo de 10X
+          // da especificação, e ela mora DENTRO dos 75mm.
+          paddingwidth: 10,
+          paddingheight: 0,
           backgroundcolor: 'FFFFFF',
-        })
+          // scale 1 faz a unidade do viewBox ser o MÓDULO, e não pixel.
+          // Sem isso a conta da largura do módulo sairia pela metade, e
+          // ela é o número que decide se o leitor lê.
+          scale: 1,
+        } as const
+
+        // Duas passadas, e não uma: o bwip-js decide a proporção a partir
+        // da altura em milímetros, e eu preciso do inverso — dada a
+        // largura final de 75mm, qual altura natural faz as barras
+        // saírem com 16mm depois do escalonamento UNIFORME.
+        //
+        // Sem isso eu teria que esticar o SVG na vertical pra acertar a
+        // altura, que é justamente o que não se deve fazer.
+        const primeira = bwipjs.default.toSVG({ ...base, height: ALTURA_BARRA_MM })
+        const vb = primeira.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)
+        if (!vb) throw new Error('não consegui ler as dimensões do código gerado')
+
+        const unidadesLargura = Number(vb[1])
+        const unidadesAltura = Number(vb[2])
+        const alturaNatural =
+          (ALTURA_BARRA_MM * unidadesLargura * (ALTURA_BARRA_MM / LARGURA_MM)) / unidadesAltura
+
+        const final = bwipjs.default.toSVG({ ...base, height: alturaNatural })
+        if (cancelado) return
+
+        // Largura do módulo no papel: o número que decide se o leitor
+        // lê. As 20 unidades das duas zonas de silêncio entram na conta,
+        // porque ocupam largura dentro dos 75mm.
+        setModuloMm(LARGURA_MM / unidadesLargura)
+        setSvg(
+          final.replace(
+            '<svg ',
+            `<svg width="${LARGURA_MM}mm" height="${ALTURA_BARRA_MM}mm" `
+          )
+        )
       } catch (e) {
         if (!cancelado) setErroBarras(e instanceof Error ? e.message : String(e))
       }
     }
 
-    void desenhar()
+    void gerar()
     return () => {
       cancelado = true
     }
   }, [emitida.token])
 
+  const legivel = moduloMm !== null && moduloMm >= MODULO_MINIMO_MM
+
   return (
     <Dialog open onOpenChange={onFechar}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="sm:max-w-xl">
         <DialogHeader>
           <DialogTitle>Cartão de {motoboyNome}</DialogTitle>
         </DialogHeader>
@@ -315,46 +342,46 @@ function CartaoEmitidoDialog({
             </p>
           </div>
 
-          {/* O que vai pro papel. `print-cartao` é o que a folha imprime;
-              o resto da tela é escondido pelo @media print no index.css. */}
+          {/* O que vai pro papel: código de barras e o token, nada mais.
+              Sem nome de motoboy e sem filial — um cartão perdido não deve
+              dizer de quem é nem de onde veio. Quem casa o papel com a
+              pessoa é o sistema, pelo public_id. */}
           <div
             id="print-cartao"
             className="flex flex-col items-center gap-2 rounded-lg border bg-white p-4 text-black"
           >
-            <p className="text-xs font-semibold tracking-wide uppercase">{farmaciaNome}</p>
-            <p className="text-base font-semibold">{motoboyNome}</p>
             {erroBarras ? (
               <p className="text-xs text-red-700">
                 Não consegui gerar o código de barras: {erroBarras}
               </p>
+            ) : svg ? (
+              // SVG no tamanho físico, não canvas esticado por CSS: em
+              // vetor a escala é exata, sem reamostragem.
+              <div dangerouslySetInnerHTML={{ __html: svg }} />
             ) : (
-              <canvas ref={canvasRef} style={{ width: `${larguraMm}mm`, maxWidth: '100%' }} />
+              <p className="text-xs">Gerando…</p>
             )}
-            {/* O token em texto embaixo do código não é enfeite: se o
-                leitor falhar no balcão, ele pode ser digitado à mão. O
-                alfabeto foi escolhido sem I, L, O e U justamente pra isso. */}
-            <p className="font-mono text-[10px] tracking-tight break-all">{emitida.token}</p>
+            {/* O token em texto embaixo não é enfeite: se o leitor falhar
+                no balcão, ele pode ser digitado. Em blocos de 6 porque 42
+                dígitos corridos ninguém acompanha com o olho. */}
+            <p className="font-mono text-[11px] tracking-wide">
+              {emitida.token.replace(/(.{6})/g, '$1 ').trim()}
+            </p>
           </div>
 
-          <div className="flex flex-col gap-1">
-            <label htmlFor="largura" className="text-sm font-medium">
-              Largura do código impresso: {larguraMm}mm
-            </label>
-            <input
-              id="largura"
-              type="range"
-              min={70}
-              max={120}
-              step={1}
-              value={larguraMm}
-              onChange={(e) => setLarguraMm(Number(e.target.value))}
-            />
-            <p className={legivel ? 'text-xs text-foreground/70' : 'text-xs text-destructive'}>
-              {moduloMm.toFixed(3)}mm por módulo.{' '}
-              {legivel
-                ? 'Dentro do que um leitor laser comum lê.'
-                : `Abaixo de ${MODULO_MINIMO_MM}mm muitos leitores falham — aumenta a largura ou usa um cartão maior.`}
+          <div className="flex flex-col gap-1 text-sm">
+            <p>
+              Área do código: <strong>{LARGURA_MM}mm × {ALTURA_BARRA_MM}mm</strong> — cabe num
+              cartão CR80 (85,6 × 54mm) com 5mm de margem de cada lado.
             </p>
+            {moduloMm !== null && (
+              <p className={legivel ? 'text-xs text-foreground/70' : 'text-xs text-destructive'}>
+                {moduloMm.toFixed(3)}mm por módulo.{' '}
+                {legivel
+                  ? 'Dentro do que um leitor laser comum lê, com folga.'
+                  : `Abaixo de ${MODULO_MINIMO_MM}mm muitos leitores falham.`}
+              </p>
+            )}
           </div>
         </div>
 
@@ -362,7 +389,9 @@ function CartaoEmitidoDialog({
           <Button variant="outline" onClick={onFechar}>
             Já imprimi
           </Button>
-          <Button onClick={() => window.print()}>Imprimir</Button>
+          <Button onClick={() => window.print()} disabled={!svg}>
+            Imprimir
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
