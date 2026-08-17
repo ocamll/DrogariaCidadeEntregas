@@ -1383,6 +1383,60 @@ checagem de tela: `definir_pin` resolve o tenant por `current_tenant_id()`,
 que depende de `auth.uid()`. Sem sessão a função não roda. Não há como
 alguém contornar mexendo no frontend.
 
+## 39. A tela dizia que aceitou antes de o servidor ter falado
+
+Achado pelo usuário no primeiro teste real, e ele reagiu certo:
+"inaceitável". Depois de criar o PIN, qualquer número de 6 dígitos
+"passava" — a seção de Custódia liberava e o botão de confirmar
+habilitava.
+
+**O servidor nunca aceitou PIN errado.** O próprio teste dele provou:
+`PIN errado` recusado, `PIN certo` aceito. Nenhuma saída foi selada
+indevidamente, e o `bcrypt` guardou o que o motoboy escolheu.
+
+O que estava errado era o gate da tela:
+
+```js
+const podeConfirmar = ... && !pinAceitavel(pin)
+```
+
+`pinAceitavel()` valida **formato** — seis dígitos, não sequência, não
+repetido. Nada mais. A verificação de identidade só acontecia no
+"Confirmar saída", depois de já ter colhido as duas assinaturas.
+
+Pra quem está no balcão, formato bem escrito e identidade confirmada
+eram a mesma coisa — e é assim que se lê uma tela que desbloqueia.
+
+**A lição, que vale além deste caso:** validação de formato nunca pode
+ocupar o lugar visual de validação de identidade. Se a tela desbloqueia,
+ela está afirmando alguma coisa; aqui ela afirmava o que não sabia.
+
+O mockup original do usuário (§16 do pedido) já tinha o passo que faltava
+— `✓ Identidade confirmada` embaixo do campo de PIN. Eu simplesmente não
+implementei, e ninguém notou até o primeiro uso real.
+
+**Correção:** botão explícito "Confirmar identidade" que pergunta ao
+servidor (`autenticar_credencial`) antes de liberar a Custódia.
+
+Três decisões dentro dela:
+
+- **Botão, e não conferência automática ao completar 6 dígitos.** Cada
+  tentativa errada conta pro bloqueio progressivo; quem se atrapalha
+  digitando queimaria o bloqueio do motoboy sem ter errado o PIN.
+- **`autenticar_credencial` e não `autorizar_saida`.** A autorização vale
+  2 minutos e é amarrada ao `document_hash` — emitida na conferência,
+  expiraria enquanto o motoboy assina. Aqui só se pergunta "é ele?"; a
+  autorização de uso único nasce fresca no confirmar. São duas passadas
+  de bcrypt online (~600ms), barato perto de descobrir o erro depois das
+  assinaturas.
+- **Depois de criar o PIN, o motoboy digita de novo.** Antes o campo
+  ficava vazio e qualquer coisa passava; agora ele passa pelo servidor, o
+  que prova que quem acabou de escolher lembra do que escolheu.
+
+Offline não há como conferir (o bcrypt vive no servidor), e a tela passa
+a dizer isso — "PIN guardado, mas **não conferido**" — em vez de parecer
+que conferiu.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)

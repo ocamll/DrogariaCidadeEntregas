@@ -987,6 +987,29 @@ dentro dele, então PIN criado com custo antigo continua validando e só
 sobe na próxima redefinição — não há como reidratar, porque reidratar
 exigiria conhecer o PIN.
 
+### Formato não é identidade
+
+O PIN é conferido pelo servidor num passo **próprio** ("Confirmar
+identidade"), antes de a tela liberar as assinaturas. Isso não é enfeite
+de UX: a primeira versão liberava a Custódia assim que o PIN tinha 6
+dígitos bem formados, e a verificação real só vinha no "Confirmar saída"
+— depois de já ter colhido as duas assinaturas. O servidor recusava
+certo, mas a tela afirmava o que não sabia, e no balcão isso é
+indistinguível de "qualquer PIN passa".
+
+Regra que fica: **se a tela desbloqueia, ela está afirmando alguma
+coisa.** Validação de formato nunca pode ocupar o lugar visual de
+validação de identidade.
+
+Botão explícito, e não conferência automática ao completar 6 dígitos:
+cada tentativa errada conta pro bloqueio progressivo, e quem se
+atrapalha digitando queimaria o bloqueio do motoboy sem ter errado o
+PIN. E usa `autenticar_credencial`, não `autorizar_saida` — a autorização
+vale 2 minutos e expiraria enquanto o motoboy assina.
+
+Offline não dá pra conferir (o bcrypt vive no servidor), e aí a tela diz
+"PIN guardado, mas **não conferido**" em vez de parecer que conferiu.
+
 ### O passo do Vault que não é migration
 
 `hash_do_token` lê o segredo do HMAC do Supabase Vault, e ele **não nasce
