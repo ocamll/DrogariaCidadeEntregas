@@ -1228,6 +1228,16 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   das linhas. Query key própria (`transferencias`), então **toda
   invalidação que mexe nos dois tipos precisa citar as duas** — corrida,
   fechamento de corrida, cancelamento e o Realtime já citam.
+- **`vales-para-saida` é a query key mais perigosa do app**, e cair na
+  mesma armadilha aqui custa mais caro. Ela alimenta a lista de onde o
+  caixa escolhe o que vai sair fisicamente da farmácia; servindo dado
+  velho, ele manda o mesmo vale duas vezes, e o servidor só recusa depois
+  de duas assinaturas colhidas e um romaneio de conflito criado. Por isso
+  ela tem `staleTime: 0` (única no projeto), é invalidada por toda
+  operação que muda quais vales estão pendentes **e** pelo selo online
+  (que não passa pela fila), e a tela ainda esconde vale que já está numa
+  operação da fila — offline o vale continua `pendente` no servidor, então
+  sem isso ele sairia duas vezes de verdade.
 - **A lista de vales não rola pra o lado.** Do número do vale ao "⋮" tem que
   caber na largura da tela — o caixa está com fila no balcão e não vai
   arrastar tabela pro lado pra achar o menu de ações. A `Table` do shadcn põe

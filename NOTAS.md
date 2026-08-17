@@ -1437,6 +1437,91 @@ Offline não há como conferir (o bcrypt vive no servidor), e a tela passa
 a dizer isso — "PIN guardado, mas **não conferido**" — em vez de parecer
 que conferiu.
 
+## 40. O que só o uso real achou
+
+Três defeitos que passaram por revisão de leitura, `tsc`, lint e build, e
+só apareceram quando o usuário rodou a tela com um cartão na mão. Vale
+listar juntos porque a causa comum é a mesma: **nada disso é detectável
+sem executar.**
+
+**A FK que fazia nenhum selo funcionar.** `selar_romaneio_interno`
+gravava `consumida_por_romaneio = p_romaneio_id` no consumo da
+autorização, ANTES do `insert into romaneios`. A coluna tem FK pro
+romaneio e a checagem é imediata — a linha não existia, o Postgres
+recusava, a transação inteira ia embora.
+
+Consequência: nenhuma saída selava, nem online nem pela fila. E o sintoma
+apontava pro lugar errado — a tela dizia "registrada offline", porque
+qualquer exceção no selo caía no `catch` que existe pra queda de rede.
+
+Corrigido partindo em dois: o `claim` (`consumida_em`) continua cedo,
+porque é ele que garante uso único e recusa antes de mexer em vale
+nenhum; só o ponteiro `consumida_por_romaneio` foi pra depois do insert.
+Inverter tudo seria pior — abriria janela com a corrida já criada e a
+autorização ainda recusável.
+
+Nada ficou pela metade: era exceção, então todo rollback foi completo.
+
+**A tela chamando recusa do servidor de "offline".** Consequência do
+anterior, e defeito por si só: mandar pra fila algo que o servidor
+recusou faz o caixa ir embora achando que deu certo, e a fila repete o
+mesmo erro pra sempre. Agora erro do PostgREST (que vem com SQLSTATE) é
+distinguido de falha de `fetch` — o primeiro aparece na tela, só o
+segundo vira fila.
+
+**A lista de vales servindo dado velho.** A query filtrava certo
+(`pendente` + sem corrida), mas ninguém invalidava `vales-para-saida`.
+Com cache de 60s e retenção de 30min, a tela seguia oferecendo vales que
+acabaram de sair — e mandar o mesmo vale de novo custa duas assinaturas e
+um romaneio de conflito. É provavelmente como o `R-000002` deste teste
+nasceu.
+
+Três frentes na correção: a chave entrou em toda operação da fila que
+muda quais vales estão pendentes e no selo online (que não passa pela
+fila); `staleTime` foi a zero, contra o padrão do app, porque esta lista
+decide o que sai fisicamente e é aberta uma vez por saída; e vale que já
+está numa operação DA FILA some da lista — offline ele continua
+`pendente` no servidor, então sem isso sairia duas vezes de verdade.
+
+Ordenação virou do mais novo pro mais antigo, a pedido: o vale
+recém-lançado é o que vai sair agora e estava no fim.
+
+## 41. Uma armadilha de desenvolvimento que custou um diagnóstico
+
+O botão "Já anotei, dispensar" não fazia nada. Não era bug de código:
+**módulo velho em memória**. O componente recarregou por HMR (por isso o
+botão novo aparecia), mas `filaOffline.ts` continuou sendo a versão sem a
+função — clicar disparava `TypeError` e nada acontecia.
+
+Reproduzi no painel: antes do reload, `descartarItemTerminal` vinha
+`undefined`; depois, a função funciona (item terminal descartado, item
+não-terminal recusado). `Ctrl+Shift+R` resolve, e em produção não existe.
+
+Fica junto do fenômeno de HMR espúrio do OneDrive já anotado mais abaixo:
+nesta máquina, **estado de tela não é prova de estado de código**. Antes
+de investigar comportamento estranho em dev, recarregar do zero.
+
+## 42. Primeira saída selada de ponta a ponta
+
+Depois das correções acima, o usuário fez uma saída limpa: cartão bipado,
+PIN conferido pelo servidor, duas assinaturas, **romaneio selado**. O
+`R-000001` foi conferido pelo chevron do vale — duas assinaturas
+renderizadas e a página do romaneio abrindo.
+
+Isso fecha a prova que faltava desde a etapa 3: a cadeia inteira funciona
+com dado real, online.
+
+**Ainda não testado:** o caminho offline ponta a ponta (registrar sem
+rede, religar, ver a fila drenar pela `sync-romaneio`), e o
+`conferir-canonico-no-console.js` — que continua sendo o único teste que
+prova que `montarCanonico` (TypeScript) e `romaneio_canonico` (SQL)
+produzem os mesmos bytes. Enquanto ele não rodar, o caminho offline está
+apoiado numa suposição não verificada.
+
+**Dados de teste que ficaram:** `R-000001` (selado, válido) e `R-000002`
+(conflito, dos mesmos vales — nasceu do bug da FK). Entram na limpeza que
+o NOTAS já lista como pendência antes do uso real.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -1647,6 +1732,14 @@ chave:
       variáveis do Cloudflare Pages **com rebuild depois** (o Vite embute
       no build), e a URL do Pages nas origens autorizadas do Google. Se
       faltar qualquer um, funciona no localhost e falha no ar.
+- [ ] **Rodar o conferir-canonico-no-console.js.** É o unico teste que
+      prova que montarCanonico (TypeScript) e romaneio_canonico (SQL)
+      geram os mesmos bytes. Enquanto nao rodar, o caminho offline esta
+      apoiado numa suposicao. Ver item 42.
+- [ ] **Testar a saida OFFLINE ponta a ponta**: registrar sem rede,
+      religar, ver a fila drenar pela sync-romaneio. Ver item 42.
+- [ ] **Apagar a pasta .chaves-offline/** depois de o secret estar
+      configurado — ela sincroniza pro OneDrive.
 - [ ] **Testar o envio ao Drive depois da correção do item 32.** O
       primeiro envio funcionou; o segundo falhou por bloqueio de pop-up
       (diagnóstico provável, não confirmado). A correção está no ar e
