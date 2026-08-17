@@ -1,5 +1,9 @@
 import { useState } from 'react'
-import { useFilaOperacoesPendentes, tentarAgora } from '@/data/filaOffline'
+import {
+  useFilaOperacoesPendentes,
+  tentarAgora,
+  descartarItemTerminal,
+} from '@/data/filaOffline'
 import type { ItemFilaOperacao } from '@/lib/db'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -98,6 +102,25 @@ export function FilaOfflineIndicador() {
                     Só sincroniza quando a conta que registrou entrar neste computador.
                   </p>
                 )}
+
+                {item.status === 'terminal' && (
+                  <div className="mt-2 flex flex-col gap-2">
+                    <ConflitoDetalhado detalhe={item.detalhe} />
+                    <p className="text-xs text-foreground/70">
+                      A tentativa está registrada no sistema, com as duas assinaturas — dispensar
+                      aqui só limpa este aviso.
+                    </p>
+                    <div>
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        onClick={() => void descartarItemTerminal(item.id)}
+                      >
+                        Já anotei, dispensar
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             ))}
           </div>
@@ -113,5 +136,37 @@ export function FilaOfflineIndicador() {
         </DialogContent>
       </Dialog>
     </>
+  )
+}
+
+// Traduz o motivo cru do conflito pra uma frase que diz o que fazer.
+//
+// "ja_em_corrida" sozinho não ajuda ninguém no balcão: o que a pessoa
+// precisa saber é QUAL vale e que ele já saiu com outra corrida.
+const MOTIVO_CONFLITO: Record<string, string> = {
+  ja_em_corrida: 'já saiu em outra corrida',
+  status_nao_permite: 'não estava mais pendente',
+  outra_filial: 'é de outra filial',
+  outro_tenant: 'não é desta farmácia',
+  vale_inexistente: 'não existe mais',
+  documento_alterado: 'o conteúdo mudou depois de assinado',
+  autenticacao_falhou: 'o PIN não conferiu na sincronização',
+  cartao_de_outro_motoboy: 'o cartão apresentado é de outro motoboy',
+}
+
+function ConflitoDetalhado({ detalhe }: { detalhe: unknown }) {
+  if (!detalhe || typeof detalhe !== 'object') return null
+  const conflitos = (detalhe as { conflitos?: unknown }).conflitos
+  if (!Array.isArray(conflitos) || conflitos.length === 0) return null
+
+  return (
+    <ul className="flex flex-col gap-0.5">
+      {conflitos.map((c: { numero_vale?: string; motivo?: string }, i) => (
+        <li key={i} className="text-xs">
+          <strong>{c.numero_vale ?? 'Vale'}</strong> —{' '}
+          {c.motivo ? (MOTIVO_CONFLITO[c.motivo] ?? c.motivo) : 'motivo desconhecido'}
+        </li>
+      ))}
+    </ul>
   )
 }

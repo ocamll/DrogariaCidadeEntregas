@@ -287,3 +287,20 @@ export function donoDaFila(profile: {
 }): { userId: string; tenantId: string; lojaId: string | null } {
   return { userId: profile.id, tenantId: profile.tenantId, lojaId: profile.lojaId }
 }
+
+// Tira da fila LOCAL um item terminal, depois que alguém olhou.
+//
+// Não apaga nada do servidor, e é isso que torna a operação segura: um
+// conflito já está gravado lá como `romaneios` com status 'conflito',
+// guardando o snapshot e os traços das duas assinaturas, mais o evento
+// de auditoria. O item da fila era só o mensageiro — depois que a
+// mensagem chegou, mantê-lo piscando "precisa de atenção" pra sempre não
+// acrescenta informação, só ruído em cima do próximo problema de verdade.
+//
+// Só terminal: item que ainda vai retentar não se descarta, senão a
+// operação se perderia mesmo.
+export async function descartarItemTerminal(id: string) {
+  const item = await db.filaOperacoes.get(id)
+  if (!item || item.status !== 'terminal') return
+  await db.filaOperacoes.delete(id)
+}
