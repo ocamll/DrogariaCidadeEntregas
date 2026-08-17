@@ -939,94 +939,73 @@ próprio selo — toda saída falharia, com o erro apontando pro lugar errado.
 ### O cartão
 
 ```
-DCM1.01K4D7M2Q8.7N5X9K3R2T8W6H4M9C7P
-^^^^ ^^^^^^^^^^ ^^^^^^^^^^^^^^^^^^^^
-ver.  public_id  segredo (100 bits)
+2 0102030405 1234567890123456789012345678901
+│ └ public_id └ segredo (31 dígitos ≈ 103 bits)
+└ versão
 ```
 
-Alfabeto Crockford base32 (sem I, L, O, U). O banco guarda `public_id` em
-claro e `token_hash = HMAC-SHA256(segredo_do_Vault, token)`. Zero dado
+**Só dígitos, sem separador, largura fixa.** O banco guarda `public_id`
+em claro e `token_hash = HMAC-SHA256(segredo_do_Vault, token)`. Zero dado
 pessoal no cartão.
 
-**O segredo tem 20 caracteres por restrição física, não por gosto.** Code
-128 gasta 11 módulos por caractere mais 35; com segredo de 32 o token vira
-um código de 105mm na densidade mínima de leitor laser, e um cartão de
-crédito tem 85,6mm — não caberia em formato nenhum. Com 20 dá 82mm. E 100
-bits não é concessão: quem protege a credencial é o PIN, o bloqueio e a
-revogação. O elo fraco é o cartão perdido, e a resposta pra esse é revogar.
+**Por que numérico, e por que o mais longo é o mais estreito.** Code 128
+tem um modo (Set C) que empacota DOIS dígitos por símbolo de 11 módulos;
+texto gasta 11 módulos por caractere, seja base32 ou base64. Medido com o
+codificador de verdade, para 75mm de área útil num CR80 (85,6mm menos 5mm
+de margem de cada lado) e piso de 0,19mm por módulo:
+
+| formato | car. | módulos | a 75mm |
+|---|---|---|---|
+| v1 `DCM1.<10>.<20>` base32 | 36 | 431 | 0,174mm ❌ |
+| `DC2.<6>.<24>` base32 | 35 | 420 | 0,179mm ❌ |
+| `DC2.<6>.<22>` base64url | 34 | 409 | 0,183mm ❌ |
+| **v2 `2<10><31>` dígitos** | **42** | **266** | **0,262mm ✅** |
+
+Trocar de alfabeto reduz caracteres, não módulos o bastante — nenhuma
+variação alfanumérica cabe. E **o separador é proibido**: um ponto no
+meio quebra a corrida numérica, força troca de set, e o mesmo token volta
+a 398 módulos.
+
+De quebra some o problema que o alfabeto Crockford existia pra mitigar:
+com só dígitos não há `O`/`0` nem `I`/`1`/`L` pra confundir.
+
+**103 bits não é concessão.** Quem protege a credencial é o PIN, o
+bloqueio progressivo e a revogação. O elo fraco é o cartão perdido, e a
+resposta pra esse é revogar — não adivinhar 2^103 pela rede. A folga de
+0,262mm perdoa impressora ruim, cartão sujo e leitor velho, que são
+riscos de verdade.
+
+**Cartão v1 já impresso continua valendo.** `public_id_do_token` (SQL) e
+`publicIdDoToken` (TS) reconhecem os dois formatos, e são os únicos
+pontos do sistema que sabem que existe mais de um.
+
+### O arquivo do cartão
+
+A tela de emissão entrega um **SVG no tamanho físico** — 75 × 20,2mm,
+barras de 16mm, zona de silêncio de 10X (2,62mm) de cada lado, dentro da
+largura. Imprimir pelo navegador não dá controle de escala pra um CR80; o
+caminho é baixar e levar pro software de impressão de cartão.
+
+- **SVG e não canvas.** Canvas escalado por CSS reamostra; em vetor a
+  escala é exata.
+- **Duas passadas no bwip-js.** Ele decide a proporção a partir da altura
+  em milímetros, e o que se precisa é o inverso: dada a largura final de
+  75mm, qual altura natural faz as barras saírem com 16mm depois de um
+  escalonamento **uniforme**. Sem isso seria preciso esticar na vertical.
+- **`scale: 1`**, senão a unidade do viewBox é pixel e a conta da largura
+  do módulo sai pela metade — e é ela que decide se o leitor lê.
+- **O token vive DENTRO do SVG**, não numa linha de HTML ao lado: o que
+  está na tela é byte a byte o que o arquivo contém.
+- **Só código de barras e token.** Sem nome de motoboy e sem filial —
+  cartão perdido não deve dizer de quem é nem de onde veio.
+
+**O arquivo É o cartão**: quem tiver ele imprime uma cópia que funciona.
+O desenho todo parte de o token existir só no papel, e um `.svg` no disco
+estende isso indefinidamente. A tela avisa pra apagar depois de imprimir.
 
 **O admin nunca escolhe o PIN, logo nunca sabe.** "Redefinir" só apaga o
 hash; quem cria o novo é o motoboy, com o cartão na mão. É isso que torna
 "Mostrar PIN" impossível de existir, em vez de apenas ausente da tela.
-
-### A vida da credencial
-
-```
-admin emite  →  AGUARDANDO ATIVAÇÃO (pin_hash null)  →  motoboy cria o PIN  →  ATIVA
-```
-
-A ativação acontece **dentro da primeira Nova Corrida**, não numa
-cerimônia administrativa própria: o caixa bipa, o sistema vê que não há
-PIN e pede ali mesmo. Evita uma tela a mais por motoboy e já deixa o fluxo
-seguir para a saída.
-
-**Criar o primeiro PIN é ONLINE obrigatório**, e isso não é uma checagem
-de tela que dê pra contornar: `definir_pin` resolve o tenant por
-`current_tenant_id()`, que depende de `auth.uid()` — sem sessão a função
-nem roda. É o momento em que o servidor grava o `pin_hash` oficial, então
-não existe versão offline dele. Depois de criado, o uso do PIN funciona
-nos dois modos.
-
-Quem ativa precisa de **as quatro coisas juntas**: usuário interno
-autenticado, cartão físico em mãos, credencial ainda sem PIN, e o motoboy
-digitando. Um cartão achado na rua não ativa sozinho — falta a sessão. E
-um cartão que já tem PIN não reativa: só o admin, apagando o hash.
-
-**`bcrypt` com custo 12** (`gen_salt('bf', 12)`). O hash carrega o custo
-dentro dele, então PIN criado com custo antigo continua validando e só
-sobe na próxima redefinição — não há como reidratar, porque reidratar
-exigiria conhecer o PIN.
-
-### Formato não é identidade
-
-O PIN é conferido pelo servidor num passo **próprio** ("Confirmar
-identidade"), antes de a tela liberar as assinaturas. Isso não é enfeite
-de UX: a primeira versão liberava a Custódia assim que o PIN tinha 6
-dígitos bem formados, e a verificação real só vinha no "Confirmar saída"
-— depois de já ter colhido as duas assinaturas. O servidor recusava
-certo, mas a tela afirmava o que não sabia, e no balcão isso é
-indistinguível de "qualquer PIN passa".
-
-Regra que fica: **se a tela desbloqueia, ela está afirmando alguma
-coisa.** Validação de formato nunca pode ocupar o lugar visual de
-validação de identidade.
-
-Botão explícito, e não conferência automática ao completar 6 dígitos:
-cada tentativa errada conta pro bloqueio progressivo, e quem se
-atrapalha digitando queimaria o bloqueio do motoboy sem ter errado o
-PIN. E usa `autenticar_credencial`, não `autorizar_saida` — a autorização
-vale 2 minutos e expiraria enquanto o motoboy assina.
-
-Offline não dá pra conferir (o bcrypt vive no servidor), e aí a tela diz
-"PIN guardado, mas **não conferido**" em vez de parecer que conferiu.
-
-### O passo do Vault que não é migration
-
-`hash_do_token` lê o segredo do HMAC do Supabase Vault, e ele **não nasce
-com nenhuma migration** — é criado uma vez, à mão, no SQL Editor:
-
-```sql
-create extension if not exists supabase_vault with schema vault;
-select vault.create_secret(
-  replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''),
-  'credencial_hmac', 'HMAC das credenciais fisicas de motoboy');
-```
-
-Gerado dentro do banco de propósito: assim o segredo não passa por
-arquivo, chat nem área de transferência. **Sintoma de esquecer este
-passo:** "Segredo credencial_hmac ausente no Vault" ao emitir a primeira
-credencial — as migrations rodam sem erro, porque a função só falha quando
-é chamada.
 
 ### O que ficou de fora, de propósito
 
@@ -1210,6 +1189,17 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   por Database[...] quando supabase gen types estiver configurado`. Quando configurar,
   trocar todos de uma vez, não um de cada vez.
 - Migrations em `supabase/migrations/`. **Nunca alterar schema pelo dashboard.**
+- **Biblioteca pesada entra por `await import()` e por `optimizeDeps.include`
+  no `vite.config.ts`, sempre as duas coisas.** São quatro hoje —
+  `exceljs`, `jspdf`, `jspdf-autotable` e `bwip-js/browser` — e todas só
+  descem quando alguém abre a tela que precisa delas. O import dinâmico
+  faz o code splitting no build; o `optimizeDeps` resolve um problema só
+  de desenvolvimento: sem ele o Vite descobre a dependência no instante em
+  que o import roda, re-otimiza o cache no meio da sessão, e a página
+  aberta segura uma URL com hash vencido que passa a responder 504 —
+  aparecendo como `Failed to fetch dynamically imported module`. Um reload
+  resolve, mas o erro cai justamente na primeira vez que alguém usa a
+  tela, e parece bug do app.
 - `src/components/` (UI), `src/pages/` (telas), `src/data/` (acesso a dados),
   `src/lib/` (utilitários)
 - Valores monetários: helpers em `src/lib/money.ts` — `centsFromDigits(digitos)`,

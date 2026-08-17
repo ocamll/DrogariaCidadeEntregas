@@ -1,4 +1,4 @@
-# Notas de trabalho — 2026-08-09 a 2026-08-16
+# Notas de trabalho — 2026-08-09 a 2026-08-17
 
 Registro de trabalho, não é documentação permanente do projeto (isso é o
 CLAUDE.md). Decisões duráveis já foram incorporadas lá; aqui fica o que é
@@ -9,12 +9,16 @@ abaixo: itens 1 a 20 são de 09 e 10/08, 21 e 22 de 11/08, 23 a 25 de
 12/08, 26 a 30 de 12 e 13/08, e 31 e 32 de 16/08 — com a parte de PDF e
 Google Drive do item 29 também sendo de 16/08.
 
-**Onde o projeto está:** funcionalmente completo, e desde 16/08 com uma
-frente nova por cima — a cadeia de custódia da saída (itens 33 a 37). A checklist "Dentro" do
+**Onde o projeto está:** funcionalmente completo. A checklist "Dentro" do
 MVP fechou no item 6, e por cima dela entraram cancelamento, fechamento de
 caixa, gestão de usuários, tarifa/vales, permissões por filial, cidade,
-exportação em .xlsx e PDF, e envio ao Google Drive. O que falta pro uso
-real não é código — ver "Estado em 2026-08-16" na seção de pendências.
+exportação em .xlsx e PDF, e envio ao Google Drive. Em 16 e 17/08 entrou a
+frente maior de todas — a cadeia de custódia da saída (itens 33 a 45),
+que já selou uma saída real de ponta a ponta.
+
+**Se você está retomando, comece por "Estado em 2026-08-17", no fim deste
+arquivo.** É lá que está o que falta, em ordem de risco, e o que já foi
+aplicado no Supabase.
 
 ## 1. Fila offline nas outras 4 escritas
 
@@ -1522,6 +1526,103 @@ apoiado numa suposição não verificada.
 (conflito, dos mesmos vales — nasceu do bug da FK). Entram na limpeza que
 o NOTAS já lista como pendência antes do uso real.
 
+## 43. O token virou numérico, e o motivo é contraintuitivo
+
+O usuário voltou com uma especificação física boa (CR80 de 85,6 × 54mm,
+área de 75 × 16mm pro código, 5mm de margem, zona de silêncio de 10X) e
+uma proposta de encurtar o token de ~48 pra ~34 caracteres, trocando
+base32 por base64url.
+
+Duas correções saíram da medição, feita com o codificador de verdade e
+não estimada:
+
+**O token já não tinha 48 caracteres** — eu o havia encurtado pra 36
+quando dimensionei o cartão na etapa 2. Ele estava avaliando o exemplo da
+spec original.
+
+**E nem a proposta dele cabia.** A 75mm com piso de 0,19mm por módulo:
+
+    v1   DCM1.<10>.<20> base32   36 car → 431 mod → 0,174mm  NÃO
+    b32  DC2.<6>.<24>            35 car → 420 mod → 0,179mm  NÃO
+    b64  DC2.<6>.<22>            34 car → 409 mod → 0,183mm  NÃO
+    v2   2<10><31> só dígitos    42 car → 266 mod → 0,262mm  SIM
+
+**Code 128 tem um modo numérico (Set C) que empacota dois dígitos por
+símbolo.** Texto gasta 11 módulos por caractere, seja qual for o
+alfabeto — trocar base32 por base64 reduz caracteres, não módulos o
+bastante. Um token só de dígitos, mesmo com MAIS caracteres, ocupa quase
+metade da largura. O bwip-js troca de set sozinho.
+
+Corolário que decidiu o formato: **sem separadores.** Um ponto no meio
+quebra a corrida numérica e força troca de set — `DC2.0102…` com pontos
+volta pra 398 módulos e deixa de caber. Campos de largura fixa.
+
+E some de graça o problema que o alfabeto Crockford existia pra mitigar:
+com só dígitos não há `O`/`0` nem `I`/`1`/`L`.
+
+**Cartão v1 continua valendo.** `public_id_do_token` (SQL) e
+`publicIdDoToken` (TS) conhecem os dois formatos e são os únicos pontos
+que sabem disso.
+
+Detalhe pequeno com razão: `gerar_digitos` faz rejeição amostral (descarta
+byte ≥ 250). Sem ela os dígitos 0-5 sairiam em 60,96% em vez de 60% —
+medido em 300 mil amostras — porque 256 não é múltiplo de 10. No base32
+do v1 isso não existia: 256 é múltiplo exato de 32.
+
+## 44. O cartão em SVG, e um erro que só a medição pegou
+
+Imprimir pelo navegador não dá controle de escala pra um CR80, então a
+tela passou a oferecer download do `.svg` no tamanho físico.
+
+Três decisões que valem registro:
+
+- **SVG e não canvas.** Eu vinha renderizando canvas com `scale: 3` e
+  esticando por CSS até 90mm, o que reamostra. Em vetor a escala é exata.
+- **Duas passadas no bwip-js.** Ele decide a proporção a partir da altura
+  em mm, e eu precisava do inverso: dada a largura de 75mm, qual altura
+  natural faz as barras saírem com 16mm num escalonamento **uniforme**.
+  Sem isso seria preciso esticar na vertical.
+- **`scale: 1`.** Sem isso a unidade do viewBox é pixel (escala 2 por
+  padrão) e a conta da largura do módulo sai **pela metade** — e é ela
+  que decide se o leitor lê. Peguei isso conferindo, não pensando.
+
+**O erro que a medição pegou:** a primeira versão pôs o token em fonte 10,
+e o texto saiu com **81,8mm — mais largo que o cartão de 75mm**,
+escapando pra fora do SVG. Teria ido pro software de impressão assim.
+Testei seis tamanhos e ficou fonte 8: texto de 60,4mm, 7,3mm de margem de
+cada lado, tudo dentro da caixa, cartão em 75 × 20,2mm.
+
+O token vive DENTRO do SVG (não numa linha de HTML ao lado), então o que
+está na tela é byte a byte o que o arquivo contém. Só código de barras e
+token — sem nome de motoboy e sem filial, a pedido: cartão perdido não
+deve dizer de quem é nem de onde veio.
+
+**Ressalva que ficou escrita na tela:** o arquivo É o cartão. Quem tiver
+ele imprime uma cópia que funciona, e o desenho todo parte de o token
+existir só no papel. Um `.svg` no disco — ainda mais dentro do OneDrive —
+estende isso indefinidamente. A tela avisa pra apagar depois de imprimir.
+
+## 45. O cache de dependências do Vite
+
+`Failed to fetch dynamically imported module: .../bwip-js_browser.js?v=4d1215e6`
+ao emitir um cartão. Não era bug do app.
+
+O Vite descobre dependência de `import()` dinâmico só no instante em que
+ele roda, e aí re-otimiza o cache no meio da sessão. A página aberta
+continua segurando a URL com o hash antigo, que passa a responder 504.
+Confirmado por HTTP: o hash atual serve 200, o antigo dá 504.
+
+`optimizeDeps.include` no `vite.config.ts` faz a descoberta acontecer na
+inicialização, antes de qualquer página existir. As quatro bibliotecas
+pesadas entraram juntas — corrigir só a que falhou deixaria a mesma
+armadilha esperando no exceljs e no jspdf. O build de produção não muda:
+conferido que os quatro continuam em chunks separados.
+
+Junto com o item 41 (módulo velho em memória depois de HMR), fica o
+padrão: **nesta máquina, comportamento estranho em desenvolvimento merece
+um reload — e às vezes um restart do servidor — antes de virar
+investigação.**
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -1683,6 +1784,10 @@ Sessão de 2026-08-16 — cadeia de custódia (itens 33 a 38):
 30. `20260816160000_credencial_leitura_para_saida.sql` — leitura das
     credenciais liberada pro tenant, pro cache offline poder existir
 31. `20260816170000_pin_custo_bcrypt.sql` — custo 10 → 12
+32. `20260816180000_corrige_ordem_da_autorizacao.sql` — a FK que fazia
+    nenhum selo funcionar (item 40)
+33. `20260817120000_token_numerico_v2.sql` — token v2 numérico, e o
+    parser que reconhece os dois formatos (item 43)
 
 **Fora de migration, e obrigatórios:**
 
@@ -1712,43 +1817,72 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### Estado em 2026-08-16 — o que separa o projeto do uso real
+### Estado em 2026-08-17 — leia isto primeiro
 
-Nada disso é código. O sistema está funcional; o que falta é a virada de
-chave:
+A cadeia de custódia (itens 33 a 45) está construída e **funcionando
+online**: uma saída real foi selada de ponta a ponta — cartão bipado, PIN
+conferido pelo servidor, duas assinaturas, romaneio `R-000001` com as
+assinaturas visíveis pelo chevron do vale.
+
+O trabalho vive na branch **`cadeia-de-custodia`**, já no GitHub. A
+`main` continua em `313a3e2` — o merge é decisão do usuário e ainda não
+foi feito.
+
+**Tudo que precisava de passo manual no Supabase já foi aplicado:** as
+oito migrations, o segredo `credencial_hmac` no Vault, a Edge Function
+`sync-romaneio` (nome dela no dashboard, não `sincronizar-romaneio`) e o
+secret `ROMANEIO_KEYS`.
+
+#### O que falta, em ordem de risco
+
+- [ ] **Rodar `scripts/conferir-canonico-no-console.js`.** Abre, copia
+      tudo, cola no console do navegador com o usuário logado. É o único
+      teste que prova que `montarCanonico` (TypeScript) e
+      `romaneio_canonico` (SQL) produzem os mesmos bytes. **Enquanto não
+      rodar, o caminho offline inteiro está apoiado numa suposição** — e
+      se divergirem, o sintoma é "a saída offline nunca sincroniza",
+      com a mensagem apontando pra "documento alterado" em vez de pra
+      causa. Custa dois minutos e é o item de maior risco em aberto.
+- [ ] **Testar a saída OFFLINE ponta a ponta**: devtools em modo
+      offline, registrar a saída, religar, ver a fila drenar pela
+      `sync-romaneio`. É o que exercita o envelope RSA e o
+      `ROMANEIO_KEYS`, que nunca rodaram de verdade — só as peças foram
+      testadas isoladas. Rodar DEPOIS do teste do canônico: se o canônico
+      divergir, este falha por um motivo que parece outro.
+- [ ] **Imprimir o cartão e bipar no leitor do balcão.** O usuário ia
+      fazer isso em 17/08. Duas ressalvas: testar com o leitor da
+      farmácia e não com app de celular (app é bem mais tolerante), e
+      antes de laminar, se for laminar. Se falhar, o primeiro ajuste é
+      imprimir maior — não mexer no formato do token.
+- [ ] **Apagar a pasta `.chaves-offline/`.** A chave privada ainda está
+      lá, dentro do OneDrive, e o secret já está configurado no Supabase.
+      Ela não serve mais pra nada.
+- [ ] **Dispensar o romaneio `R-000002`** na fila offline (botão "Já
+      anotei, dispensar"). É um conflito de teste, nascido do bug da FK
+      do item 40 — os mesmos vales tentando sair duas vezes.
+
+#### E o que já era pendência antes desta frente
 
 - [ ] **Dados reais das filiais.** Hoje o banco tem Matriz e Filial 02
-      fictícias; a farmácia tem 17. Falta a lista de filiais com suas
-      cidades pra montar o SQL (loja e cidade são inserção manual, por
-      decisão antiga — ver CLAUDE.md).
+      fictícias; a farmácia tem 17. Falta a lista com as cidades pra
+      montar o SQL (loja e cidade são inserção manual, decisão antiga).
 - [ ] **Agência real.** O dado de teste é "Ágil Motos"; em São Gabriel a
       agência é a Gabrielense.
-- [ ] **Limpeza dos dados de teste** (lista atualizada no fim).
+- [ ] **Limpeza dos dados de teste** (lista no fim deste arquivo).
 - [ ] **Trocar as senhas de teste no Supabase** — pendente desde
       2026-08-10 e o único item com risco real esperando. `adminteste@` e
       `caixateste@` com senha `2026`, num Supabase de produção, e o
       histórico do repositório registra isso.
-- [ ] **Passos de produção do Drive**: `VITE_GOOGLE_CLIENT_ID` nas
-      variáveis do Cloudflare Pages **com rebuild depois** (o Vite embute
-      no build), e a URL do Pages nas origens autorizadas do Google. Se
-      faltar qualquer um, funciona no localhost e falha no ar.
-- [ ] **Rodar o conferir-canonico-no-console.js.** É o unico teste que
-      prova que montarCanonico (TypeScript) e romaneio_canonico (SQL)
-      geram os mesmos bytes. Enquanto nao rodar, o caminho offline esta
-      apoiado numa suposicao. Ver item 42.
-- [ ] **Testar a saida OFFLINE ponta a ponta**: registrar sem rede,
-      religar, ver a fila drenar pela sync-romaneio. Ver item 42.
-- [ ] **Apagar a pasta .chaves-offline/** depois de o secret estar
-      configurado — ela sincroniza pro OneDrive.
-- [ ] **Testar o envio ao Drive depois da correção do item 32.** O
-      primeiro envio funcionou; o segundo falhou por bloqueio de pop-up
-      (diagnóstico provável, não confirmado). A correção está no ar e
-      espera um teste real — se falhar de novo, a mensagem agora diz qual
-      dos três casos é.
+- [ ] **Passos de produção do Drive e do romaneio no Cloudflare Pages**:
+      `VITE_GOOGLE_CLIENT_ID`, `VITE_ROMANEIO_KEY_ID` e
+      `VITE_ROMANEIO_PUBKEY` nas variáveis, **com rebuild depois** (o
+      Vite embute no build), e a URL do Pages nas origens autorizadas do
+      Google. Faltando qualquer um, funciona no localhost e falha no ar.
+- [ ] **Testar o envio ao Drive depois da correção do item 32.**
 
 Ideia pequena anotada e não feita: **atalho de quinzena** no relatório
 (1ª/2ª quinzena ao lado de Hoje/Este mês), já que o pagamento das teles
-segue esse ciclo e hoje as datas são digitadas à mão.
+segue esse ciclo.
 
 **Dos 3 buracos que levantei quando o usuário perguntou que ideias
 existiam além das obrigatórias, 2 foram feitos** (cancelamento no item
