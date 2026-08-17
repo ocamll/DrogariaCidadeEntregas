@@ -410,7 +410,17 @@ async function buscarValesParaSaida(): Promise<ValeCanonico[]> {
     )
     .eq('status_entrega', 'pendente')
     .is('corrida_id', null)
-    .order('registrado_em', { ascending: true })
+    // Mais novo primeiro: o vale que o caixa acabou de lançar é o que ele
+    // vai mandar sair agora, então ele tem que estar no topo — não no fim
+    // de uma lista que precisa rolar.
+    //
+    // Isso inverte a regra geral das filas de trabalho deste projeto (que
+    // ordenam ascendente pra que truncar perca o mais NOVO, a direção
+    // benigna). Aqui o teto de 500 está muito acima do real: vale pendente
+    // sem corrida sai no mesmo dia, então a lista vive perto de dezenas.
+    // Se algum dia encostar em 500, o problema não é a ordenação — é que
+    // tem vale parado há semanas.
+    .order('registrado_em', { ascending: false })
     .limit(LIMITE_VALES_SAIDA)
 
   if (error) throw error
@@ -445,9 +455,18 @@ export function useValesParaSaida() {
   return useQuery({
     queryKey: ['vales-para-saida'],
     queryFn: buscarValesParaSaida,
-    // Fica em cache pra a tela ainda funcionar se a internet cair com ela
-    // aberta. Recarregar a página offline é outro caso, e aí não há lista.
-    staleTime: 60_000,
+    // `staleTime: 0` de propósito, contra o padrão do resto do app.
+    //
+    // Esta lista decide o que sai fisicamente da farmácia. Mostrar um vale
+    // que já saiu faz o caixa mandá-lo de novo, e aí o servidor recusa por
+    // conflito — corretamente, mas depois de colher duas assinaturas e com
+    // um romaneio de conflito pra alguém resolver. A tela é aberta
+    // deliberadamente, uma vez por saída; buscar de novo custa nada perto
+    // disso.
+    staleTime: 0,
+    // O cache longo é pro caso de a internet cair com a tela aberta: o
+    // dado anterior continua servindo. Recarregar a página offline é outro
+    // caso, e aí não há lista.
     gcTime: 30 * 60_000,
   })
 }

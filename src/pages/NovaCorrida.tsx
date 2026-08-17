@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
+import { useQueryClient } from '@tanstack/react-query'
 import SignaturePad from 'signature_pad'
 import type { AuthProfile } from '@/data/auth'
 import { useCidadeDaLoja } from '@/data/lojas'
@@ -24,7 +25,11 @@ import {
   publicIdDoToken,
 } from '@/data/credenciais'
 import { selarSegredos, calcularOfflineEventHash, envelopeDisponivel } from '@/lib/envelope'
-import { enfileirarOperacao, donoDaFila } from '@/data/filaOffline'
+import {
+  enfileirarOperacao,
+  donoDaFila,
+  useFilaOperacoesPendentes,
+} from '@/data/filaOffline'
 import type { EntradaCanonica, ValeCanonico } from '@/lib/canonico'
 import { uuidv7 } from '@/lib/uuid'
 import { formatBRL } from '@/lib/money'
@@ -76,6 +81,8 @@ function NovaCorridaFluxo({
   const { data: vales, isLoading } = useValesParaSaida()
   const cidadeId = useCidadeDaLoja(lojaId)
   const { data: agenciasDaCidade } = useAgenciasDaCidade(cidadeId)
+  const pendentesDaFila = useFilaOperacoesPendentes()
+  const queryClient = useQueryClient()
 
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set())
   const [token, setToken] = useState('')
@@ -110,7 +117,21 @@ function NovaCorridaFluxo({
     if (navigator.onLine) void sincronizarCacheDeCredenciais().catch(() => {})
   }, [])
 
-  const escolhidos: ValeCanonico[] = (vales ?? []).filter((v) => selecionadas.has(v.entregaId))
+  // Vale que já saiu numa operação AINDA NA FILA não pode reaparecer aqui.
+  //
+  // Sem isto, offline: o caixa registra a saída, o vale continua
+  // `pendente` no servidor (que é o certo — ver CLAUDE.md), a tela abre de
+  // novo e oferece o mesmo vale. Ele sai duas vezes fisicamente, e o
+  // servidor só descobre na sincronização, virando conflito. O servidor
+  // recusa certo; o ponto é não deixar chegar lá.
+  const jaNaFila = new Set(
+    pendentesDaFila
+      .filter((i) => i.tipo === 'romaneio_saida' && i.status !== 'terminal')
+      .flatMap((i) => (i.payload as SaidaOfflineInput).entregaIds)
+  )
+
+  const disponiveis = (vales ?? []).filter((v) => !jaNaFila.has(v.entregaId))
+  const escolhidos: ValeCanonico[] = disponiveis.filter((v) => selecionadas.has(v.entregaId))
   const totalEntrega = escolhidos.reduce((soma, v) => soma + v.valorEntregaCents, 0)
   const totalVales = escolhidos.reduce((soma, v) => soma + v.quantidadeVales, 0)
 
@@ -414,6 +435,12 @@ function NovaCorridaFluxo({
               ? { kind: 'selado', numero: selo.numero, finalHash: selo.finalHash }
               : { kind: 'conflito', numero: selo.numero, detalhe: selo.conflitos }
           )
+          // Sem isto a tela continua oferecendo os vales que acabaram
+          // de sair — a query tem cache e ninguém a invalidava.
+          queryClient.invalidateQueries({ queryKey: ['vales-para-saida'] })
+          queryClient.invalidateQueries({ queryKey: ['entregas-hoje'] })
+          queryClient.invalidateQueries({ queryKey: ['custodia-vales'] })
+          queryClient.invalidateQueries({ queryKey: ['eventos-auditoria'] })
           limpar()
           return
         } catch (e) {
@@ -478,12 +505,12 @@ function NovaCorridaFluxo({
         <CardContent className="flex flex-col gap-6">
           <Secao numero={1} titulo="Vales">
             {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
-            {!isLoading && (vales ?? []).length === 0 && (
+            {!isLoading && disponiveis.length === 0 && (
               <p className="text-sm text-muted-foreground">Nenhum vale pendente pra sair agora.</p>
             )}
-            {(vales ?? []).length > 0 && (
+            {disponiveis.length > 0 && (
               <div className="flex max-h-64 flex-col gap-1 overflow-y-auto rounded-lg border p-2">
-                {vales!.map((vale) => (
+                {disponiveis.map((vale) => (
                   <label key={vale.entregaId} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"

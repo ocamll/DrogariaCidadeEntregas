@@ -24,12 +24,16 @@ import { sincronizarSaidaOffline, ErroTerminalDeSaida } from '@/data/romaneios'
 // montado (é quem desenha o botão do cabeçalho), então sem invalidar aqui
 // o registro fica velho até alguém dar refresh.
 const QUERY_KEYS_POR_TIPO: Record<TipoOperacaoFila, string[]> = {
-  entrega: ['entregas-hoje', 'eventos-auditoria'],
-  transferencia: ['transferencias', 'eventos-auditoria'],
+  // 'vales-para-saida' entra em tudo que muda QUAIS VALES estão pendentes
+  // sem corrida — que é a lista de onde o caixa escolhe o que vai sair.
+  // Faltava, e a Nova Corrida seguia oferecendo vale que já tinha saído.
+  entrega: ['entregas-hoje', 'vales-para-saida', 'eventos-auditoria'],
+  transferencia: ['transferencias', 'vales-para-saida', 'eventos-auditoria'],
   corrida: [
     'entregas-hoje',
     'transferencias',
     'entregas-pendentes-sem-corrida',
+    'vales-para-saida',
     'entregas-historico',
     'eventos-auditoria',
   ],
@@ -37,6 +41,7 @@ const QUERY_KEYS_POR_TIPO: Record<TipoOperacaoFila, string[]> = {
     'entregas-hoje',
     'transferencias',
     'entregas-pendentes-sem-corrida',
+    'vales-para-saida',
     'entregas-historico',
     'romaneios',
     'eventos-auditoria',
@@ -50,6 +55,7 @@ const QUERY_KEYS_POR_TIPO: Record<TipoOperacaoFila, string[]> = {
   ],
   fechamento_corrida: [
     'entregas-hoje',
+    'vales-para-saida',
     'transferencias',
     'entregas-historico',
     'corridas-abertas',
