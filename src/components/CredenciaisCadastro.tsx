@@ -351,9 +351,21 @@ function CartaoEmitidoDialog({
             className="flex flex-col items-center gap-2 rounded-lg border bg-white p-4 text-black"
           >
             {erroBarras ? (
-              <p className="text-xs text-red-700">
-                Não consegui gerar o código de barras: {erroBarras}
-              </p>
+              <div className="text-xs text-red-700">
+                <p>Não consegui gerar o código de barras.</p>
+                {/* "Failed to fetch dynamically imported module" quase
+                    sempre é o cache de deps do Vite vencido, não defeito
+                    do app — e a saída é recarregar. Dizer isso poupa
+                    alguém de caçar bug que não existe. */}
+                {erroBarras.includes('dynamically imported module') ? (
+                  <p className="mt-1">
+                    Recarrega a página (Ctrl+Shift+R) e emite de novo — o navegador está com uma
+                    versão vencida de um arquivo.
+                  </p>
+                ) : (
+                  <p className="mt-1">{erroBarras}</p>
+                )}
+              </div>
             ) : svg ? (
               // SVG no tamanho físico, não canvas esticado por CSS: em
               // vetor a escala é exata, sem reamostragem.
