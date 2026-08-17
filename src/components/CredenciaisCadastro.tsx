@@ -31,6 +31,18 @@ const ALTURA_BARRA_MM = 16
 // alfanumérico que não cabia: 431 módulos, 0,174mm.
 const MODULO_MINIMO_MM = 0.19
 
+// Faixa abaixo das barras pro token em texto, em unidades do viewBox
+// (uma unidade = um módulo ≈ 0,26mm). Os três números foram MEDIDOS no
+// navegador, não estimados: a primeira tentativa usou fonte 10 e o texto
+// saiu com 81,8mm — mais largo que o próprio cartão de 75mm, escapando
+// pra fora do SVG.
+//
+// Com fonte 8: texto de 60,4mm (folga de ~7mm de cada lado) e cartão de
+// 20,2mm de altura total, longe dos 54mm do CR80.
+const ESPACO_TEXTO_UNIDADES = 16
+const FONTE_TOKEN_UNIDADES = 8
+const BASE_TEXTO_UNIDADES = 12
+
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfile }) {
   const { data: motoboys, isLoading, isError, error } = useMototaxistasCadastro()
@@ -238,13 +250,50 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
 // O cartão recém-emitido
 //
 // Esta tela é a ÚNICA vez que o token existe fora do papel. O banco
-// guarda só o HMAC, então fechar sem imprimir significa emitir outro —
+// guarda só o HMAC, então fechar sem salvar significa emitir outro —
 // não há "ver de novo".
 //
 // Dimensionado pro CR80 (85,6 × 54mm), com 5mm de margem física de cada
 // lado. Ver a nota de dimensionamento na migration 20260817120000: é ela
 // que explica por que o token é numérico.
 // =====================================================================
+
+// O token em blocos: 42 dígitos corridos ninguém acompanha com o olho, e
+// esse texto existe justamente pro caso de alguém precisar digitá-lo
+// quando o leitor falhar.
+function tokenLegivel(token: string): string {
+  return token.replace(/(.{6})/g, '$1 ').trim()
+}
+
+// Compõe o SVG final: código de barras + token, e nada mais.
+//
+// Sem nome de motoboy e sem filial, a pedido — um cartão perdido não deve
+// dizer de quem é nem de onde veio. Quem casa o papel com a pessoa é o
+// sistema, pelo public_id.
+//
+// O `<rect width="100%" height="100%">` que o bwip-js já põe acompanha o
+// viewBox, então esticar a altura pra caber o texto mantém o fundo branco
+// cobrindo tudo — não precisa de retângulo novo.
+function comporCartao(svgDoCodigo: string, token: string, unidadesLargura: number, unidadesAltura: number) {
+  const alturaTotal = unidadesAltura + ESPACO_TEXTO_UNIDADES
+  // Escala uniforme: a largura física manda, e a altura acompanha o
+  // viewBox. Nada é esticado numa direção só.
+  const alturaMm = (LARGURA_MM * alturaTotal) / unidadesLargura
+
+  const svg = svgDoCodigo
+    .replace(
+      `viewBox="0 0 ${unidadesLargura} ${unidadesAltura}"`,
+      `viewBox="0 0 ${unidadesLargura} ${alturaTotal}" width="${LARGURA_MM}mm" height="${alturaMm.toFixed(2)}mm"`
+    )
+    .replace(
+      '</svg>',
+      `<text x="${unidadesLargura / 2}" y="${unidadesAltura + BASE_TEXTO_UNIDADES}" ` +
+        `text-anchor="middle" font-family="Courier New, monospace" ` +
+        `font-size="${FONTE_TOKEN_UNIDADES}" fill="#000000">${tokenLegivel(token)}</text>\n</svg>`
+    )
+
+  return { svg, alturaMm }
+}
 
 function CartaoEmitidoDialog({
   emitida,
@@ -258,6 +307,7 @@ function CartaoEmitidoDialog({
   const [svg, setSvg] = useState<string | null>(null)
   const [erroBarras, setErroBarras] = useState<string | null>(null)
   const [moduloMm, setModuloMm] = useState<number | null>(null)
+  const [alturaMm, setAlturaMm] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelado = false
@@ -265,7 +315,9 @@ function CartaoEmitidoDialog({
     async function gerar() {
       try {
         // Import dinâmico, mesmo padrão do exceljs e do jspdf: ~930 kB que
-        // só descem quando um admin abre esta tela.
+        // só descem quando um admin abre esta tela. Está em
+        // optimizeDeps.include do vite.config pra o cache de deps não
+        // vencer no meio da sessão em desenvolvimento.
         const bwipjs = await import('bwip-js/browser')
         if (cancelado) return
 
@@ -288,9 +340,6 @@ function CartaoEmitidoDialog({
         // da altura em milímetros, e eu preciso do inverso — dada a
         // largura final de 75mm, qual altura natural faz as barras
         // saírem com 16mm depois do escalonamento UNIFORME.
-        //
-        // Sem isso eu teria que esticar o SVG na vertical pra acertar a
-        // altura, que é justamente o que não se deve fazer.
         const primeira = bwipjs.default.toSVG({ ...base, height: ALTURA_BARRA_MM })
         const vb = primeira.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)
         if (!vb) throw new Error('não consegui ler as dimensões do código gerado')
@@ -300,19 +349,19 @@ function CartaoEmitidoDialog({
         const alturaNatural =
           (ALTURA_BARRA_MM * unidadesLargura * (ALTURA_BARRA_MM / LARGURA_MM)) / unidadesAltura
 
-        const final = bwipjs.default.toSVG({ ...base, height: alturaNatural })
+        const segunda = bwipjs.default.toSVG({ ...base, height: alturaNatural })
+        const vb2 = segunda.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)
+        if (!vb2) throw new Error('não consegui ler as dimensões do código gerado')
         if (cancelado) return
 
-        // Largura do módulo no papel: o número que decide se o leitor
-        // lê. As 20 unidades das duas zonas de silêncio entram na conta,
+        const composto = comporCartao(segunda, emitida.token, Number(vb2[1]), Number(vb2[2]))
+
+        // Largura do módulo no papel: o número que decide se o leitor lê.
+        // As 20 unidades das duas zonas de silêncio entram na conta,
         // porque ocupam largura dentro dos 75mm.
         setModuloMm(LARGURA_MM / unidadesLargura)
-        setSvg(
-          final.replace(
-            '<svg ',
-            `<svg width="${LARGURA_MM}mm" height="${ALTURA_BARRA_MM}mm" `
-          )
-        )
+        setAlturaMm(composto.alturaMm)
+        setSvg(composto.svg)
       } catch (e) {
         if (!cancelado) setErroBarras(e instanceof Error ? e.message : String(e))
       }
@@ -323,6 +372,19 @@ function CartaoEmitidoDialog({
       cancelado = true
     }
   }, [emitida.token])
+
+  function baixarSvg() {
+    if (!svg) return
+    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
+    const url = URL.createObjectURL(blob)
+    const link = document.createElement('a')
+    link.href = url
+    // O nome carrega só o public_id, que não é segredo — é o que permite
+    // casar o arquivo com a linha da tela sem abri-lo.
+    link.download = `cartao-${emitida.publicId}.svg`
+    link.click()
+    URL.revokeObjectURL(url)
+  }
 
   const legivel = moduloMm !== null && moduloMm >= MODULO_MINIMO_MM
 
@@ -336,16 +398,14 @@ function CartaoEmitidoDialog({
         <div className="flex flex-col gap-4">
           <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
             <p className="text-sm">
-              <strong>Imprime agora.</strong> O sistema guarda só uma impressão digital do cartão —
-              este código não aparece de novo em lugar nenhum. Se fechar sem imprimir, o caminho é
-              emitir outro cartão.
+              <strong>Salva ou imprime agora.</strong> O sistema guarda só uma impressão digital do
+              cartão — este código não aparece de novo em lugar nenhum. Se fechar sem salvar, o
+              caminho é emitir outro cartão.
             </p>
           </div>
 
-          {/* O que vai pro papel: código de barras e o token, nada mais.
-              Sem nome de motoboy e sem filial — um cartão perdido não deve
-              dizer de quem é nem de onde veio. Quem casa o papel com a
-              pessoa é o sistema, pelo public_id. */}
+          {/* O que está na tela é byte a byte o que o .svg contém — o token
+              vive DENTRO do SVG, não numa linha de HTML ao lado. */}
           <div
             id="print-cartao"
             className="flex flex-col items-center gap-2 rounded-lg border bg-white p-4 text-black"
@@ -355,8 +415,7 @@ function CartaoEmitidoDialog({
                 <p>Não consegui gerar o código de barras.</p>
                 {/* "Failed to fetch dynamically imported module" quase
                     sempre é o cache de deps do Vite vencido, não defeito
-                    do app — e a saída é recarregar. Dizer isso poupa
-                    alguém de caçar bug que não existe. */}
+                    do app — e a saída é recarregar. */}
                 {erroBarras.includes('dynamically imported module') ? (
                   <p className="mt-1">
                     Recarrega a página (Ctrl+Shift+R) e emite de novo — o navegador está com uma
@@ -373,18 +432,13 @@ function CartaoEmitidoDialog({
             ) : (
               <p className="text-xs">Gerando…</p>
             )}
-            {/* O token em texto embaixo não é enfeite: se o leitor falhar
-                no balcão, ele pode ser digitado. Em blocos de 6 porque 42
-                dígitos corridos ninguém acompanha com o olho. */}
-            <p className="font-mono text-[11px] tracking-wide">
-              {emitida.token.replace(/(.{6})/g, '$1 ').trim()}
-            </p>
           </div>
 
           <div className="flex flex-col gap-1 text-sm">
             <p>
-              Área do código: <strong>{LARGURA_MM}mm × {ALTURA_BARRA_MM}mm</strong> — cabe num
-              cartão CR80 (85,6 × 54mm) com 5mm de margem de cada lado.
+              Arquivo: <strong>{LARGURA_MM}mm × {alturaMm ? alturaMm.toFixed(1) : '…'}mm</strong>,
+              com barras de {ALTURA_BARRA_MM}mm — cabe num CR80 (85,6 × 54mm) com 5mm de margem de
+              cada lado.
             </p>
             {moduloMm !== null && (
               <p className={legivel ? 'text-xs text-foreground/70' : 'text-xs text-destructive'}>
@@ -394,15 +448,26 @@ function CartaoEmitidoDialog({
                   : `Abaixo de ${MODULO_MINIMO_MM}mm muitos leitores falham.`}
               </p>
             )}
+            {/* O arquivo É o cartão: quem tiver ele consegue imprimir uma
+                cópia funcional. O desenho todo parte de o token existir só
+                no papel, e um .svg no disco (ainda mais dentro do OneDrive)
+                estende isso indefinidamente. */}
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              O arquivo contém o código do cartão — quem tiver ele imprime uma cópia que funciona.
+              Apaga depois de imprimir.
+            </p>
           </div>
         </div>
 
         <DialogFooter>
           <Button variant="outline" onClick={onFechar}>
-            Já imprimi
+            Já salvei
           </Button>
-          <Button onClick={() => window.print()} disabled={!svg}>
+          <Button variant="outline" onClick={() => window.print()} disabled={!svg}>
             Imprimir
+          </Button>
+          <Button onClick={baixarSvg} disabled={!svg}>
+            Baixar .svg
           </Button>
         </DialogFooter>
       </DialogContent>
