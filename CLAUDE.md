@@ -46,9 +46,15 @@ Lista fechada. Não instalar dependência nova sem perguntar.
   trouxe uma vulnerabilidade **alta** em `nanoid`, resolvida com
   `npm audit fix` (não-quebrante) — não confundir com o aviso do `uuid`
   acima, que é outro e não se aplica.
-- Supabase: Postgres + Auth + Storage + Realtime + RLS + **uma** Edge Function
-  (`criar-usuario` — a única coisa que roda no servidor, ver "Gestão de
-  usuários" abaixo)
+- `bwip-js` (código de barras Code 128 do cartão do motoboy — aprovado em
+  2026-08-16). **Zero dependências transitivas** e **importado
+  dinamicamente**: são ~930 kB que só descem quando um admin abre a tela
+  de emitir credencial, mesma disciplina do exceljs e do jspdf. Só a
+  **impressão** precisa dele — ler o cartão não precisa de nada, porque o
+  leitor age como teclado.
+- Supabase: Postgres + Auth + Storage + Realtime + RLS + **duas** Edge
+  Functions (`criar-usuario` e `sync-romaneio`) e um conjunto de RPCs
+  `SECURITY DEFINER` — ver "Onde roda código no servidor" abaixo
 - Deploy: Cloudflare Pages
 - Repositório: `github.com/ocamll/DrogariaCidadeEntregas` — **privado**, branch
   `main`. Até 2026-08-10 o projeto só existia nesta máquina (dentro do
@@ -80,16 +86,38 @@ Não são preferências. Violar qualquer uma é bug.
 
 6. **`eventos` é append-only.** Só `INSERT`. Nunca `UPDATE`, nunca `DELETE`.
 
-7. **Entrega com assinatura capturada é imutável** nos campos de valor, cliente e
-   número do vale. Correção é evento novo apontando para o original, nunca `UPDATE`
-   silencioso. Há trigger no banco garantindo isso — não tente contorná-la.
+7. **Vale em romaneio selado é imutável** em tudo que entrou no documento
+   assinado: número do vale, cliente, endereço, valor de compra, valor de
+   entrega, quantidade de vales, valor pago em mãos, tipo, filial, filial
+   de origem, convênio e corrida. Trigger no banco garante — não tente
+   contorná-la. Continua mutável o que descreve o que aconteceu *depois*:
+   os três eixos de status, observações, motivo de insucesso e a custódia
+   de papel.
 
-   **Ressalva pendente (2026-08-11):** o usuário decidiu que vale assinado
-   **não recebe alteração nenhuma**, nem por evento novo. Ou seja, a
-   segunda frase desta regra descreve uma saída que ele não quer que
-   exista. Ele ficou de explicar o porquê; até lá, **não construir nem
-   propor** a correção por evento. Quando a explicação vier, esta regra
-   precisa ser reescrita.
+   **Dado assinado e dado operacional atual são coisas separadas**
+   (definido em 2026-08-16, revendo a decisão de 11/08). O documento nunca
+   muda; a tela mostra o valor vigente com aviso "corrigido após a saída",
+   e o chevron abre o que foi assinado. O PDF do romaneio jamais é
+   regenerado com o valor novo.
+
+   O risco que essa separação evita: tratar "o último evento de correção"
+   como se o original nunca tivesse existido faria um relatório afirmar
+   que o motoboy recebeu um endereço que ele nunca recebeu — e aí a
+   auditoria perde o sentido.
+
+   **Correção posterior tem três categorias, com tratamentos diferentes.**
+   Antes de construir qualquer uma, pergunte em qual delas o campo cai;
+   misturá-las é o erro:
+
+   | categoria | campos | mecanismo |
+   |---|---|---|
+   | correção cadastral | endereço, complemento, referência, telefone, nome do cliente, observações | evento de correção com motivo e autor |
+   | divergência operacional | Pix previsto → Dinheiro realizado, cliente ausente, documento faltante, insucesso | **já existe e funciona** — e não se chama "correção" |
+   | custódia e financeiro | motoboy, agência, valor, quantidade de vales, valor da tele, filial, número do vale | **não** vira correção: motoboy errado é cadeia de custódia errada, e a saída é reverter/cancelar a saída ou abrir ocorrência. Valor exige aprovação de gestor |
+
+   A terceira categoria é subsistema próprio, com workflow de aprovação, e
+   **ainda não está construída**. A primeira também não. A segunda é o que
+   o sistema já faz hoje.
 
 8. **Dois relógios.** Gravar `ocorrido_em_local` (relógio do dispositivo, enviado
    pelo cliente) e `registrado_em` (`now()` do servidor). Nunca usar só um. O PC do
@@ -318,6 +346,16 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       novos (que antes só tinham `user_id` cru), filtro de filial isolando
       corretamente Matriz de Filial 02 (inclusive o vale de transferência
       aparecendo na filial que o criou).
+- [x] **Cadeia de custódia da saída (Romaneio)** — entrou em 2026-08-16,
+      muito depois da checklist original fechar, por pedido explícito e
+      detalhado. Substitui o "escolhe motoboy num dropdown e assina" por:
+      cartão físico com código de barras + PIN pessoal do motoboy +
+      assinatura do caixa **e** do motoboy + snapshot canônico do que saiu
+      + três hashes encadeados (documento → assinaturas → envelope) +
+      transação atômica com lock dos vales — **funcionando online e
+      offline**, com a saída offline sendo validada e selada só quando a
+      rede volta. Seção própria abaixo, porque quase nada disso dá pra
+      descobrir lendo o código.
 - [x] **Painel de admin criar/gerenciar usuários** — entrou **depois** de a
       checklist original fechar (era "Ideias futuras"), por pedido explícito.
       Sub-aba "Usuários" em Cadastros, só pra `admin`. Cria, edita
@@ -329,12 +367,25 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
 
 Onboarding de tenant, tela de cadastro de farmácia, cobrança, subdomínio, portal da
 agência, integração com Trier, leitura de QR de NF-e, app nativo,
-notificação WhatsApp, GPS, tarifário por bairro, dashboard com gráfico, conciliação
-de cartão por NSU, PIN de mototaxista, encadeamento de hash, tela de fechamento
+notificação WhatsApp, tarifário por bairro, dashboard com gráfico, conciliação
+de cartão por NSU, encadeamento de hash entre eventos, tela de fechamento
 mensal, tela de cadastro de loja/filial/cidade nova
 pela UI (continua manual via SQL, filial é rara e cidade mais ainda —
 **não confundir com suporte a múltiplas lojas, que já existe** de ponta a
 ponta; a farmácia real tem 17 filiais).
+
+**PIN de mototaxista e GPS saíram desta lista em 2026-08-16**, por decisão
+explícita do usuário: os dois são peça da cadeia de custódia e estão
+construídos (ver "Cadeia de custódia" abaixo). O rodapé do
+`schema_inicial.sql` ainda os lista como v2 junto com `assinaturas.cadeia`
+e a policy de `'agencia'` — aquele comentário está desatualizado nesses
+dois pontos, e os outros dois continuam fora.
+
+**Encadeamento de hash continua fora**, e isso é do próprio texto do
+pedido: primeiro o documento se prova sozinho (document → assinaturas →
+envelope), e só depois os eventos ganham `prev_hash`. Se um dia entrar,
+tem que ser cadeia por escopo (tenant/filial/documento), nunca uma cadeia
+global — cadeia global cria concorrência entre filiais sem necessidade.
 
 Se algum destes parecer necessário, **pare e pergunte antes de implementar.**
 
@@ -720,13 +771,288 @@ foram assinados.
 
 ---
 
-## Gestão de usuários — a única parte com backend
+---
 
-O projeto é frontend puro falando direto com Postgres via RLS, **com uma
-exceção**: criar usuário no Supabase Auth exige a `service_role` key, que
-ignora RLS inteira e por isso nunca pode ir pro navegador. Isso mora numa
-Edge Function (`supabase/functions/criar-usuario/`), a única peça de
-servidor do projeto.
+## Cadeia de custódia — o Romaneio de Saída
+
+Construído em 2026-08-16, em seis etapas. A saída da tele deixou de ser
+"salvar uma assinatura do motoboy" e virou um documento selado.
+
+```
+CARTÃO  → quem é?        identifica a credencial física
+PIN     → é ele mesmo?   autentica a pessoa
+sessão  → quem é o caixa  nunca vem do frontend
+ROMANEIO → o que exatamente saiu naquele instante
+hash    → amarra as assinaturas àquele conteúdo
+```
+
+Depois de selado, o documento é imutável. Tudo que acontece depois é
+evento, nunca reescrita do passado (regra 7).
+
+### As duas implementações gêmeas — a parte frágil
+
+**`montarCanonico` (`src/lib/canonico.ts`) e `romaneio_canonico`
+(migration `20260816140000`) precisam produzir os MESMOS BYTES.** Online o
+servidor calcula; offline o navegador calcula; na sincronização o servidor
+recalcula e compara. Se divergirem em um byte, o sintoma não é erro claro
+— é "a saída offline nunca sincroniza", meses depois, sem pista.
+
+Por isso o canônico é **texto por linha com TAB**, e não JSON canônico:
+some ordem de chave, escape de Unicode e notação de número, que é onde a
+divergência mora. É chato de propósito — chato é o que dá pra reproduzir
+em duas linguagens.
+
+- **`collate "C"` na ordenação do lado SQL**, porque a collation padrão do
+  banco não é a ordem de code unit do JavaScript. Pra UUID em hex as duas
+  coincidem, mas depender de coincidência aqui quebra sem ninguém achar.
+- **`montarCanonico` mora em `lib/` e não importa nada** (nem o cliente
+  Supabase) — é o que permite testá-lo isolado.
+  `npx tsx scripts/canonico.spec.mts` cobre 15 casos.
+- **`preparar_romaneio` devolve o canônico INTEIRO**, não só o hash, pra
+  permitir a comparação byte a byte:
+  `scripts/conferir-canonico-no-console.js` faz isso contra dado real.
+  **Rodar sempre que alguém tocar em qualquer um dos dois lados.**
+- **A tela compara antes de assinar**: online ela calcula local *e* pede o
+  do servidor, e se divergirem se recusa a prosseguir. Transforma o risco
+  em erro imediato e legível.
+
+Existe um segundo par de gêmeos, bem menos arriscado porque é TypeScript
+dos dois lados: `calcularOfflineEventHash` em `src/lib/envelope.ts` e a
+cópia dentro de `supabase/functions/sync-romaneio/index.ts`.
+
+### O PIN offline, e por que não é criptografia simétrica
+
+Offline o navegador precisa guardar PIN e token do cartão até a rede
+voltar — podem ser horas. Cifrar com chave simétrica local não resolve
+nada: a chave teria que ficar acessível à própria página, então quem
+controla a página decifra também. Vira ofuscação.
+
+**A saída é cifrar com a chave PÚBLICA do servidor.** O navegador sela e
+não tem como reabrir — não existe chave privada nele. Quem abre é a Edge
+Function `sync-romaneio`.
+
+- **Híbrido, não RSA direto.** RSA-OAEP 2048 cifra no máximo 190 bytes, e
+  os segredos mais as amarrações dão ~300 em JSON. AES-GCM-256 cifra o
+  conteúdo e o RSA envolve só a chave de 32 bytes. RSA-4096 caberia hoje
+  com 446 bytes, mas quebraria no dia em que alguém somasse um campo — e
+  offline, no balcão.
+- **O envelope carrega `key_id`.** Ao rotacionar, MANTENHA a chave antiga
+  no secret `ROMANEIO_KEYS` enquanto houver saída offline pendente; sem
+  ela, o que foi selado antes da troca não abre mais. A função diz qual
+  `key_id` faltou.
+- **A pública é variável de build** (`VITE_ROMANEIO_PUBKEY`), como o
+  `VITE_GOOGLE_CLIENT_ID`. Estando no bundle ela existe offline por
+  construção — não há o caso "caiu a internet antes de eu ter a chave".
+- Isso **não** resolve JavaScript malicioso no instante em que o PIN é
+  digitado. Nada em navegador resolve. Resolve o PIN **em repouso**.
+- Chaves geradas por `node scripts/gerar-chaves-offline.mjs`, que escreve
+  em `.chaves-offline/` (gitignored) e **nunca imprime a privada**.
+
+### Online e offline terminam no mesmo lugar
+
+A Nova Corrida **sela o envelope sempre**, mesmo online: se o selo cair no
+meio por rede, a retirada física pode já ter acontecido, e a operação vai
+pra fila com os mesmos ids (reenvio é no-op se já tiver selado).
+
+| | online | offline |
+|---|---|---|
+| identidade do motoboy | RPC valida o HMAC → "credencial reconhecida" | cache local por `public_id` → **"credencial informada"** |
+| PIN | validado na hora, gera autorização de uso único (~2 min) | selado no envelope, validado na sincronização |
+| `modo` do romaneio | `online` | `offline_sincronizada` |
+| o que a tela afirma | "romaneio selado" | "registrada offline, **ainda não validada**" |
+
+**"Registrado" e "validado" não podem se parecer.** A saída offline é uma
+afirmação do balcão; o selo é uma afirmação do servidor.
+
+**Não existe estado novo em `status_entrega`.** O vale fica `pendente` até
+selar — que é a verdade do ponto de vista do servidor. O estado offline
+mora na fila local e em `romaneios.status`/`.modo`. Pôr um valor novo
+naquela coluna atingiria relatórios, fechamento, .xlsx, PDF, auditoria e
+as quatro listas de vale: a maior superfície de regressão do projeto.
+
+### Conflito de sincronização
+
+PC A offline entrega o vale ao João; PC B online põe o mesmo vale numa
+corrida do Pedro. Quando A sincroniza, o servidor acha o vale já
+vinculado.
+
+**Nada é sobrescrito e nada é apagado.** A transação não sela, mas
+registra: um `romaneios` com `status = 'conflito'`, sem corrida, guardando
+o snapshot **e os traços das duas assinaturas** — a retirada física
+aconteceu, e essa prova não pode sumir. Mais evento de auditoria.
+
+O detalhe que decide se isso funciona: **o registro do conflito precisa
+commitar**. Por isso `selar_romaneio_interno` devolve `jsonb` discriminado
+em vez de levantar exceção nos casos previstos — `raise` faria rollback e
+levaria a prova junto. Erro de verdade (autorização inválida, romaneio sem
+vale) continua sendo exceção, porque aí não há nada a preservar.
+
+Pelo mesmo motivo `autenticar_credencial` **não levanta exceção com PIN
+errado**: o contador de tentativas precisa commitar, senão o bloqueio
+progressivo fica desligado sem ninguém perceber. O bloqueio tem teto de 15
+minutos — bloqueio permanente automático deixaria qualquer um com o cartão
+na mão derrubar o motoboy de vez.
+
+### GRANT restringe coluna; RLS não
+
+O projeto aprendeu duas vezes que RLS não protege coluna (`profiles`, e a
+conferência do fechamento), e concluiu "então põe num trigger". Em
+`motoboy_credenciais` a ferramenta certa é outra e existe desde sempre:
+**`token_hash` e `pin_hash` simplesmente não entram no `grant select`.**
+Nenhuma policy, por mais frouxa, consegue devolvê-los — o privilégio não
+existe.
+
+Isso é o que permitiu, na etapa 5, **abrir a leitura da tabela para
+qualquer autenticado do tenant** sem expor nada: o caixa precisa ter lido
+a lista alguma vez online pra o cache offline existir. Policy governa
+quais linhas; grant governa quais colunas.
+
+E o `revoke` explícito é obrigatório, não decorativo: o Supabase configura
+`alter default privileges ... grant all on tables to anon, authenticated`,
+então tabela nova nasce **com tudo liberado**.
+
+### A fila offline tem dono
+
+`filaOperacoes` (Dexie v4) carrega `userId`, `tenantId` e `lojaId`. O caixa
+A registra uma saída, sai, o caixa B entra no mesmo PC — a saída de A não
+sincroniza sob a sessão de B. **O gate de verdade está na Edge Function**,
+que confere o JWT contra o dono; a tela só evita o caso normal chegar lá.
+
+Sair com operação pendente **avisa mas não impede**: o PC do balcão é
+compartilhado e trancar o caixa dentro da própria sessão é pior que o
+problema. Nada se perde — volta a sincronizar quando aquela conta entrar.
+
+**A chave da fila é própria, sem significado de negócio.** Antes era o id
+do negócio, e `corrida` e `fechamento_corrida` usavam ambas o `corridaId`:
+fechar uma corrida ainda não sincronizada **substituía a criação dela** no
+`put`, e o fechamento seguinte batia em 0 linhas — que no PostgREST não é
+erro. Perda silenciosa, reproduzida e corrigida em 2026-08-16. Dependência
+entre operações agora é explícita (`chave` / `dependeDeChave`).
+
+### Ordem dentro da transação do selo
+
+`corrida → vales em rota → romaneio → vínculo → assinaturas`. O UPDATE dos
+vales tem que vir **antes** de existir `romaneio_entregas` ou assinatura,
+senão o trigger de imutabilidade vê o documento já selado e barra o
+próprio selo — toda saída falharia, com o erro apontando pro lugar errado.
+
+### O cartão
+
+```
+DCM1.01K4D7M2Q8.7N5X9K3R2T8W6H4M9C7P
+^^^^ ^^^^^^^^^^ ^^^^^^^^^^^^^^^^^^^^
+ver.  public_id  segredo (100 bits)
+```
+
+Alfabeto Crockford base32 (sem I, L, O, U). O banco guarda `public_id` em
+claro e `token_hash = HMAC-SHA256(segredo_do_Vault, token)`. Zero dado
+pessoal no cartão.
+
+**O segredo tem 20 caracteres por restrição física, não por gosto.** Code
+128 gasta 11 módulos por caractere mais 35; com segredo de 32 o token vira
+um código de 105mm na densidade mínima de leitor laser, e um cartão de
+crédito tem 85,6mm — não caberia em formato nenhum. Com 20 dá 82mm. E 100
+bits não é concessão: quem protege a credencial é o PIN, o bloqueio e a
+revogação. O elo fraco é o cartão perdido, e a resposta pra esse é revogar.
+
+**O admin nunca escolhe o PIN, logo nunca sabe.** "Redefinir" só apaga o
+hash; quem cria o novo é o motoboy, com o cartão na mão. É isso que torna
+"Mostrar PIN" impossível de existir, em vez de apenas ausente da tela.
+
+### A vida da credencial
+
+```
+admin emite  →  AGUARDANDO ATIVAÇÃO (pin_hash null)  →  motoboy cria o PIN  →  ATIVA
+```
+
+A ativação acontece **dentro da primeira Nova Corrida**, não numa
+cerimônia administrativa própria: o caixa bipa, o sistema vê que não há
+PIN e pede ali mesmo. Evita uma tela a mais por motoboy e já deixa o fluxo
+seguir para a saída.
+
+**Criar o primeiro PIN é ONLINE obrigatório**, e isso não é uma checagem
+de tela que dê pra contornar: `definir_pin` resolve o tenant por
+`current_tenant_id()`, que depende de `auth.uid()` — sem sessão a função
+nem roda. É o momento em que o servidor grava o `pin_hash` oficial, então
+não existe versão offline dele. Depois de criado, o uso do PIN funciona
+nos dois modos.
+
+Quem ativa precisa de **as quatro coisas juntas**: usuário interno
+autenticado, cartão físico em mãos, credencial ainda sem PIN, e o motoboy
+digitando. Um cartão achado na rua não ativa sozinho — falta a sessão. E
+um cartão que já tem PIN não reativa: só o admin, apagando o hash.
+
+**`bcrypt` com custo 12** (`gen_salt('bf', 12)`). O hash carrega o custo
+dentro dele, então PIN criado com custo antigo continua validando e só
+sobe na próxima redefinição — não há como reidratar, porque reidratar
+exigiria conhecer o PIN.
+
+### O passo do Vault que não é migration
+
+`hash_do_token` lê o segredo do HMAC do Supabase Vault, e ele **não nasce
+com nenhuma migration** — é criado uma vez, à mão, no SQL Editor:
+
+```sql
+create extension if not exists supabase_vault with schema vault;
+select vault.create_secret(
+  replace(gen_random_uuid()::text || gen_random_uuid()::text, '-', ''),
+  'credencial_hmac', 'HMAC das credenciais fisicas de motoboy');
+```
+
+Gerado dentro do banco de propósito: assim o segredo não passa por
+arquivo, chat nem área de transferência. **Sintoma de esquecer este
+passo:** "Segredo credencial_hmac ausente no Vault" ao emitir a primeira
+credencial — as migrations rodam sem erro, porque a função só falha quando
+é chamada.
+
+### O que ficou de fora, de propósito
+
+- **Credencial verificável offline** (cartão assinado que o navegador
+  valide sem rede). Avaliado e recusado: provaria só que o cartão foi
+  emitido por nós — não presença (isso é o PIN), não revogação
+  (impossível offline), e o servidor revalida tudo no sync.
+- **PDF do romaneio e envio ao Drive.** A arquitetura já está pronta pra
+  eles: snapshot → hashes → assinaturas → PDF. O PDF nunca é fonte da
+  verdade.
+- **Portal da agência.** `profiles.papel` já aceita `'agencia'` desde o
+  schema inicial; falta a policy.
+- **Romaneio de retorno.** Nada impede — o de saída não assume ser único.
+- **Correção cadastral por evento** (categoria 1 da regra 7).
+
+---
+
+## Onde roda código no servidor
+
+Até 2026-08-16 este projeto era frontend puro falando direto com Postgres
+via RLS, com **uma** exceção. Não é mais. Hoje o servidor aparece em três
+formas, e cada uma existe por um motivo que não dá pra contornar no
+cliente:
+
+| onde | por quê |
+|---|---|
+| Edge Function `criar-usuario` | criar login no Auth exige `service_role` |
+| Edge Function `sync-romaneio` | abrir o envelope do PIN exige a chave privada |
+| RPCs `SECURITY DEFINER` | transação atômica, HMAC/bcrypt e acesso a tabela sem grant |
+
+Duas regras valem para as três: **a `service_role` e a chave privada nunca
+aparecem no código nem no repositório** (vivem como variáveis de ambiente
+e secret), e **nada que vem no corpo do request decide identidade** — o id
+do caixa sai sempre do JWT validado no servidor.
+
+E uma armadilha que já custou uma sessão inteira: **`functions.invoke` não
+anexa o JWT da sessão**, manda a anon key. O header `Authorization` vai
+explícito nas duas chamadas. Se alguém "simplificar" removendo, quebra com
+403 e o motivo não é óbvio.
+
+`SECURITY DEFINER` **ignora a RLS de quem chamou**, então cada checagem de
+tenant e loja que a policy fazia de graça precisa ser reescrita à mão
+dentro da função. É a classe de buraco que o projeto já abriu antes.
+
+### Gestão de usuários
+
+Criar usuário no Supabase Auth exige a `service_role` key, que ignora RLS
+inteira e por isso nunca pode ir pro navegador. Isso mora na Edge Function
+`supabase/functions/criar-usuario/`.
 
 Editar e bloquear usuário **não** passam por lá — são `UPDATE` comum em
 `profiles`, resolvidos pela RLS. A função tem uma rota só, de propósito:
@@ -755,8 +1081,14 @@ quanto menor a superfície que roda com `service_role`, melhor.
 - **Ninguém bloqueia a própria conta** — senão o admin se tranca pra fora
   e só outro admin devolve o acesso.
 
-Deploy da função (não tem CLI configurada neste projeto): dashboard →
-Edge Functions → Deploy a new function → Via Editor, nome `criar-usuario`.
+Deploy das funções (não há CLI do Supabase configurada neste projeto):
+dashboard → Edge Functions → Deploy a new function → Via Editor. **Salvar
+no editor não publica** — tem um botão Deploy separado, e é fácil sair da
+tela achando que subiu; foi o que aconteceu com a `sync-romaneio`.
+
+A função publicada chama-se **`sync-romaneio`** (não `sincronizar-romaneio`).
+O nome no dashboard e o do `functions.invoke` têm que bater exatamente, e
+o sintoma de não baterem é 404.
 
 ---
 
@@ -834,6 +1166,12 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
 8. ~~Fila offline~~ — feito. Cobre as 5 escritas do app (entrega,
    transferência, corrida/assinatura, divergência, fechamento de corrida).
    Ver nota na lista "Dentro" pro detalhe de como cada uma ficou idempotente.
+9. ~~Cadeia de custódia (Romaneio de Saída)~~ — feito em 2026-08-16, em
+   seis etapas, cada uma testável por si: (1) autoria derivada da sessão,
+   (2) credencial física e PIN, (3) romaneio, canônico e transação
+   atômica, (4) fila offline com dono e envelope, (5) tela da Nova
+   Corrida, (6) custódia no vale e página do romaneio. Ver "Cadeia de
+   custódia" acima.
 
 ---
 

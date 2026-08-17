@@ -9,7 +9,8 @@ abaixo: itens 1 a 20 são de 09 e 10/08, 21 e 22 de 11/08, 23 a 25 de
 12/08, 26 a 30 de 12 e 13/08, e 31 e 32 de 16/08 — com a parte de PDF e
 Google Drive do item 29 também sendo de 16/08.
 
-**Onde o projeto está:** funcionalmente completo. A checklist "Dentro" do
+**Onde o projeto está:** funcionalmente completo, e desde 16/08 com uma
+frente nova por cima — a cadeia de custódia da saída (itens 33 a 37). A checklist "Dentro" do
 MVP fechou no item 6, e por cima dela entraram cancelamento, fechamento de
 caixa, gestão de usuários, tarifa/vales, permissões por filial, cidade,
 exportação em .xlsx e PDF, e envio ao Google Drive. O que falta pro uso
@@ -1211,6 +1212,177 @@ qual dos três casos é — e aí o conserto é dirigido, não chute.
 
 **Pendente de teste do usuário.**
 
+## 33. Cadeia de custódia — a maior frente do projeto até agora
+
+Pedido longo e detalhado do usuário: transformar a saída da tele numa
+cadeia de custódia digital, e não "salvar uma assinatura do motoboy". Ele
+pediu explicitamente análise e plano ANTES de qualquer código, e revisou o
+plano ponto a ponto. Foram seis etapas, cada uma aplicada por ele antes da
+seguinte começar.
+
+O que a arquitetura ficou está no CLAUDE.md ("Cadeia de custódia — o
+Romaneio de Saída"). Aqui fica o que é estado de sessão.
+
+**Três propostas minhas contra o texto original, todas aceitas:**
+
+1. **PIN offline com chave pública (RSA-OAEP + AES-GCM)** em vez de
+   criptografia simétrica local. O furo da simétrica: a chave precisa
+   ficar acessível ao navegador, então quem controla a página decifra
+   também. Com pública, o cliente sela e não reabre. O usuário aceitou e
+   acrescentou o token do cartão ao envelope e a rotação por `key_id` —
+   os dois entraram.
+2. **Não construir credencial verificável offline.** Ele mesmo tinha
+   pedido pra avaliar antes; avaliado, não compensa.
+3. **Não criar valor novo em `status_entrega`.** Ele chamou essa de "a
+   melhor das três" — a superfície de regressão daquela coluna é o
+   projeto inteiro.
+
+**A decisão de negócio que ele reverteu**, e que estava pendente desde
+11/08: vale assinado passa a poder receber correção, desde que o documento
+não mude. Ele deu a razão que faltava (proibir empurra a operação pra fora
+do sistema — WhatsApp, papel, memória) e desenhou a separação entre *dado
+assinado* e *dado operacional atual*, mais as três categorias de correção.
+Regra 7 do CLAUDE.md reescrita. **A memória que dizia o contrário foi
+substituída.**
+
+## 34. Três bugs sérios achados no caminho
+
+**O da fila offline é o pior, e estava em produção.** `NovaCorrida`
+enfileirava com id = `payload.corridaId`; `RetornoCorrida` enfileirava com
+**o mesmo** `corridaId`. E `enfileirarOperacao` faz `put`, que substitui
+pela chave primária. Offline: cria a corrida, motoboy volta, fecha a
+corrida → **o fechamento sobrescreve a criação**. A corrida nunca é criada,
+e o fechamento seguinte faz `update` em 0 linhas, que no PostgREST não é
+erro. Perda silenciosa, mesma armadilha já documentada no cancelamento.
+
+Reproduzido no navegador antes de corrigir: enfileirei os dois e sobrou um
+item só, do tipo `fechamento_corrida`. Corrigido dando chave própria ao
+item da fila (`uuidv7`) e tornando a dependência explícita.
+
+**Ordem dentro da transação do selo.** Eu tinha escrito o insert de
+`romaneio_entregas` antes do UPDATE dos vales — e aí o trigger de
+imutabilidade via o romaneio já selado e barrava o próprio selo. **Toda
+saída falharia**, com o erro apontando pro lugar errado. Achado relendo o
+que eu mesmo tinha escrito, antes de entregar.
+
+**Comentário JSX virando texto na tela.** Ao envolver a linha da tabela
+num `<Fragment>`, um `/* ... */` que era comentário JS dentro do
+`return(...)` passou a ser filho do JSX — o React renderizaria o texto do
+comentário dentro da tabela. **O `tsc` não pega**: é JSX válido.
+
+## 35. Restrição física que mudou o formato do token
+
+Ao dimensionar o cartão descobri que o token de 47 caracteres vira um Code
+128 de 138mm, e cartão de crédito tem 85,6mm. Não cabe em formato nenhum.
+Encurtei o segredo de 32 pra 20 caracteres (100 bits) → 82mm na densidade
+mínima de leitor laser.
+
+**Errei a conta na primeira vez**: estimei 420 módulos contando 35
+caracteres, e o token tem 36. Rodei o codificador de verdade e são 431.
+Corrigi nos dois lugares onde o número aparecia. A tela de emissão mostra
+a largura em mm e avisa quando cai abaixo de 0,19mm/módulo.
+
+## 36. Como testei sem conseguir logar
+
+Não tenho credencial e não digito senha em nome de ninguém, então o fluxo
+real (bipar → PIN → duas assinaturas → selar) **continua sem teste ponta a
+ponta**. O que deu pra provar de verdade, e provei:
+
+- **Canônico**: 15 casos em `scripts/canonico.spec.mts` (ordenação,
+  pagamentos em bloco separado, TAB/LF virando espaço, acento preservado,
+  UUID minúsculo, determinismo). Roda com `npx tsx`.
+- **Envelope**: ponta a ponta em Node com o formato exato dos dois lados —
+  832 bytes, PIN e token ausentes da forma serializada, privada abre e
+  confere, chave errada não abre.
+- **`offline_event_hash`**: extraí a função direto do `index.ts` da Edge
+  Function (sem reescrever, pra o teste não virar terceira cópia) e
+  comparei com o valor medido no navegador. Batem.
+- **Código de barras**: `bwipjs.raw()` deu 431 módulos, batendo com a
+  conta; e no navegador o canvas saiu com 1317px e 118 barras, que é
+  exatamente o que Code 128 produz com 36 caracteres. Fundo transparente
+  descoberto aí e corrigido com `backgroundcolor`.
+- **Dexie v2→v3**: semeei um banco na v2, recarreguei a página e o item
+  ganhou dono herdando `criadoPor`, com `criadoEm` preservado.
+- **Assinatura desenhada**: renderizei o componente React de verdade no
+  navegador com dados no formato do `signature_pad` — 814 pixels de tinta,
+  caixa dentro dos 260×90, 96% da largura aproveitada, ponto único
+  desenhando e `strokes` nulo não quebrando.
+- **Migrations e Edge Function**: conferidas por HTTP, sem credencial
+  nenhuma — RPC que existe devolve `42501` pro anon, RPC que não existe
+  devolve `PGRST202`.
+
+**Nota de método:** na primeira rodada o teste do upgrade do Dexie deu
+negativo, e eu quase reportei como bug. Era defeito do teste — apaguei o
+IndexedDB com a conexão do app ainda aberta. Refeito com `db.close()` e
+reload, passou. É a terceira vez neste projeto que um teste "falha" por
+causa do teste; conferir o instrumento antes de concluir continua valendo.
+
+## 37. O 404 da Edge Function
+
+Depois de o usuário aplicar tudo, chequei e a função dava 404 em todas as
+variações de nome. Não era erro de URL: `criar-usuario` respondia 401 no
+mesmo endereço. Ele então disse o nome que tinha usado — **`sync-romaneio`**,
+não `sincronizar-romaneio`.
+
+Adaptei o cliente ao nome dele e renomeei a pasta local junto, pra o
+repositório espelhar o que está publicado. Confirmado que é o meu código
+rodando: `OPTIONS` devolveu `ok`, que é a primeira linha do meu handler (o
+`verify_jwt` da plataforma deixa OPTIONS passar).
+
+**Lição de instrução:** eu tinha mandado `npm run dev` e `node scripts/...`
+sem lembrar que **nem `node` nem `npm` estão no PATH desta máquina** — está
+anotado neste arquivo desde 10/08 e eu passei por cima. E o snippet do
+teste do canônico eu deixei metade como pseudocódigo, o que o tornava
+impossível de rodar. Virou `scripts/conferir-canonico-no-console.js`,
+completo.
+
+## 38. O passo do Vault, e o bcrypt em 12
+
+Ao tentar emitir a primeira credencial o usuário bateu em `Segredo
+credencial_hmac ausente no Vault`. Não é bug: o segredo do HMAC não nasce
+de migration nenhuma, é um passo manual de uma vez só no SQL Editor. As
+migrations rodam sem erro porque a função só falha quando é chamada.
+
+**A instrução foi minha e estava errada**: passei o comando dentro de um
+`echo`, que só imprime o texto em vez de executar. É a segunda vez nesta
+sessão que erro a forma de um comando — a primeira foi mandar `node` e
+`npm` sem lembrar que não estão no PATH desta máquina, coisa que está
+anotada neste arquivo desde 10/08. O comando certo, e o sintoma de
+esquecê-lo, agora estão no CLAUDE.md.
+
+A versão que ficou usa dois `gen_random_uuid()` concatenados em vez de
+`gen_random_bytes`: dá 64 caracteres hex sem depender de o pgcrypto estar
+no schema `public` ou no `extensions`, que varia por instalação.
+
+**bcrypt subiu de custo 10 pra 12**, a pedido dele. Eu tinha escolhido 10
+pesando o tempo no balcão; revendo, ele está certo — os ~300ms a mais
+acontecem uma vez por saída, no passo do motoboy, e não no cadastro de
+entrega, que é o fluxo cronometrado contra os 25 segundos. Num espaço de
+6 dígitos, cada dobra de custo vale muito.
+
+Sem migração de dado: o hash do bcrypt carrega o custo dentro dele, então
+PIN antigo continua validando com o custo antigo e só sobe na próxima
+redefinição. Reidratar seria impossível de qualquer jeito — exigiria
+conhecer o PIN, e ninguém conhece.
+
+**O ciclo de vida da credencial que ele descreveu já era o construído.**
+Conferi item a item: cartão emitido sem PIN, ativação online obrigatória,
+bcrypt no servidor, tela mostrando só "configurado", "Redefinir" sem
+"Mostrar", auditoria de quem supervisionou sem registrar o PIN, e a
+ativação exigindo as quatro coisas juntas (sessão interna + cartão físico
++ credencial sem PIN + motoboy digitando). A ativação dentro da primeira
+Nova Corrida, em vez de cerimônia administrativa própria, era o que já
+estava lá — e é o que ele disse preferir.
+
+O que mudei foi vocabulário e visibilidade: "Aguardando ativação" no lugar
+de "Aguardando o motoboy", e as colunas de emissão e último uso na tela de
+Cadastros.
+
+Vale registrar por quê a ativação é online por construção e não por
+checagem de tela: `definir_pin` resolve o tenant por `current_tenant_id()`,
+que depende de `auth.uid()`. Sem sessão a função não roda. Não há como
+alguém contornar mexendo no frontend.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -1352,6 +1524,36 @@ Supabase configurada neste projeto** — mandei o comando `supabase
 functions deploy` sem checar isso antes e o usuário acabou colando o
 `index.ts` no SQL Editor, que obviamente falhou. Da próxima vez que
 aparecer algo pra publicar, o caminho é o dashboard.
+
+Sessão de 2026-08-16 — cadeia de custódia (itens 33 a 38):
+
+26. `20260816120000_autoria_no_servidor.sql` — triggers conferindo
+    `auth.uid()` em `saida_por`, `retorno_por`, `cancelado_por`,
+    `documento_recebido_por`, `receita_recebida_por`,
+    `pagamentos.registrado_por` e `eventos.user_id`, mais `criado_por`
+    imutável depois do INSERT
+27. `20260816130000_motoboy_credenciais.sql` — tabela da credencial,
+    HMAC do token via Vault, bcrypt do PIN, bloqueio progressivo, e as
+    funções de emitir/identificar/autenticar/definir/revogar/redefinir
+28. `20260816140000_romaneio_de_saida.sql` — `romaneios`,
+    `romaneio_entregas`, `motoboy_autorizacoes`, canônico + hash,
+    `selar_romaneio` transacional, imutabilidade alargada
+29. `20260816150000_selo_sincronizado.sql` — a porta de sincronização
+    (`selar_romaneio_sincronizado`, só `service_role`) e a quebra de
+    `autenticar_credencial` em duas
+30. `20260816160000_credencial_leitura_para_saida.sql` — leitura das
+    credenciais liberada pro tenant, pro cache offline poder existir
+31. `20260816170000_pin_custo_bcrypt.sql` — custo 10 → 12
+
+**Fora de migration, e obrigatórios:**
+
+- O segredo `credencial_hmac` no Vault (SQL Editor, uma vez só). Sem ele,
+  emitir credencial falha — ver item 38 e a seção do CLAUDE.md.
+- A Edge Function `sync-romaneio`, publicada pelo dashboard.
+- O secret `ROMANEIO_KEYS` da Edge Function, gerado por
+  `node scripts/gerar-chaves-offline.mjs`.
+- `VITE_ROMANEIO_KEY_ID` e `VITE_ROMANEIO_PUBKEY` no `.env` local **e**
+  nas variáveis do Cloudflare Pages, com rebuild depois.
 
 Todas confirmadas rodando pelo usuário antes dos testes. Nenhuma migration
 pendente no momento em que esta sessão terminou.
