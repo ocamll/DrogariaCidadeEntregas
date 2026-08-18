@@ -25,6 +25,7 @@ import {
   publicIdDoToken,
 } from '@/data/credenciais'
 import { selarSegredos, calcularOfflineEventHash, envelopeDisponivel } from '@/lib/envelope'
+import { useOnline } from '@/lib/useOnline'
 import {
   enfileirarOperacao,
   donoDaFila,
@@ -87,6 +88,11 @@ function NovaCorridaFluxo({
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set())
   const [token, setToken] = useState('')
   const [credencial, setCredencial] = useState<Credencial | null>(null)
+  // Só pra EXIBIÇÃO. Quem decide o caminho (handleConfirmar, criar PIN,
+  // conferir identidade) continua lendo `navigator.onLine` na hora da
+  // ação — entre o render e o clique a rede pode ter mudado, e ali o que
+  // vale é o instante da ação. Ver a nota em lib/useOnline.ts.
+  const online = useOnline()
   const [pin, setPin] = useState('')
   const [pinConfirmacao, setPinConfirmacao] = useState('')
 
@@ -691,7 +697,7 @@ function NovaCorridaFluxo({
                 <strong>{escolhidos.length}</strong> entrega(s) · <strong>{totalVales}</strong>{' '}
                 vale(s) · <strong>{formatBRL(totalEntrega)}</strong> em teles
               </p>
-              {!navigator.onLine && (
+              {!online && (
                 <p className="text-xs text-amber-700 dark:text-amber-400">
                   Sem internet — a saída fica registrada aqui e vai ser validada quando a rede
                   voltar.
@@ -701,7 +707,7 @@ function NovaCorridaFluxo({
             <Button onClick={() => void handleConfirmar()} disabled={!podeConfirmar || !!ocupado}>
               {ocupado === 'confirmar'
                 ? 'Registrando…'
-                : navigator.onLine
+                : online
                   ? 'Confirmar saída'
                   : 'Registrar saída offline'}
             </Button>

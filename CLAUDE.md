@@ -1374,6 +1374,20 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
     valor/status ocupam uma, os de uma linha ficavam centralizados — 9px
     abaixo do nome do cliente, com cada coluna começando numa altura
     diferente. Célula de altura mista sempre alinha pelo topo aqui.
+- **`navigator.onLine` no JSX é sempre bug; use `useOnline()`.** Ler
+  direto no render devolve o valor certo, mas nada faz o React renderizar
+  de novo quando a rede cai — não há listener de `online`/`offline` em
+  lugar nenhum do app fora da fila. Quem tirasse a rede com a Nova Corrida
+  aberta continuava vendo "Confirmar saída" e nenhum aviso. É da família
+  do defeito do PIN: **a tela afirmando algo que ela não sabe** — ali o
+  botão dizia "identidade conferida" tendo checado só formato; aqui ele
+  prometia selo imediato quando o clique só ia enfileirar. Reproduzido
+  lado a lado no navegador antes de corrigir. `src/lib/useOnline.ts`
+  (`useSyncExternalStore`) resolve a exibição.
+  **Mas a DECISÃO continua lendo `navigator.onLine` na hora da ação** —
+  entre o render e o clique a rede muda, e ali vale o instante da ação,
+  não o do último render. Os dois usos convivem no mesmo arquivo de
+  propósito.
 - **Sem router.** Não está na stack. Navegação é troca de estado local (`useState<View>`)
   dentro de `Painel.tsx`, com `onVoltar` como prop pra cada tela voltar pra lista. Isso
   aguenta bem o tanto de telas que o MVP tem hoje — se crescer muito mais, reconsiderar

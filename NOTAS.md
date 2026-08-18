@@ -1808,6 +1808,173 @@ contra 1,38x —, e margem não se testa no dia bom, se cobra no dia ruim:
 impressora pior, cartão sujo, leitor velho. É honesto dizer que a
 decisão foi de folga, não de necessidade demonstrada.
 
+## 48. A saída offline rodou ponta a ponta — e falhou no último passo
+
+Primeira execução real do caminho offline. **Toda a infraestrutura
+passou; falhou só a conferência do PIN**, e vale entender por que isso é
+um resultado bom.
+
+### O que cada erro que NÃO aconteceu prova
+
+A Edge Function recusa em etapas, com `motivo` distinto em cada uma. Como
+o processo foi até o fim e parou só na autenticação, cada etapa anterior
+ficou provada:
+
+| motivo que não veio | fica provado |
+|---|---|
+| `envelope` | **o par de chaves confere** — `VITE_ROMANEIO_PUBKEY` e o secret `ROMANEIO_KEYS` são o mesmo par |
+| `payload_alterado` | os gêmeos do `offline_event_hash` concordam **em produção**, não só no teste |
+| `envelope_trocado` | as amarrações `operationId`/`documentHash` bateram |
+| `outro_usuario` | o gate de dono da fila aceitou a conta certa |
+| 401/403 | o `Authorization` explícito chegou (o bug histórico do `functions.invoke`) |
+
+Ou seja: selar offline → fila → drenar sozinha ao voltar a rede → Edge
+Function → abrir envelope → conferir payload → transação → registrar o
+resultado. **Tudo funcionou.** O único passo que falhou foi o `crypt()`
+do PIN.
+
+Era o par de chaves o maior desconhecido — a privada foi apagada desta
+máquina em 17/08 e não havia como conferir o pareamento sem uma execução
+real. Confere.
+
+### A prova preservada, verificada com dado real
+
+`R-000004`, `status='conflito'`, `modo='offline_sincronizada'`, com
+`conflito.motivos = [{autenticacao_falhou, pin_incorreto}]` e **os traços
+das duas assinaturas dentro**: 1 traço do caixa, 4 do motoboy, com pontos
+e timestamps.
+
+Isto é a promessa central do desenho de conflito, agora verificada em vez
+de apenas escrita: *a retirada física aconteceu, e essa prova não pode
+sumir*. O selo foi recusado e mesmo assim nada se perdeu — porque
+`selar_romaneio_interno` devolve `jsonb` discriminado em vez de levantar
+exceção nos casos previstos, e por isso o registro do conflito commitou.
+
+E a classificação funcionou: recusa por PIN virou item **terminal**, sem
+retry. Sem isso, cada retentativa queimaria uma tentativa e o bloqueio
+progressivo derrubaria o motoboy sozinho.
+
+### Por que o PIN não conferiu — e por que não é bug
+
+A credencial estava sendo ativada: o cartão não tinha PIN. Como
+`definir_pin` depende de `auth.uid()`, criar PIN é **online por
+construção**. Então o fluxo foi: offline → bipa → "precisa de internet" →
+liga a rede → cria o PIN → desliga a rede → digita o PIN de novo → assina
+→ confirma.
+
+Esse segundo toque nunca passou pelo servidor. Offline não há como
+conferir (o bcrypt vive lá), então a tela aceita qualquer PIN bem formado
+e sela — exatamente como documentado ("PIN guardado, mas não conferido").
+Os dois toques diferiram.
+
+**Conferi que não é defeito de estado**, porque a hipótese óbvia seria o
+PIN selado não ser o digitado: `handleCriarPin` limpa o campo e zera
+`pinConferido`; o input trava (`disabled={pinConferido !== null}`) depois
+de confirmado **e** qualquer edição zera a confirmação. Dupla proteção. O
+PIN selado é o digitado.
+
+Linha do tempo no banco, batendo com isso: `credencial_emitida` 04:27 →
+`credencial_pin_definido` 04:41 → `credencial_pin_incorreto` 04:43,
+`tentativas = 1`.
+
+**Confirmado logo depois:** o usuário refez o fluxo com o PIN que
+conhecia, e o servidor aceitou — selo concluído, vales em rota. Ou seja,
+o PIN gravado por `definir_pin` estava correto o tempo todo; o que
+divergiu foi o segundo toque, offline, que ninguém tinha como conferir.
+Fecha a hipótese de defeito e confirma a de digitação.
+
+### O que este teste NÃO provou, e é o que falta
+
+**O caminho feliz.** `selar_romaneio_interno` com `modo =
+'offline_sincronizada'` e PIN correto nunca rodou: não houve corrida
+criada, vale nenhum foi pra `em_rota`, nenhum `final_hash` foi calculado
+por esta via. O que se provou foi todo o transporte e o caminho do
+conflito.
+
+Repetir com um PIN de que se tenha certeza fecha o item. Cuidado ao
+repetir: **já há 1 tentativa gasta** na credencial `171233`; a 3ª dispara
+30s de bloqueio. Na dúvida, redefinir o PIN pelo Cadastros sai mais barato
+que adivinhar.
+
+### O gap que isto expôs
+
+Um PIN **recém-criado** é qualitativamente diferente de um já em uso: a
+única evidência de que está certo é a memória de quem o digitou, e offline
+não há como testá-la. Como criar PIN exige internet por construção, quem
+acabou de criar estava online segundos antes — dá pra exigir **uma**
+confirmação online antes de permitir selar offline, e isso custa nada.
+
+O caso geral (motoboy erra o PIN numa saída offline comum) **não tem
+conserto**: guardar qualquer hash local de um PIN de 6 dígitos seria
+quebrável em segundos, e é por isso que ele só vive no servidor. O preço
+de errar continua sendo um romaneio em conflito — que é caro, mas é o
+desenho, e a prova fica guardada.
+
+## 49. "Não consigo ficar offline" era bug do app, não do DevTools
+
+Depois do teste do item 48, o usuário foi repetir e relatou que a tela
+"aparece sempre online", sem conseguir alternar. Não era o DevTools.
+
+**O app não tinha listener de conectividade nenhum.** `navigator.onLine`
+era lido DENTRO do JSX da Nova Corrida em dois pontos — o aviso "Sem
+internet" e o rótulo do botão. Ler assim devolve o valor certo, mas só no
+instante do render; e como nada assinava `online`/`offline` (o único
+listener do projeto é o da fila, e só de `'online'`, pra drenar), o React
+não tinha motivo pra renderizar de novo. Quem tirasse a rede com a tela
+já aberta continuava vendo **"Confirmar saída"** e nenhum aviso.
+
+O comportamento por baixo estava certo — `handleConfirmar` lê
+`navigator.onLine` na hora e teria tomado o caminho offline. **O que
+estava errado era a tela afirmar o contrário do que ia fazer.** Isso é da
+mesma família do §39: lá o botão liberava dizendo "identidade conferida"
+tendo checado só o formato; aqui ele prometia selo imediato quando o
+clique só ia enfileirar. Nos dois casos a tela afirma o que não sabe, e
+nos dois o preço é pago depois de colher duas assinaturas.
+
+### Reproduzido antes de corrigir, lado a lado
+
+Montei os dois componentes na mesma página, com o React do próprio app,
+e forcei a queda como o app a enxerga (`navigator.onLine` sobrescrito +
+`dispatchEvent`):
+
+    navigator.onLine = false
+      versão antiga (lendo no render) → "Confirmar saída"        ← mentia
+      versão nova (useOnline)         → "Registrar saída offline"
+
+É o mesmo método do §22, quando reapliquei `white-space: nowrap` por CSS
+pra medir o "antes" na mesma tela: sem o par, eu teria lido só o "depois"
+e concluído certo por sorte.
+
+### A correção
+
+`src/lib/useOnline.ts`, com `useSyncExternalStore` — e não
+`useState` + `useEffect`, que deixa uma janela entre o primeiro render e
+o efeito assinar, onde um evento se perde. Medido: 1 render inicial →
+evento `offline` → 2 renders → evento `online` → 3 renders. Sem loop.
+
+**A separação que importa e que ficou escrita nos dois arquivos:** o hook
+é pra EXIBIÇÃO; as decisões (`handleConfirmar`, criar PIN, conferir
+identidade) continuam lendo `navigator.onLine` na hora da ação. Entre o
+render e o clique a rede pode mudar, e ali o que vale é o instante da
+ação. Trocar tudo por estado reativo seria "consertar" a parte que já
+estava certa.
+
+### Como forçar offline sem depender do DevTools
+
+O app decide só por `navigator.onLine`, então dá pra simular no console:
+
+    Object.defineProperty(navigator, 'onLine', {configurable: true, get: () => false})
+    window.dispatchEvent(new Event('offline'))
+
+e desfazer com `delete navigator.onLine` + `dispatchEvent(new Event('online'))`
+— o `delete` remove a propriedade própria e revela de volta o getter
+nativo do prototype (conferido).
+
+**Não é equivalente ao DevTools**, e a diferença importa: aqui a rede
+continua funcionando de verdade, então isto exercita a lógica de decisão
+do app mas não a falha de rede em si. Pro teste fiel, o DevTools continua
+sendo o certo. Pra destravar quando ele não coopera, isto serve.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -2070,14 +2237,27 @@ secret `ROMANEIO_KEYS`.
       pendente sem corrida na hora. O que ESTÁ coberto: ordenação, bloco
       separado de pagamentos, e `convenio_id` nos dois estados (V-000013
       tinha, os outros dois não).
-- [ ] **Testar a saída OFFLINE ponta a ponta**: devtools em modo
-      offline, registrar a saída, religar, ver a fila drenar pela
-      `sync-romaneio`. É o que exercita o envelope RSA e o
-      `ROMANEIO_KEYS`, que nunca rodaram de verdade — só as peças foram
-      testadas isoladas. **Passou a ser o item de maior risco em aberto**,
-      agora que o canônico foi conferido: era ele que travava este, e o
-      pré-requisito está cumprido (se o canônico divergisse, este falharia
-      por um motivo que parece outro).
+- [~] **Saída OFFLINE ponta a ponta — transporte PROVADO, caminho feliz
+      ainda não.** Rodou em 2026-08-18 (item 48): selou offline, ficou na
+      fila, drenou sozinha ao voltar a rede, o envelope ABRIU na Edge
+      Function, o payload conferiu e a transação rodou. Isso fecha o
+      envelope RSA, o `ROMANEIO_KEYS`, o par de chaves e os gêmeos do
+      `offline_event_hash` — tudo que nunca tinha rodado junto.
+
+      **O que falta é só o desfecho bem-sucedido por essa via:** o PIN
+      digitado offline diferiu do criado, então terminou em conflito
+      (`R-000004`). `selar_romaneio_interno` com
+      `modo = 'offline_sincronizada'` e PIN correto ainda não criou
+      corrida, não moveu vale pra `em_rota` nem calculou `final_hash`.
+
+      Repetir com PIN conferido fecha. **Conferir pelo `modo`, não pela
+      tela** — uma saída feita online também "sela e fica em rota", e as
+      duas são indistinguíveis olhando o resultado:
+
+          select numero, status, modo, (corrida_id is not null) as tem_corrida
+            from public.romaneios order by numero desc limit 5;
+
+      Só vale como este item se vier `offline_sincronizada`.
 - [x] ~~**Aplicar a migration `20260817130000_token_v3.sql`.**~~ Aplicada
       e conferida em 2026-08-17: os 7 casos do parser passaram direto no
       banco e `pg_proc` confirmou a `emitir_credencial` nova instalada.
