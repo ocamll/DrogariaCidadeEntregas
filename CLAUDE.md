@@ -1436,6 +1436,17 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   em outro navegador. Só na máquina com tradução ativa. Se algum dia
   surgir texto truncado ou trocado sem explicação, **suspeite do tradutor
   antes de suspeitar do React**.
+
+  São **duas travas, e elas respondem a coisas diferentes** — não mexa
+  numa achando que a outra cobre. `lang="pt-BR"` tira o MOTIVO da
+  tradução automática (o Chrome só oferece quando acha que a página está
+  noutra língua); `translate="no"` no `<html>` mais
+  `<meta name="google" content="notranslate">` fecham também o pedido
+  MANUAL pelo menu. A segunda trava é herdada pela árvore inteira
+  (`document.body.translate === false`), então não precisa ser repetida
+  por elemento. Aqui isso vale a pena: não há o que ganhar traduzindo uma
+  tela operacional em português pra quem fala português, e há o que
+  perder — vale, valor, endereço e status reescritos em silêncio.
 - **`navigator.onLine` no JSX é sempre bug; use `useOnline()`.** Ler
   direto no render devolve o valor certo, mas nada faz o React renderizar
   de novo quando a rede cai — não há listener de `online`/`offline` em

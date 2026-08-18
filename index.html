@@ -13,9 +13,23 @@
   pra achar, com o agravante de vir de fora do código: nem o fonte, nem o
   bundle, nem um render isolado mostram o problema.
 -->
-<html lang="pt-BR">
+<html lang="pt-BR" translate="no">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      Duas travas, porque respondem a coisas diferentes:
+
+      `lang="pt-BR"` acima tira o MOTIVO da tradução automática — o Chrome
+      só oferece quando acha que a página está noutra língua. Resolve a
+      causa, mas não impede alguém pedir tradução no menu.
+
+      `translate="no"` (atributo padrão do HTML, no <html> acima) e esta
+      meta do Google fecham também o pedido manual. Aqui isso vale a pena:
+      não há o que ganhar traduzindo uma tela operacional em português
+      para quem fala português, e há o que perder — número de vale, valor,
+      endereço e status reescritos por um tradutor, em silêncio.
+    -->
+    <meta name="google" content="notranslate" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Tele-entrega — Drogaria Cidade</title>

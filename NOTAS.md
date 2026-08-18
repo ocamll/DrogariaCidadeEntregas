@@ -2126,13 +2126,29 @@ mostrariam.
 Fica a regra de diagnóstico no CLAUDE.md: texto truncado ou trocado sem
 explicação → **suspeitar do tradutor antes do React**.
 
-### O que ficou em aberto
+### As duas travas
 
-`lang="pt-BR"` impede a tradução AUTOMÁTICA, que é a causa aqui. Não
-impede alguém pedir tradução no menu. Bloquear de vez seria
-`<meta name="google" content="notranslate">`; não fiz por conta própria
-porque é decisão de produto — desliga um recurso do navegador pro
-usuário. Vale a pena decidir, dado o que está em jogo na tela.
+`lang="pt-BR"` impede a tradução AUTOMÁTICA, que era a causa. Não impede
+alguém pedir tradução no menu — e o usuário decidiu fechar isso também,
+no mesmo dia. Entraram `translate="no"` no `<html>` (atributo padrão do
+HTML) e `<meta name="google" content="notranslate">`.
+
+Conferido na página servida, e o que importa é a última linha:
+
+    lang                              pt-BR
+    atributo translate                "no"
+    documentElement.translate         false   ← o que o navegador consulta
+    document.body.translate           false   ← HERDADO pela árvore inteira
+    meta google                       notranslate
+
+O atributo sozinho não provaria nada: quem decide é a **propriedade**
+`translate`, e o fato de `document.body` já vir `false` é o que garante
+que não precisa repetir a marca elemento por elemento.
+
+A decisão é defensável porque o cálculo é assimétrico: não há nada a
+ganhar traduzindo uma tela operacional em português pra quem fala
+português, e há o que perder — vale, valor, endereço e status reescritos
+em silêncio.
 
 ## Commits desta sessão
 
