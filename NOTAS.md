@@ -2299,6 +2299,12 @@ transcrito exato. Do formato do token à leitura no balcão, nada nessa
 corrente é mais suposição. Ver o fecho do item 47 pro que o teste **não**
 prova.
 
+**E a saída OFFLINE fechou em 18/08**: `R-000010` selado com
+`modo = 'offline_sincronizada'`, vale indo pra `em_rota`. A cadeia está
+exercitada nos quatro estados que ela pode assumir — online
+(`R-000001`), conflito (`R-000004`), offline bem-sucedida (`R-000010`) —
+mais o cartão lido no leitor físico. Ver os itens 48 e 50.
+
 **E o canônico também**, no mesmo dia:
 `conferir-canonico-no-console.js` rodou contra dado real e voltou
 `iguais: true`, `primeiraDiferenca: -1`, 873 bytes sobre 3 vales. Era o
@@ -2345,27 +2351,27 @@ secret `ROMANEIO_KEYS`.
       pendente sem corrida na hora. O que ESTÁ coberto: ordenação, bloco
       separado de pagamentos, e `convenio_id` nos dois estados (V-000013
       tinha, os outros dois não).
-- [~] **Saída OFFLINE ponta a ponta — transporte PROVADO, caminho feliz
-      ainda não.** Rodou em 2026-08-18 (item 48): selou offline, ficou na
-      fila, drenou sozinha ao voltar a rede, o envelope ABRIU na Edge
-      Function, o payload conferiu e a transação rodou. Isso fecha o
-      envelope RSA, o `ROMANEIO_KEYS`, o par de chaves e os gêmeos do
-      `offline_event_hash` — tudo que nunca tinha rodado junto.
+- [x] ~~**Saída OFFLINE ponta a ponta.**~~ **FECHADO em 2026-08-18.**
+      `R-000010` selado com **`modo = 'offline_sincronizada'`**, 1 vale, e
+      `V-000042` indo de `Pendente` → `Em rota`. Confirmado pelo Registro
+      de Auditoria, que mostra "sincronizado depois" justamente porque
+      `payload.modo` **não** é `'online'`.
 
-      **O que falta é só o desfecho bem-sucedido por essa via:** o PIN
-      digitado offline diferiu do criado, então terminou em conflito
-      (`R-000004`). `selar_romaneio_interno` com
-      `modo = 'offline_sincronizada'` e PIN correto ainda não criou
-      corrida, não moveu vale pra `em_rota` nem calculou `final_hash`.
+      A prova veio em duas rodadas, e as duas eram necessárias: a
+      primeira (item 48) provou todo o transporte — envelope RSA,
+      `ROMANEIO_KEYS`, par de chaves, gêmeos do `offline_event_hash`,
+      fila, JWT — e terminou em conflito por PIN divergente; a segunda
+      provou o desfecho, com `selar_romaneio_interno` criando corrida e
+      movendo vale por essa via.
 
-      Repetir com PIN conferido fecha. **Conferir pelo `modo`, não pela
-      tela** — uma saída feita online também "sela e fica em rota", e as
-      duas são indistinguíveis olhando o resultado:
+      **Só o `modo` distingue**, e é por isso que valia insistir nele:
+      uma saída online também "sela e fica em rota", então olhar a tela
+      não responderia.
 
-          select numero, status, modo, (corrida_id is not null) as tem_corrida
-            from public.romaneios order by numero desc limit 5;
-
-      Só vale como este item se vier `offline_sincronizada`.
+      Com isso a cadeia de custódia está exercitada por inteiro: online
+      (`R-000001`), conflito (`R-000004`), offline bem-sucedida
+      (`R-000010`), cartão físico lido no leitor da farmácia, e o
+      canônico conferido byte a byte contra o SQL.
 - [x] ~~**Aplicar a migration `20260817130000_token_v3.sql`.**~~ Aplicada
       e conferida em 2026-08-17: os 7 casos do parser passaram direto no
       banco e `pg_proc` confirmou a `emitir_credencial` nova instalada.
