@@ -1427,6 +1427,15 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
     valor/status ocupam uma, os de uma linha ficavam centralizados — 9px
     abaixo do nome do cliente, com cada coluna começando numa altura
     diferente. Célula de altura mista sempre alinha pelo topo aqui.
+- **`<html lang="pt-BR">`, e isso não é acessibilidade.** Era `"en"`,
+  sobra do template do Vite. Com a página inteira em português, o Chrome
+  concluía que precisava **traduzir** — e o tradutor reescreve os nós de
+  texto. Apareceu em uso real como a aba "Transferências" renderizando
+  literalmente **"s"**. O que torna esse bug caro é onde ele NÃO aparece:
+  nem no fonte, nem no bundle (conferi os dois), nem num render isolado
+  em outro navegador. Só na máquina com tradução ativa. Se algum dia
+  surgir texto truncado ou trocado sem explicação, **suspeite do tradutor
+  antes de suspeitar do React**.
 - **`navigator.onLine` no JSX é sempre bug; use `useOnline()`.** Ler
   direto no render devolve o valor certo, mas nada faz o React renderizar
   de novo quando a rede cai — não há listener de `online`/`offline` em

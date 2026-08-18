@@ -2083,6 +2083,57 @@ módulo velho em memória**, o fenômeno do §41. Recarreguei e passou. É a
 quinta vez neste projeto que um teste "falha" por causa do instrumento;
 conferir o instrumento antes de concluir continua pagando.
 
+## 51. A aba "Transferências" virou "s" — e não era o app
+
+O usuário mandou print: a barra de abas mostrando `Hoje | Histórico | s |
+Documentos | …`. O rótulo, não o conteúdo.
+
+**O que eu descartei antes de achar, e por que cada descarte importou:**
+
+- **O fonte está íntegro.** Linha 71 do `Painel.tsx` é a string literal
+  `Transferências`, com os codepoints conferidos um a um
+  (`…66 65 72 ea 6e 63 69 61 73`), e o arquivo não é tocado desde agosto
+  — nada do que eu mexi no dia passou perto.
+- **Não é layout.** Montei os 8 gaveteiros REAIS em 1180, 900, 760, 640,
+  520, 420 e 360px. A `TabsList` nunca encolhe (fica em 679px e
+  transborda o container em vez de cortar), e a caixa do rótulo mede
+  110px pra um texto de 96px. **Nenhuma largura corta.**
+- **Não é o bundle.** `index-*.js` do build de produção contém
+  `Transferências` inteiro.
+- **Não é o app.** Os mesmos componentes, renderizados no meu navegador,
+  saem corretos.
+
+Quatro descartes apontando pra fora do código. E a pista que fechou:
+**"s" é exatamente o que sobra de "Transferências" quando se remove
+"Transferência"** — não é truncamento, é substituição.
+
+### A causa
+
+`index.html` tinha **`<html lang="en">`**, sobra do template do Vite que
+ninguém trocou. Página declarada em inglês, conteúdo todo em português: o
+Chrome conclui que precisa TRADUZIR e reescreve os nós de texto. Um
+render isolado em navegador sem tradução ativa nunca mostraria isso.
+
+### Por que isso é mais grave que um rótulo torto
+
+Traduzir esta tela é reescrever **número de vale, valor, endereço e
+status** — num sistema cuja regra central é a tela nunca afirmar o que
+não sabe. É a mesma família dos §39, §49 e §50 (a tela dizendo o que não
+sabe), com um agravante novo: **a corrupção vem de fora do código**.
+Nenhuma revisão de fonte, nenhum `tsc`, nenhum teste e nenhum build
+mostrariam.
+
+Fica a regra de diagnóstico no CLAUDE.md: texto truncado ou trocado sem
+explicação → **suspeitar do tradutor antes do React**.
+
+### O que ficou em aberto
+
+`lang="pt-BR"` impede a tradução AUTOMÁTICA, que é a causa aqui. Não
+impede alguém pedir tradução no menu. Bloquear de vez seria
+`<meta name="google" content="notranslate">`; não fiz por conta própria
+porque é decisão de produto — desliga um recurso do navegador pro
+usuário. Vale a pena decidir, dado o que está em jogo na tela.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)

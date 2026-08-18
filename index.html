@@ -1,5 +1,19 @@
 <!doctype html>
-<html lang="en">
+<!--
+  lang="pt-BR" não é detalhe de acessibilidade: era "en", sobra do
+  template do Vite, e com a página inteira em português o Chrome concluía
+  que precisava TRADUZIR. O tradutor reescreve os nós de texto, e o
+  resultado apareceu em produção como a aba "Transferências" virando
+  literalmente "s".
+
+  O risco real é maior que o rótulo torto. Traduzir esta tela é reescrever
+  número de vale, valor, endereço e status — num sistema cuja regra
+  central é a tela nunca afirmar o que ela não sabe. Corrupção silenciosa
+  de texto aqui é da mesma família dos bugs que este projeto já pagou caro
+  pra achar, com o agravante de vir de fora do código: nem o fonte, nem o
+  bundle, nem um render isolado mostram o problema.
+-->
+<html lang="pt-BR">
   <head>
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
