@@ -2150,6 +2150,118 @@ ganhar traduzindo uma tela operacional em português pra quem fala
 português, e há o que perder — vale, valor, endereço e status reescritos
 em silêncio.
 
+## 52. A credencial CR80 — desenho pronto, integração e três defeitos no spec
+
+O usuário trouxe o desenho da credencial pronto (frente e verso em SVG,
+mais logo e cruz), com o código do gerador escrito e uma instrução clara:
+não redesenhar, não mexer em coordenada, cor, tamanho ou opacidade. E uma
+ressalva que definiu o método: *"se for algo que prejudique o sistema,
+avise antes de implementar"*.
+
+Avisei três coisas antes, e uma quarta apareceu no teste.
+
+### 1. O spec gravava as credenciais em disco
+
+`credential-service.ts` usava `node:fs` pra escrever `frente.svg` e
+`verso.svg` numa pasta. Dois problemas, e o segundo é o que importa: não
+há backend aqui (a emissão roda no navegador do admin), e **um diretório
+com todas as credenciais funcionais é exatamente o que o desenho deste
+projeto evita** — "o arquivo É o cartão", e a tela manda apagar depois de
+imprimir.
+
+O usuário concordou e mandou a versão em memória com download. Foi a
+única adaptação estrutural; o desenho não mudou um caractere.
+
+### 2. A credencial passou a identificar o portador
+
+Nome e agência impressos revertem a decisão registrada no CLAUDE.md
+("cartão perdido não deve dizer de quem é nem de onde veio"). É escolha
+dele, veio junto do desenho, e é defensável: o cartão perdido já
+carregava o token, que é o que de fato importa, e a resposta continua
+sendo revogar. Registrado como reversão consciente.
+
+### 3. Uma segunda implementação de Code 128
+
+O projeto tem regra explícita contra duas codificações do mesmo dado —
+foi ela que fez o PDF do cartão antigo LER as barras do SVG em vez de
+chamar o bwip-js de novo. A credencial precisa das barras como `<rect>`
+dentro de um SVG maior, então a segunda implementação passou a ser
+necessária.
+
+O que a torna aceitável não é cuidado ao escrevê-la: é
+`scripts/code128.spec.mts` conferindo **barra a barra contra o bwip-js**
+em 24 comprimentos (2 a 44 dígitos) mais os tokens v3 e v2 reais.
+Posição e largura idênticas em todos. O bwip-js segue sendo o
+padrão-ouro; divergiu, quem está errado é o arquivo novo.
+
+Achado bonito no caminho: **o `15.767` do desenho não é arbitrário**. É
+exatamente a altura uniforme de 37 módulos para um token de 22 dígitos
+(37 × 75/176 = 15,767mm). O desenho e o formato do token se encaixam por
+construção — e é por isso que o gerador EXIGE o v3.
+
+### 4. Um teste de aceitação do próprio spec falhava
+
+"Nome longo não ultrapassa o cartão", da lista que ele mesmo escreveu.
+`fitSansFontSize` para de encolher no piso de 2,9, então acima de ~46
+caracteres o nome transborda a borda. "Maria Aparecida da Conceição do
+Nascimento Silva" (47) dá 77,95mm numa área de 75,2mm. Nome brasileiro
+comprido não é caso raro.
+
+Resolvido **sem tocar no desenho**: `ajustarNomeParaCaber` abrevia os
+nomes do meio, mantendo primeiro e último por extenso e preservando as
+partículas ("da", "do"), como faria qualquer documento de identidade. O
+que muda é a string, que é dado; coordenada, cor e corpo seguem intactos.
+
+    "Maria Aparecida da Conceição do Nascimento Silva"
+      → "Maria A. da Conceição do Nascimento Silva"     75,20mm
+    "Jose Ricardo Wanderley Albuquerque Cavalcanti Montenegro Filho"
+      → "Jose R. W. A. Cavalcanti Montenegro Filho"     75,20mm
+
+A alternativa seria recusar a emissão — que é o que o spec faz com o
+token longo demais, e ali está certo, porque token tem tamanho fixo.
+Recusar por nome comprido seria impedir de emitir cartão pra quem tem
+nome comprido.
+
+### O PDF, e a cor que eu não inventei
+
+O usuário escolheu SVG **e** PDF. O motivo é o mesmo de 17/08 e ficou
+maior: onde havia um campo de texto vivo, agora há três. Medido no
+navegador, o mesmo token mede **66,45mm em Consolas e 72,04mm em Courier
+New** — 5,6mm de diferença conforme a máquina que abrir o arquivo, num
+campo de 75,2mm. No PDF as fontes são Courier e Helvetica base-14, cuja
+métrica é do formato.
+
+**O vermelho `#C9141A` ficou em RGB de propósito.** Converter cor de
+marca pra CMYK é decisão de identidade visual, não de código: um chute
+sairia impresso num tom que ninguém aprovou. O que a conversão poderia
+estragar — as barras — já está travado em 100% K, e é preto sobre o
+painel branco. Fica a recomendação de dizer à gráfica qual vermelho
+(Pantone ou CMYK).
+
+### O que a medição mostrou
+
+- PDF: duas páginas de **85,60 × 54,00mm exatos**, `0. 0. 0. 1. k` nas
+  barras, `/BaseFont /Courier` e `/Helvetica` sem arquivo de fonte
+  embutido, e os **três textos medidos com a métrica real** cabendo
+  (token 72,03mm, nome 67,63mm no pior caso, agência 17,57mm).
+- No navegador, renderizado de verdade: proporção **1,5851** contra
+  1,5852 do CR80, 43 barras no verso, nome abreviado corretamente, 99ms
+  pra gerar.
+- Os assets são **PNG e não vetor**, apesar do comentário no SVG de
+  origem afirmar o contrário. Resolução folgada no tamanho final (847 e
+  1074 dpi), então não é problema de qualidade — o custo é peso: ~900 kB
+  por lado, ~2 MB no PDF.
+- Segunda vez no dia em que um teste meu acusou falha com o arquivo
+  correto: eu esperava o RGB com três casas decimais e o jsPDF grava com
+  duas (`0.79 0.08 0.1 rg`). Volta pro mesmo byte.
+
+### Efeito colateral bom
+
+Com a troca, `src/lib/cartaoPdf.ts` ficou **órfão** e o **bwip-js saiu do
+bundle de produção** — ele agora só roda nos testes. São ~930 kB a menos.
+O `cartaoPdf.ts` e o spec dele continuam no repositório; removê-los é
+decisão de limpeza, não urgência.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)

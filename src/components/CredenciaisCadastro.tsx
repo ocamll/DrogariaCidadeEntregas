@@ -10,7 +10,13 @@ import {
   type Credencial,
   type CredencialEmitida,
 } from '@/data/credenciais'
-import { montarCartaoPdf } from '@/lib/cartaoPdf'
+import {
+  generateMotoboyCredential,
+  formatTokenForDisplay,
+  type MotoboyCredentialData,
+  type GeneratedCredential,
+} from '@/lib/credencialMotoboy'
+import { baixarSvg, baixarArquivo } from '@/lib/credencialDownload'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -21,32 +27,6 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-
-// Dimensões do cartão CR80 (85,6 × 54mm), com 5mm de margem física de
-// cada lado. As zonas de silêncio de 10X ficam DENTRO desta largura.
-const LARGURA_MM = 75
-const ALTURA_BARRA_MM = 16
-
-// Piso comum de leitor laser 1D. Com o token v3 (22 dígitos, 156 módulos
-// mais 20 de zona de silêncio) dá 0,426mm por módulo — 2,2x o piso. O v2
-// dava 0,262mm (1,4x) e o v1 alfanumérico nem cabia: 431 módulos,
-// 0,174mm. Ver o cabeçalho da migration 20260817130000.
-const MODULO_MINIMO_MM = 0.19
-
-// Faixa abaixo das barras pro token em texto, em unidades do viewBox
-// (uma unidade = um módulo, hoje ≈ 0,43mm). Os números foram MEDIDOS, não
-// estimados: a primeira tentativa usou fonte 10 e o texto saiu com 81,8mm
-// — mais largo que o próprio cartão de 75mm, escapando pra fora do SVG.
-//
-// Como tudo aqui é medido em MÓDULOS, a faixa acompanha sozinha quando o
-// token muda de tamanho: com o v3 a fonte cresceu junto com o módulo e o
-// texto ficou com 51,1mm (11,9mm de folga de cada lado), num cartão de
-// 22,6mm de altura total — longe dos 54mm do CR80. Conferido por
-// `npx tsx scripts/cartao-pdf.spec.mts`, que recalcula os dois a cada
-// execução em vez de confiar neste comentário.
-const ESPACO_TEXTO_UNIDADES = 16
-const FONTE_TOKEN_UNIDADES = 8
-const BASE_TEXTO_UNIDADES = 12
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfile }) {
@@ -62,9 +42,11 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
   const revogar = useRevogarCredencial()
   const redefinir = useRedefinirPin()
 
-  const [emitida, setEmitida] = useState<{ dados: CredencialEmitida; motoboyNome: string } | null>(
-    null
-  )
+  const [emitida, setEmitida] = useState<{
+    dados: CredencialEmitida
+    motoboyNome: string
+    agenciaNome: string
+  } | null>(null)
   const [confirmando, setConfirmando] = useState<
     { acao: 'revogar' | 'redefinir'; credencial: Credencial; motoboyNome: string } | null
   >(null)
@@ -77,9 +59,12 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
   // imprimir papel que o próprio banco recusa (emitir_credencial barra).
   const ativos = motoboys?.filter((m) => m.ativo) ?? []
 
-  async function handleEmitir(motoboyId: string, motoboyNome: string) {
+  // A agência entra aqui porque ela aparece IMPRESSA na credencial. Vem
+  // do cadastro do motoboy, resolvida no mesmo lugar que a coluna da
+  // tabela — uma fonte só.
+  async function handleEmitir(motoboyId: string, motoboyNome: string, agenciaNome: string) {
     const dados = await emitir.mutateAsync(motoboyId)
-    setEmitida({ dados, motoboyNome })
+    setEmitida({ dados, motoboyNome, agenciaNome })
   }
 
   return (
@@ -204,7 +189,7 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
                         variant={credencial ? 'ghost' : 'default'}
                         size="sm"
                         disabled={emitir.isPending}
-                        onClick={() => void handleEmitir(motoboy.id, motoboy.nome)}
+                        onClick={() => void handleEmitir(motoboy.id, motoboy.nome, nomeAgencia(motoboy.agenciaId))}
                       >
                         {credencial ? 'Emitir novo' : 'Emitir cartão'}
                       </Button>
@@ -224,9 +209,10 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
       )}
 
       {emitida && (
-        <CartaoEmitidoDialog
+        <CredencialEmitidaDialog
           emitida={emitida.dados}
           motoboyNome={emitida.motoboyNome}
+          agenciaNome={emitida.agenciaNome}
           onFechar={() => setEmitida(null)}
         />
       )}
@@ -252,191 +238,88 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
 }
 
 // =====================================================================
-// O cartão recém-emitido
+// A credencial recém-emitida
 //
 // Esta tela é a ÚNICA vez que o token existe fora do papel. O banco
-// guarda só o HMAC, então fechar sem salvar significa emitir outro —
+// guarda só o HMAC, então fechar sem salvar significa emitir outra —
 // não há "ver de novo".
 //
-// Dimensionado pro CR80 (85,6 × 54mm), com 5mm de margem física de cada
-// lado. Ver a nota de dimensionamento na migration 20260817120000: é ela
-// que explica por que o token é numérico.
+// O DESENHO NÃO MORA AQUI. Frente e verso vêm prontos de
+// `src/lib/credencialMotoboy.ts`, que só substitui token, código de
+// barras, nome e agência num modelo fixo. Este componente não desenha,
+// não posiciona e não escolhe cor: ele mostra e entrega.
+//
+// A credencial substituiu o cartão de 75 × 20,2mm que só tinha código e
+// token. Cartões daquele formato já impressos continuam válidos — o que
+// autentica é o token, e ele não mudou.
 // =====================================================================
 
-// O token em blocos: 42 dígitos corridos ninguém acompanha com o olho, e
-// esse texto existe justamente pro caso de alguém precisar digitá-lo
-// quando o leitor falhar.
-function tokenLegivel(token: string): string {
-  return token.replace(/(.{6})/g, '$1 ').trim()
-}
-
-// Compõe o SVG final: código de barras + token, e nada mais.
-//
-// Sem nome de motoboy e sem filial, a pedido — um cartão perdido não deve
-// dizer de quem é nem de onde veio. Quem casa o papel com a pessoa é o
-// sistema, pelo public_id.
-//
-// O `<rect width="100%" height="100%">` que o bwip-js já põe acompanha o
-// viewBox, então esticar a altura pra caber o texto mantém o fundo branco
-// cobrindo tudo — não precisa de retângulo novo.
-function comporCartao(svgDoCodigo: string, token: string, unidadesLargura: number, unidadesAltura: number) {
-  const alturaTotal = unidadesAltura + ESPACO_TEXTO_UNIDADES
-  // Escala uniforme: a largura física manda, e a altura acompanha o
-  // viewBox. Nada é esticado numa direção só.
-  const alturaMm = (LARGURA_MM * alturaTotal) / unidadesLargura
-
-  const svg = svgDoCodigo
-    .replace(
-      `viewBox="0 0 ${unidadesLargura} ${unidadesAltura}"`,
-      `viewBox="0 0 ${unidadesLargura} ${alturaTotal}" width="${LARGURA_MM}mm" height="${alturaMm.toFixed(2)}mm"`
-    )
-    .replace(
-      '</svg>',
-      `<text x="${unidadesLargura / 2}" y="${unidadesAltura + BASE_TEXTO_UNIDADES}" ` +
-        `text-anchor="middle" font-family="Courier New, monospace" ` +
-        `font-size="${FONTE_TOKEN_UNIDADES}" fill="#000000">${tokenLegivel(token)}</text>\n</svg>`
-    )
-
-  return { svg, alturaMm }
-}
-
-function CartaoEmitidoDialog({
+function CredencialEmitidaDialog({
   emitida,
   motoboyNome,
+  agenciaNome,
   onFechar,
 }: {
   emitida: CredencialEmitida
   motoboyNome: string
+  agenciaNome: string
   onFechar: () => void
 }) {
-  const [svg, setSvg] = useState<string | null>(null)
-  const [erroBarras, setErroBarras] = useState<string | null>(null)
-  const [moduloMm, setModuloMm] = useState<number | null>(null)
-  const [alturaMm, setAlturaMm] = useState<number | null>(null)
-  // Dimensões em MÓDULOS, guardadas porque o PDF desenha a partir delas.
-  const [unidades, setUnidades] = useState<{ largura: number; altura: number } | null>(null)
-  const [erroPdf, setErroPdf] = useState<string | null>(null)
+  const [gerada, setGerada] = useState<GeneratedCredential | null>(null)
+  const [erro, setErro] = useState<string | null>(null)
+  const [ocupado, setOcupado] = useState(false)
+
+  const dados: MotoboyCredentialData = {
+    tokenDisplay: formatTokenForDisplay(emitida.token),
+    // O valor EXATO que o leitor precisa devolver. Nunca o formatado —
+    // os espaços são só pro olho humano.
+    barcodeValue: emitida.token,
+    fullName: motoboyNome,
+    agency: agenciaNome,
+  }
 
   useEffect(() => {
     let cancelado = false
-
-    async function gerar() {
-      try {
-        // Import dinâmico, mesmo padrão do exceljs e do jspdf: ~930 kB que
-        // só descem quando um admin abre esta tela. Está em
-        // optimizeDeps.include do vite.config pra o cache de deps não
-        // vencer no meio da sessão em desenvolvimento.
-        const bwipjs = await import('bwip-js/browser')
-        if (cancelado) return
-
-        const base = {
-          bcid: 'code128',
-          text: emitida.token,
-          includetext: false,
-          // 10 módulos de zona de silêncio de cada lado — o mínimo de 10X
-          // da especificação, e ela mora DENTRO dos 75mm.
-          paddingwidth: 10,
-          paddingheight: 0,
-          backgroundcolor: 'FFFFFF',
-          // scale 1 faz a unidade do viewBox ser o MÓDULO, e não pixel.
-          // Sem isso a conta da largura do módulo sairia pela metade, e
-          // ela é o número que decide se o leitor lê.
-          scale: 1,
-        } as const
-
-        // Duas passadas, e não uma: o bwip-js decide a proporção a partir
-        // da altura em milímetros, e eu preciso do inverso — dada a
-        // largura final de 75mm, qual altura natural faz as barras
-        // saírem com 16mm depois do escalonamento UNIFORME.
-        const primeira = bwipjs.default.toSVG({ ...base, height: ALTURA_BARRA_MM })
-        const vb = primeira.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)
-        if (!vb) throw new Error('não consegui ler as dimensões do código gerado')
-
-        const unidadesLargura = Number(vb[1])
-        const unidadesAltura = Number(vb[2])
-
-        // Quantos módulos INTEIROS cabem nos 16mm de barra. O bwip-js só
-        // produz altura em número inteiro de módulos, então o alvo precisa
-        // ser explícito e arredondado PRA BAIXO — deixar que ele arredonde
-        // sozinho faz a barra estourar a área especificada. Com o token v2
-        // isso passava despercebido (módulo pequeno, erro pequeno); com o
-        // v3 o módulo é 1,6x maior e a barra saía com 16,19mm.
-        const alvoUnidades = Math.floor((ALTURA_BARRA_MM * unidadesLargura) / LARGURA_MM)
-        const alturaNatural = (ALTURA_BARRA_MM * alvoUnidades) / unidadesAltura
-
-        const segunda = bwipjs.default.toSVG({ ...base, height: alturaNatural })
-        const vb2 = segunda.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)
-        if (!vb2) throw new Error('não consegui ler as dimensões do código gerado')
-        if (cancelado) return
-
-        const composto = comporCartao(segunda, emitida.token, Number(vb2[1]), Number(vb2[2]))
-
-        // Largura do módulo no papel: o número que decide se o leitor lê.
-        // As 20 unidades das duas zonas de silêncio entram na conta,
-        // porque ocupam largura dentro dos 75mm.
-        setModuloMm(LARGURA_MM / unidadesLargura)
-        setAlturaMm(composto.alturaMm)
-        setUnidades({ largura: Number(vb2[1]), altura: Number(vb2[2]) })
-        setSvg(composto.svg)
-      } catch (e) {
-        if (!cancelado) setErroBarras(e instanceof Error ? e.message : String(e))
-      }
-    }
-
-    void gerar()
+    generateMotoboyCredential(dados)
+      .then((r) => {
+        if (!cancelado) setGerada(r)
+      })
+      .catch((e) => {
+        if (!cancelado) setErro(e instanceof Error ? e.message : String(e))
+      })
     return () => {
       cancelado = true
     }
-  }, [emitida.token])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emitida.token, motoboyNome, agenciaNome])
 
-  function baixarSvg() {
-    if (!svg) return
-    const blob = new Blob([svg], { type: 'image/svg+xml;charset=utf-8' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    // O nome carrega só o public_id, que não é segredo — é o que permite
-    // casar o arquivo com a linha da tela sem abri-lo.
-    link.download = `cartao-${emitida.publicId}.svg`
-    link.click()
-    URL.revokeObjectURL(url)
-  }
-
-  // O PDF sai do MESMO svg que está na tela — ver a nota no topo de
-  // cartaoPdf.ts. É o formato pra mandar pra gráfica: a fonte do token
-  // não depende da máquina de quem abre e o preto é 100% K.
   async function baixarPdf() {
-    if (!svg || !unidades) return
-    setErroPdf(null)
+    if (!gerada) return
+    setErro(null)
+    setOcupado(true)
     try {
-      const bytes = await montarCartaoPdf(svg, tokenLegivel(emitida.token), {
-        larguraMm: LARGURA_MM,
-        unidadesLargura: unidades.largura,
-        unidadesAltura: unidades.altura,
-        espacoTextoUnidades: ESPACO_TEXTO_UNIDADES,
-        baseTextoUnidades: BASE_TEXTO_UNIDADES,
-        fonteTokenUnidades: FONTE_TOKEN_UNIDADES,
-      })
-      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
-      const link = document.createElement('a')
-      link.href = url
-      link.download = `cartao-${emitida.publicId}.pdf`
-      link.click()
-      URL.revokeObjectURL(url)
+      // Só o PDF entra por import dinâmico: é ele que puxa os ~400 kB do
+      // jspdf. O módulo de download é estático — misturar os dois estilos
+      // no mesmo arquivo faz o Rolldown desistir de separar o chunk.
+      const { montarCredencialPdf, carregarAssetsCredencial } = await import('@/lib/credencialPdf')
+      const bytes = await montarCredencialPdf(dados, await carregarAssetsCredencial())
+      baixarArquivo(
+        new Blob([bytes], { type: 'application/pdf' }),
+        `credencial-${emitida.publicId}.pdf`,
+        'application/pdf'
+      )
     } catch (e) {
-      // Sem isto a falha seria um clique que não faz nada — e esta tela é
-      // a única vez que o token existe fora do papel.
-      setErroPdf(e instanceof Error ? e.message : String(e))
+      setErro(e instanceof Error ? e.message : String(e))
+    } finally {
+      setOcupado(false)
     }
   }
 
-  const legivel = moduloMm !== null && moduloMm >= MODULO_MINIMO_MM
-
   return (
     <Dialog open onOpenChange={onFechar}>
-      <DialogContent className="sm:max-w-xl">
+      <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Cartão de {motoboyNome}</DialogTitle>
+          <DialogTitle>Credencial de {motoboyNome}</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
@@ -444,88 +327,78 @@ function CartaoEmitidoDialog({
             <p className="text-sm">
               <strong>Salva ou imprime agora.</strong> O sistema guarda só uma impressão digital do
               cartão — este código não aparece de novo em lugar nenhum. Se fechar sem salvar, o
-              caminho é emitir outro cartão.
+              caminho é emitir outra credencial.
             </p>
           </div>
 
-          {/* O que está na tela é byte a byte o que o .svg contém — o token
-              vive DENTRO do SVG, não numa linha de HTML ao lado. */}
-          <div
-            id="print-cartao"
-            className="flex flex-col items-center gap-2 rounded-lg border bg-white p-4 text-black"
-          >
-            {erroBarras ? (
-              <div className="text-xs text-red-700">
-                <p>Não consegui gerar o código de barras.</p>
-                {/* "Failed to fetch dynamically imported module" quase
-                    sempre é o cache de deps do Vite vencido, não defeito
-                    do app — e a saída é recarregar. */}
-                {erroBarras.includes('dynamically imported module') ? (
-                  <p className="mt-1">
-                    Recarrega a página (Ctrl+Shift+R) e emite de novo — o navegador está com uma
-                    versão vencida de um arquivo.
-                  </p>
-                ) : (
-                  <p className="mt-1">{erroBarras}</p>
-                )}
-              </div>
-            ) : svg ? (
-              // SVG no tamanho físico, não canvas esticado por CSS: em
-              // vetor a escala é exata, sem reamostragem.
-              <div dangerouslySetInnerHTML={{ __html: svg }} />
-            ) : (
-              <p className="text-xs">Gerando…</p>
-            )}
-          </div>
+          {/* O que está na tela é byte a byte o que os arquivos contêm. */}
+          {erro ? (
+            <div className="text-xs text-red-700">
+              <p>Não consegui gerar a credencial.</p>
+              {erro.includes('dynamically imported module') ? (
+                <p className="mt-1">
+                  Recarrega a página (Ctrl+Shift+R) e emite de novo — o navegador está com uma
+                  versão vencida de um arquivo.
+                </p>
+              ) : (
+                <p className="mt-1">{erro}</p>
+              )}
+            </div>
+          ) : gerada ? (
+            <div className="flex flex-col gap-3 sm:flex-row">
+              <div
+                className="w-full [&>svg]:h-auto [&>svg]:w-full"
+                dangerouslySetInnerHTML={{ __html: gerada.frontSvg }}
+              />
+              <div
+                className="w-full [&>svg]:h-auto [&>svg]:w-full"
+                dangerouslySetInnerHTML={{ __html: gerada.backSvg }}
+              />
+            </div>
+          ) : (
+            <p className="text-xs">Gerando…</p>
+          )}
 
           <div className="flex flex-col gap-1 text-sm">
             <p>
-              Arquivo: <strong>{LARGURA_MM}mm × {alturaMm ? alturaMm.toFixed(1) : '…'}mm</strong>,
-              com barras de {ALTURA_BARRA_MM}mm — cabe num CR80 (85,6 × 54mm) com 5mm de margem de
-              cada lado.
+              Cartão <strong>85,6 × 54mm</strong> (CR80), com o código de barras em 75 × 15,767mm —
+              0,426mm por módulo, mais que o dobro do que um leitor laser comum exige.
             </p>
-            {moduloMm !== null && (
-              <p className={legivel ? 'text-xs text-foreground/70' : 'text-xs text-destructive'}>
-                {moduloMm.toFixed(3)}mm por módulo.{' '}
-                {legivel
-                  ? 'Dentro do que um leitor laser comum lê, com folga.'
-                  : `Abaixo de ${MODULO_MINIMO_MM}mm muitos leitores falham.`}
-              </p>
-            )}
-            {/* O arquivo É o cartão: quem tiver ele consegue imprimir uma
-                cópia funcional. O desenho todo parte de o token existir só
-                no papel, e um .svg no disco (ainda mais dentro do OneDrive)
-                estende isso indefinidamente. */}
-            {/* Os dois arquivos têm o mesmo código; o que muda é o
-                trajeto até a gráfica. Ver a nota no topo de cartaoPdf.ts. */}
             <p className="text-xs text-foreground/70">
-              Pra mandar pra gráfica, use o <strong>PDF</strong>: o número embaixo das barras não
-              depende de a máquina deles ter a fonte, e o preto já vai como 100% K, sem as outras
-              três cores. Peça pra imprimir <strong>a 100%, sem redimensionar</strong>, em cartão
-              branco. O .svg continua sendo o mesmo código, pra quem preferir editar em vetor.
+              Pra gráfica, use o <strong>PDF</strong>: nele as fontes são as padrão do formato, não
+              dependem de a máquina deles ter Consolas ou Arial, e o preto das barras vai como 100%
+              K. Peça pra imprimir <strong>a 100%, sem redimensionar</strong>. Diga também qual
+              vermelho vocês querem (Pantone ou CMYK) — o arquivo leva o da tela, em RGB.
             </p>
             <p className="text-xs text-amber-700 dark:text-amber-400">
-              Os dois arquivos contêm o código do cartão — quem tiver eles imprime uma cópia que
+              Os arquivos contêm o código do cartão — quem tiver eles imprime uma cópia que
               funciona. Apaga depois de imprimir.
             </p>
-            {erroPdf && (
-              <p className="text-xs text-destructive">Não consegui gerar o PDF: {erroPdf}</p>
-            )}
           </div>
         </div>
 
-        <DialogFooter>
+        <DialogFooter className="flex-wrap">
           <Button variant="outline" onClick={onFechar}>
             Já salvei
           </Button>
-          <Button variant="outline" onClick={() => window.print()} disabled={!svg}>
-            Imprimir
+          {/* Dois botões separados de propósito: alguns navegadores
+              bloqueiam o segundo download disparado no mesmo gesto. */}
+          <Button
+            variant="outline"
+            disabled={!gerada}
+            onClick={() => gerada && baixarSvg(gerada.frontSvg, `credencial-${emitida.publicId}-frente.svg`)}
+          >
+            Baixar frente
           </Button>
-          <Button variant="outline" onClick={baixarSvg} disabled={!svg}>
-            Baixar .svg
+          <Button
+            variant="outline"
+            disabled={!gerada}
+            onClick={() => gerada && baixarSvg(gerada.backSvg, `credencial-${emitida.publicId}-verso.svg`)}
+          >
+            Baixar verso
           </Button>
-          <Button onClick={baixarPdf} disabled={!svg || !unidades}>
-            Baixar PDF
+          <Button onClick={() => void baixarPdf()} disabled={!gerada || ocupado}>
+            {ocupado ? 'Gerando PDF…' : 'Baixar PDF'}
           </Button>
         </DialogFooter>
       </DialogContent>

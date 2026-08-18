@@ -1081,7 +1081,72 @@ módulo; deixá-lo arredondar sozinho fez a barra do v3 sair com 16,19mm,
 estourando a área de 16mm da especificação. Com o v2 isso passava
 despercebido, porque o módulo era pequeno e o erro também.
 
-### O arquivo do cartão
+### A credencial CR80 — o que a tela de emissão entrega hoje
+
+Entrou em 2026-08-18, com desenho pronto trazido pelo usuário, e
+**substituiu** o cartão de 75 × 20,2mm que só tinha código e token (esse
+está descrito logo abaixo, e a descrição vale como história: cartões
+daquele formato já impressos continuam válidos, porque o que autentica é
+o token e ele não mudou).
+
+- **O desenho é fixo e não se mexe.** `src/lib/credencialMotoboy.ts` só
+  substitui quatro valores — token, código de barras, nome, agência — num
+  modelo cujas coordenadas, cores, tamanhos e opacidades vieram prontos.
+  Se algo parecer arbitrário (`y="16.791477"`, `.085` da cruz,
+  `letter-spacing=".22"`), é porque veio do desenho.
+- **A credencial agora IDENTIFICA o portador**, com nome e agência
+  impressos. Isso reverte a decisão anterior ("cartão perdido não deve
+  dizer de quem é nem de onde veio"), por escolha explícita do usuário ao
+  trazer o desenho. Continua valendo o que sustentava a decisão antiga: o
+  cartão perdido já carregava o token, então quem o acha sempre teve o
+  que importa — e a resposta continua sendo revogar, não torcer.
+- **`src/lib/code128.ts` é a SEGUNDA implementação de Code 128 do
+  projeto**, e existe porque a credencial precisa das barras como
+  `<rect>` dentro de um SVG maior. O que a torna aceitável, num projeto
+  com regra contra duas codificações, é `scripts/code128.spec.mts`
+  conferindo **barra a barra contra o bwip-js** em 24 comprimentos. O
+  bwip-js segue sendo o padrão-ouro: divergiu, quem está errado é o
+  arquivo novo.
+- **O `15.767` do desenho não é arbitrário** — é exatamente a altura
+  uniforme de 37 módulos para um token de 22 dígitos (37 × 75/176). Por
+  isso o gerador **exige** o formato v3: com outro comprimento a escala
+  do símbolo deixa de ser uniforme.
+- **v1 e v2 são versões de teste descontinuadas** (decidido em
+  2026-08-18). Os parsers ainda as reconhecem, o que não custa nada e
+  mantém válido o que já foi impresso.
+- **O nome longo é abreviado, não espremido.** `fitSansFontSize` para de
+  encolher no piso de 2,9, então acima de ~46 caracteres o nome
+  transbordava a borda — foi o teste de aceitação que pegou. Quem resolve
+  é `ajustarNomeParaCaber`, que abrevia os nomes do meio mantendo
+  primeiro e último por extenso. **Isso não mexe no desenho**: muda a
+  string, que é dado. Recusar a emissão seria o outro caminho, e é o que
+  se faz com o token (que tem tamanho fixo) — mas recusar por nome
+  comprido seria impedir de emitir cartão pra quem tem nome comprido.
+- **Nada persiste.** O `credential-service.ts` da especificação original
+  gravava os arquivos numa pasta; aqui eles são gerados em memória e
+  baixados. Um diretório com todas as credenciais funcionais é exatamente
+  o que "o arquivo É o cartão" existe pra evitar.
+- **Os assets são PNG, não vetor**, apesar do comentário no SVG de origem
+  dizer o contrário. A resolução é folgada no tamanho final (847 dpi a
+  48mm, 1074 dpi a 47,5mm), então não é problema de qualidade — o custo é
+  peso: ~900 kB por lado e ~2 MB no PDF, porque a cruz entra nas duas
+  páginas.
+- **No PDF o vermelho fica em RGB, de propósito.** Converter cor de marca
+  pra CMYK é decisão de identidade visual, não de código. O que a
+  conversão poderia estragar — o código de barras — já está em 100% K, e
+  é preto sobre o painel branco. **Diga à gráfica qual vermelho vocês
+  querem** (Pantone ou CMYK).
+- `scripts/credencial-de-teste.mts` gera uma credencial com token
+  fictício pro teste de impressão, pelo mesmo motivo do
+  `cartao-de-teste.mts`: testar impressora não deve custar uma credencial
+  de verdade.
+
+**`src/lib/cartaoPdf.ts` ficou órfão** com a troca — nada no app o
+importa. O spec dele continua passando; se for removido, o spec vai
+junto. Com ele saiu também o `bwip-js` do bundle de produção (ele agora
+só roda nos testes), o que aliviou ~930 kB.
+
+### O arquivo do cartão antigo — substituído em 2026-08-18, mantido como história
 
 A tela de emissão entrega um **SVG no tamanho físico** — 75 × 20,2mm,
 barras de 16mm, zona de silêncio de 10X (2,62mm) de cada lado, dentro da
