@@ -146,6 +146,18 @@ export async function enfileirarOperacao<T extends TipoOperacaoFila>(
 }
 
 let processando = false
+// Quando a rodada em curso começou. Sem isto, `processando` é uma trava
+// sem saída: basta UM `await` que nunca resolve pra fila inteira parar
+// pra sempre, e o sintoma é o pior possível — o item fica "Na fila",
+// sem erro, com `tentativas` em 0, e nada mais é tentado nem depois de
+// reconectar. Só um F5 destravava.
+//
+// Não há timeout em nenhum ponto da cadeia (`functions.invoke` não tem, e
+// `fetch` sem `signal` espera indefinidamente), então a possibilidade é
+// real, não teórica. O relógio aqui é a rede de segurança geral: vale pra
+// qualquer operação que pendure, não só a que motivou a descoberta.
+let processandoDesde = 0
+const LIMITE_RODADA_MS = 90_000
 let relogio: ReturnType<typeof setTimeout> | null = null
 
 async function usuarioDaSessao(): Promise<string | null> {
@@ -154,13 +166,19 @@ async function usuarioDaSessao(): Promise<string | null> {
 }
 
 export async function processarFilaOperacoes(): Promise<void> {
-  if (processando) return
+  // A rodada anterior pode ter pendurado num `await` que nunca resolve.
+  // Passado o limite, a nova rodada segue mesmo assim: no pior caso duas
+  // rodadas se sobrepõem, e isso é seguro porque toda operação da fila é
+  // idempotente por construção (ids determinísticos, upsert, 23505 tratado
+  // como sucesso). Fila parada pra sempre não é seguro.
+  if (processando && Date.now() - processandoDesde < LIMITE_RODADA_MS) return
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
     agendarProximaRodada()
     return
   }
 
   processando = true
+  processandoDesde = Date.now()
   try {
     const usuario = await usuarioDaSessao()
     if (!usuario) return
@@ -245,13 +263,24 @@ function agendarProximaRodada() {
 }
 
 // Retry manual, pro caso de alguém não querer esperar o backoff.
+//
+// Alcança 'pendente' TAMBÉM, e não só 'erro'. O caso que motivou isso: um
+// item que nunca chegou a ser executado fica 'pendente' com `tentativas`
+// em 0 e sem mensagem — e era justamente ele que o botão não alcançava,
+// porque a tela só o habilitava havendo item em 'erro'. Quem está olhando
+// uma operação parada precisa de um jeito de cutucá-la, e "nunca foi
+// tentada" é mais aflitivo que "falhou e vai tentar de novo".
 export async function tentarAgora() {
   const itens = await db.filaOperacoes.toArray()
   await Promise.all(
     itens
-      .filter((i) => i.status === 'erro')
+      .filter((i) => i.status === 'erro' || i.status === 'pendente')
       .map((i) => db.filaOperacoes.update(i.id, { proximaTentativaEm: new Date(0).toISOString() }))
   )
+  // Destrava uma rodada pendurada antes de tentar: sem isto o clique cairia
+  // no guard `processando` e não faria nada — que é exatamente a sensação
+  // de botão quebrado que o usuário relatou.
+  processando = false
   await processarFilaOperacoes()
 }
 

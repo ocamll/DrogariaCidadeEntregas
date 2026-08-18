@@ -938,6 +938,59 @@ fechar uma corrida ainda não sincronizada **substituía a criação dela** no
 erro. Perda silenciosa, reproduzida e corrigida em 2026-08-16. Dependência
 entre operações agora é explícita (`chave` / `dependeDeChave`).
 
+### O que a saída offline NÃO alcança
+
+Descoberto no primeiro teste offline com uso real, em 2026-08-18. Três
+limites, e o primeiro é arquitetural — não adianta procurar solução de
+cache pra ele:
+
+- **Vale criado offline não pode sair offline.** `numero_vale` é gerado
+  pelo BANCO (sequência `V-000001…`) e entra no canônico, que é o
+  documento que as duas partes assinam. Vale que ainda não subiu não tem
+  número, logo não tem como constar de um documento assinado. Guardar a
+  lista localmente não resolveria: o que falta não é o dado, é o número.
+  A tela avisa quantos vales estão nessa situação, em vez de deixar o
+  caixa achar que o lançamento se perdeu.
+- **A lista de vales vem do servidor e não fica salva.** Se a internet
+  cair com a tela aberta, o cache do TanStack Query segura (`gcTime` de
+  30min). Se a página recarregar offline, não há lista. A tela passou a
+  dizer isso — antes exibia "Nenhum vale pendente pra sair agora", que é
+  uma **afirmação sobre o estoque de vales** e vira mentira quando o que
+  houve foi falha ao carregar.
+- **Só sai vale da PRÓPRIA filial.** `selar_romaneio_interno` exige
+  `e.loja_id = p_loja_id`. Pro caixa e pro gerente a RLS já garante isso,
+  mas o **admin enxerga o tenant inteiro** — e a lista, que não filtrava,
+  oferecia vale de outra filial numa saída que o servidor recusa sempre.
+  O filtro por `loja_id` no cliente não é redundância com a RLS nem
+  "confiar no cliente": o servidor continua sendo quem recusa; o ponto é
+  não OFERECER o impossível, porque descobrir custa duas assinaturas e um
+  romaneio de conflito.
+
+### A fila não pode travar em silêncio
+
+Também de 2026-08-18. `processarFilaOperacoes` tem um guard
+`if (processando) return` que era uma trava **de mão única**: bastava um
+`await` que nunca resolvesse pra fila inteira parar pra sempre. E não há
+timeout em ponto nenhum da cadeia — `functions.invoke` não tem, e `fetch`
+sem `signal` espera indefinidamente.
+
+O sintoma é o pior possível, porque não parece erro: o item fica **"Na
+fila"**, com `tentativas` em 0 e nenhuma mensagem, e não é tentado nem
+depois de reconectar. Só um F5 destravava.
+
+- `processando` ganhou um **relógio** (`LIMITE_RODADA_MS`): passado o
+  limite, a rodada seguinte segue mesmo assim. Duas rodadas se
+  sobreporem é seguro — toda operação da fila é idempotente por
+  construção (ids determinísticos, upsert, `23505` tratado como
+  sucesso). Fila parada pra sempre não é.
+- **"Tentar agora" alcança `pendente`, não só `erro`.** O botão era
+  habilitado por `comErro.length > 0`, então justamente o item preso —
+  que nunca falhou, porque nunca foi executado — era o único que ele não
+  alcançava. Item sem erro escrito nele é o mais aflitivo de todos.
+- `tentarAgora` também zera `processando` antes de rodar, senão o clique
+  cairia no guard e não faria nada: a sensação exata de botão quebrado
+  que o usuário relatou.
+
 ### Ordem dentro da transação do selo
 
 `corrida → vales em rota → romaneio → vínculo → assinaturas`. O UPDATE dos

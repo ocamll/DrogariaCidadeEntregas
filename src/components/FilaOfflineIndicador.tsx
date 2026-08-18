@@ -39,6 +39,8 @@ export function FilaOfflineIndicador() {
   const terminais = pendentes.filter((i) => i.status === 'terminal')
   const bloqueados = pendentes.filter((i) => i.status === 'bloqueado')
   const comErro = pendentes.filter((i) => i.status === 'erro')
+  // O que "Tentar agora" alcança: tudo que ainda pode sair da fila.
+  const retentaveis = pendentes.filter((i) => i.status === 'erro' || i.status === 'pendente')
 
   const rotulo = terminais.length > 0
     ? 'Precisa de atenção'
@@ -129,7 +131,11 @@ export function FilaOfflineIndicador() {
             <Button variant="outline" onClick={() => setAberto(false)}>
               Fechar
             </Button>
-            <Button onClick={() => void tentarAgora()} disabled={comErro.length === 0}>
+            {/* Habilitado pra qualquer item que ainda possa sair da fila,
+                não só pros que já falharam. Item 'pendente' que nunca foi
+                executado era o único que o botão não alcançava — e é o mais
+                aflitivo de todos, porque não tem erro nenhum escrito nele. */}
+            <Button onClick={() => void tentarAgora()} disabled={retentaveis.length === 0}>
               Tentar agora
             </Button>
           </DialogFooter>

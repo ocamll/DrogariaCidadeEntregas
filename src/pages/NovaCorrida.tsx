@@ -79,7 +79,7 @@ function NovaCorridaFluxo({
   lojaId: string
   onVoltar: () => void
 }) {
-  const { data: vales, isLoading } = useValesParaSaida()
+  const { data: vales, isLoading, isError } = useValesParaSaida(lojaId)
   const cidadeId = useCidadeDaLoja(lojaId)
   const { data: agenciasDaCidade } = useAgenciasDaCidade(cidadeId)
   const pendentesDaFila = useFilaOperacoesPendentes()
@@ -137,6 +137,19 @@ function NovaCorridaFluxo({
   )
 
   const disponiveis = (vales ?? []).filter((v) => !jaNaFila.has(v.entregaId))
+
+  // Vales criados offline e ainda na fila NÃO podem sair, e a tela precisa
+  // dizer isso — senão o caixa lança o vale, abre esta tela e conclui que
+  // o sistema perdeu o lançamento.
+  //
+  // O motivo é o `numero_vale`: ele é gerado pelo BANCO (sequência
+  // V-000001…, regra do CLAUDE.md) e entra no canônico, que é o documento
+  // que as duas partes assinam. Um vale que ainda não subiu não tem
+  // número, logo não tem como constar de um documento assinado. Não é
+  // limitação de cache — cachear a lista não resolveria isto.
+  const criadosNaFila = pendentesDaFila.filter(
+    (i) => (i.tipo === 'entrega' || i.tipo === 'transferencia') && i.status !== 'terminal'
+  ).length
   const escolhidos: ValeCanonico[] = disponiveis.filter((v) => selecionadas.has(v.entregaId))
   const totalEntrega = escolhidos.reduce((soma, v) => soma + v.valorEntregaCents, 0)
   const totalVales = escolhidos.reduce((soma, v) => soma + v.quantidadeVales, 0)
@@ -512,7 +525,23 @@ function NovaCorridaFluxo({
           <Secao numero={1} titulo="Vales">
             {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
             {!isLoading && disponiveis.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nenhum vale pendente pra sair agora.</p>
+              // "Nenhum vale pendente" é uma AFIRMAÇÃO sobre o estoque de
+              // vales, e sem lista carregada ela é mentira. Sem rede e sem
+              // dado, o certo é dizer que não deu pra saber.
+              <p className="text-sm text-muted-foreground">
+                {vales === undefined || isError
+                  ? online
+                    ? 'Não consegui carregar os vales. Tenta de novo em instantes.'
+                    : 'Sem internet e sem a lista carregada — a lista de vales vem do servidor e não fica salva neste computador. Abra esta tela com internet antes de precisar dela offline.'
+                  : 'Nenhum vale pendente pra sair agora.'}
+              </p>
+            )}
+            {criadosNaFila > 0 && (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                {criadosNaFila} vale(s) lançado(s) sem internet ainda não aparecem aqui. O número do
+                vale é gerado pelo servidor e faz parte do documento assinado, então eles só podem
+                sair depois de sincronizar.
+              </p>
             )}
             {disponiveis.length > 0 && (
               <div className="flex max-h-64 flex-col gap-1 overflow-y-auto rounded-lg border p-2">

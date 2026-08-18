@@ -1975,6 +1975,114 @@ continua funcionando de verdade, então isto exercita a lógica de decisão
 do app mas não a falha de rede em si. Pro teste fiel, o DevTools continua
 sendo o certo. Pra destravar quando ele não coopera, isto serve.
 
+## 50. Cinco defeitos que só o uso offline de verdade achou
+
+O usuário rodou o fluxo offline como ele aconteceria na farmácia — lançar
+vale sem rede, mandar sair, religar — em vez do roteiro mínimo. Apareceram
+cinco coisas, e elas se dividem em uma limitação de arquitetura e quatro
+bugs.
+
+### 1. Vale criado offline não pode sair offline — e isso é arquitetura
+
+Foi o primeiro sintoma relatado ("o vale criado offline não passa para a
+tabela de vales selecionáveis"). A hipótese natural, que o próprio usuário
+levantou, era cache: "acho que para carregar os vales precisa de internet,
+eles não ficam salvos".
+
+Cache é parte, mas não é a causa. **`numero_vale` é gerado pelo BANCO** —
+sequência `V-000001…`, regra antiga do projeto pra o caixa nunca inventar
+número — e o número **entra no canônico**, conferido nos dois lados
+(`textoCanonico(vale.numeroVale)` no TS, `texto_para_canonico(numero_vale)`
+no SQL). Vale que ainda não subiu não tem número, logo não tem como
+constar do documento que as duas partes assinam.
+
+Ou seja: **guardar a lista localmente não resolveria**, porque o que falta
+não é o dado, é o número. Qualquer "solução" que gerasse número no cliente
+quebraria a sequência do banco ou o documento assinado.
+
+As alternativas foram avaliadas e nenhuma compensa: número no cliente
+quebra a regra e arrisca colisão; trocar o número pelo UUID no canônico
+mexeria nas duas implementações gêmeas — a área mais frágil do projeto —
+pra tirar do romaneio impresso justamente o identificador que um humano
+lê. Fica como está, **mas a tela passou a dizer**, com a contagem de
+quantos vales estão nessa situação, em vez de deixar o caixa concluir que
+o lançamento sumiu.
+
+### 2. "Nenhum vale pendente pra sair agora" mentia
+
+Com a página recarregada offline não há lista nenhuma, e a tela exibia
+aquela frase — que é uma **afirmação sobre o estoque de vales**, não sobre
+a rede. É o mesmo defeito do §39 e do §49: a tela afirmando o que não
+sabe. Agora distingue os três casos (sem rede e sem lista / falhou com
+rede / lista vazia de verdade).
+
+### 3. A lista não filtrava por filial — e isso custou um conflito
+
+`R-000009` falhou com `V-000032 — é de outra filial`. Não era bug de
+sincronização: `buscarValesParaSaida` não tinha filtro de loja nenhum,
+confiando só na RLS. Pro caixa e pro gerente a RLS prende à própria
+filial, mas o **admin enxerga o tenant inteiro** — então a tela oferecia
+vale de outra filial numa saída que `selar_romaneio_interno` recusa
+sempre (`e.loja_id <> p_loja_id` → `outra_filial`).
+
+Filtro por `loja_id` no cliente. Não é "confiar em filtro de cliente" nem
+redundância com a RLS: o servidor continua sendo quem recusa. O ponto é
+não OFERECER o impossível, porque descobrir custa duas assinaturas
+colhidas, o motoboy já a caminho e um romaneio de conflito.
+
+Repare que este bug **só aparece testando como admin**. É o espelho do
+§23, onde só testando como gerente de verdade a restrição ficou provada:
+o papel de quem testa muda o que dá pra ver.
+
+### 4. A fila podia travar pra sempre, em silêncio
+
+O mais grave. O usuário relatou uma saída offline que, depois de religar,
+"ainda está para sincronizar, não saiu da fila" e com o botão "tentar
+novamente" inerte.
+
+`processarFilaOperacoes` abre com `if (processando) return`. Isso era uma
+trava **de mão única**: `processando` só volta a `false` no `finally`, e
+se algum `await` nunca resolver, o `finally` nunca roda. **Não há timeout
+em ponto nenhum da cadeia** — `functions.invoke` não tem, `fetch` sem
+`signal` espera indefinidamente. Um request pendurado congela a fila
+inteira até um F5.
+
+E o sintoma não parece erro: o item fica `pendente` ("Na fila"), com
+`tentativas` em 0 e nenhuma mensagem, e não é tentado nem ao reconectar.
+
+Correção: `processando` ganhou relógio (`LIMITE_RODADA_MS`, 90s). Passado
+o limite, a rodada seguinte segue mesmo assim. Duas rodadas se
+sobreporem é seguro — toda operação da fila é idempotente por construção,
+que é exatamente a propriedade construída na sessão da fila offline. Fila
+parada pra sempre não é segura.
+
+### 5. O botão "Tentar agora" não alcançava o item preso
+
+Consequência do anterior e defeito por si só:
+
+    disabled={comErro.length === 0}
+
+O item preso está em `pendente`, não em `erro` — porque nunca chegou a ser
+executado. Então o botão ficava desabilitado justamente pro caso que mais
+precisa dele. **Item sem erro escrito nele é o mais aflitivo de todos**:
+não há o que ler, e a única ação disponível está cinza.
+
+Agora habilita pra qualquer item retentável (`pendente` ou `erro`), e
+`tentarAgora` zera `processando` antes de rodar — senão o clique cairia no
+guard e não faria nada, que é a sensação exata de botão quebrado que foi
+relatada.
+
+**Verificado no navegador** semeando um item idêntico ao do relato
+(`pendente`, 0 tentativas, `proximaTentativaEm` no futuro): regra antiga
+do botão → DESABILITADO; regra nova → HABILITADO; e depois de
+`tentarAgora`, `proximaTentativaEm` foi de `2026-08-18T16:10` pra
+`1970-01-01`, ou seja, destravou.
+
+Na primeira rodada desse teste o `destravou` deu `false` — **e era o
+módulo velho em memória**, o fenômeno do §41. Recarreguei e passou. É a
+quinta vez neste projeto que um teste "falha" por causa do instrumento;
+conferir o instrumento antes de concluir continua pagando.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)

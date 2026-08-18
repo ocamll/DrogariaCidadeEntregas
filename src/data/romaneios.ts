@@ -400,7 +400,7 @@ type LinhaVale = {
   }> | null
 }
 
-async function buscarValesParaSaida(): Promise<ValeCanonico[]> {
+async function buscarValesParaSaida(lojaId: string): Promise<ValeCanonico[]> {
   const { data, error } = await supabase
     .from('entregas')
     .select(
@@ -409,6 +409,22 @@ async function buscarValesParaSaida(): Promise<ValeCanonico[]> {
         'loja_origem_id, convenio_id, pagamentos(id, momento, forma, valor_cents, troco_cents)'
     )
     .eq('status_entrega', 'pendente')
+    // Filtro de filial NO CLIENTE, e não é redundância com a RLS.
+    //
+    // Pro caixa e pro gerente a RLS já prende à própria loja, então isto
+    // não muda nada. Pro ADMIN ela devolve o tenant inteiro de propósito
+    // — e aí a tela oferecia vale de outra filial numa saída que o
+    // servidor recusa sempre, porque `selar_romaneio_interno` exige
+    // `e.loja_id = p_loja_id` e devolve 'outra_filial'.
+    //
+    // O preço de descobrir isso é alto: duas assinaturas colhidas, o
+    // motoboy já foi embora e um romaneio de conflito pra gestão resolver.
+    // Aconteceu de verdade no teste da saída offline (V-000032, um vale de
+    // transferência de outra filial, no R-000009).
+    //
+    // Não é "confiar em filtro de cliente" — o servidor continua sendo
+    // quem recusa. É não OFERECER o que nunca poderia dar certo.
+    .eq('loja_id', lojaId)
     .is('corrida_id', null)
     // Mais novo primeiro: o vale que o caixa acabou de lançar é o que ele
     // vai mandar sair agora, então ele tem que estar no topo — não no fim
@@ -451,10 +467,14 @@ async function buscarValesParaSaida(): Promise<ValeCanonico[]> {
   }))
 }
 
-export function useValesParaSaida() {
+// A chave carrega a loja, mas a invalidação continua sendo por
+// `['vales-para-saida']` em toda a fila — o TanStack Query casa por
+// PREFIXO, então a chave composta é alcançada do mesmo jeito. Mesmo
+// mecanismo de `['entregas-hoje', pagina]`.
+export function useValesParaSaida(lojaId: string) {
   return useQuery({
-    queryKey: ['vales-para-saida'],
-    queryFn: buscarValesParaSaida,
+    queryKey: ['vales-para-saida', lojaId],
+    queryFn: () => buscarValesParaSaida(lojaId),
     // `staleTime: 0` de propósito, contra o padrão do resto do app.
     //
     // Esta lista decide o que sai fisicamente da farmácia. Mostrar um vale
