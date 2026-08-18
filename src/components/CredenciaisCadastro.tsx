@@ -10,6 +10,7 @@ import {
   type Credencial,
   type CredencialEmitida,
 } from '@/data/credenciais'
+import { montarCartaoPdf } from '@/lib/cartaoPdf'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
@@ -26,19 +27,23 @@ import {
 const LARGURA_MM = 75
 const ALTURA_BARRA_MM = 16
 
-// Piso comum de leitor laser 1D. Com o token v2 (numérico, 266 módulos)
-// a conta dá ~0,26mm por módulo — bem acima disto. Era o v1
-// alfanumérico que não cabia: 431 módulos, 0,174mm.
+// Piso comum de leitor laser 1D. Com o token v3 (22 dígitos, 156 módulos
+// mais 20 de zona de silêncio) dá 0,426mm por módulo — 2,2x o piso. O v2
+// dava 0,262mm (1,4x) e o v1 alfanumérico nem cabia: 431 módulos,
+// 0,174mm. Ver o cabeçalho da migration 20260817130000.
 const MODULO_MINIMO_MM = 0.19
 
 // Faixa abaixo das barras pro token em texto, em unidades do viewBox
-// (uma unidade = um módulo ≈ 0,26mm). Os três números foram MEDIDOS no
-// navegador, não estimados: a primeira tentativa usou fonte 10 e o texto
-// saiu com 81,8mm — mais largo que o próprio cartão de 75mm, escapando
-// pra fora do SVG.
+// (uma unidade = um módulo, hoje ≈ 0,43mm). Os números foram MEDIDOS, não
+// estimados: a primeira tentativa usou fonte 10 e o texto saiu com 81,8mm
+// — mais largo que o próprio cartão de 75mm, escapando pra fora do SVG.
 //
-// Com fonte 8: texto de 60,4mm (folga de ~7mm de cada lado) e cartão de
-// 20,2mm de altura total, longe dos 54mm do CR80.
+// Como tudo aqui é medido em MÓDULOS, a faixa acompanha sozinha quando o
+// token muda de tamanho: com o v3 a fonte cresceu junto com o módulo e o
+// texto ficou com 51,1mm (11,9mm de folga de cada lado), num cartão de
+// 22,6mm de altura total — longe dos 54mm do CR80. Conferido por
+// `npx tsx scripts/cartao-pdf.spec.mts`, que recalcula os dois a cada
+// execução em vez de confiar neste comentário.
 const ESPACO_TEXTO_UNIDADES = 16
 const FONTE_TOKEN_UNIDADES = 8
 const BASE_TEXTO_UNIDADES = 12
@@ -308,6 +313,9 @@ function CartaoEmitidoDialog({
   const [erroBarras, setErroBarras] = useState<string | null>(null)
   const [moduloMm, setModuloMm] = useState<number | null>(null)
   const [alturaMm, setAlturaMm] = useState<number | null>(null)
+  // Dimensões em MÓDULOS, guardadas porque o PDF desenha a partir delas.
+  const [unidades, setUnidades] = useState<{ largura: number; altura: number } | null>(null)
+  const [erroPdf, setErroPdf] = useState<string | null>(null)
 
   useEffect(() => {
     let cancelado = false
@@ -346,8 +354,15 @@ function CartaoEmitidoDialog({
 
         const unidadesLargura = Number(vb[1])
         const unidadesAltura = Number(vb[2])
-        const alturaNatural =
-          (ALTURA_BARRA_MM * unidadesLargura * (ALTURA_BARRA_MM / LARGURA_MM)) / unidadesAltura
+
+        // Quantos módulos INTEIROS cabem nos 16mm de barra. O bwip-js só
+        // produz altura em número inteiro de módulos, então o alvo precisa
+        // ser explícito e arredondado PRA BAIXO — deixar que ele arredonde
+        // sozinho faz a barra estourar a área especificada. Com o token v2
+        // isso passava despercebido (módulo pequeno, erro pequeno); com o
+        // v3 o módulo é 1,6x maior e a barra saía com 16,19mm.
+        const alvoUnidades = Math.floor((ALTURA_BARRA_MM * unidadesLargura) / LARGURA_MM)
+        const alturaNatural = (ALTURA_BARRA_MM * alvoUnidades) / unidadesAltura
 
         const segunda = bwipjs.default.toSVG({ ...base, height: alturaNatural })
         const vb2 = segunda.match(/viewBox="0 0 ([\d.]+) ([\d.]+)"/)
@@ -361,6 +376,7 @@ function CartaoEmitidoDialog({
         // porque ocupam largura dentro dos 75mm.
         setModuloMm(LARGURA_MM / unidadesLargura)
         setAlturaMm(composto.alturaMm)
+        setUnidades({ largura: Number(vb2[1]), altura: Number(vb2[2]) })
         setSvg(composto.svg)
       } catch (e) {
         if (!cancelado) setErroBarras(e instanceof Error ? e.message : String(e))
@@ -384,6 +400,34 @@ function CartaoEmitidoDialog({
     link.download = `cartao-${emitida.publicId}.svg`
     link.click()
     URL.revokeObjectURL(url)
+  }
+
+  // O PDF sai do MESMO svg que está na tela — ver a nota no topo de
+  // cartaoPdf.ts. É o formato pra mandar pra gráfica: a fonte do token
+  // não depende da máquina de quem abre e o preto é 100% K.
+  async function baixarPdf() {
+    if (!svg || !unidades) return
+    setErroPdf(null)
+    try {
+      const bytes = await montarCartaoPdf(svg, tokenLegivel(emitida.token), {
+        larguraMm: LARGURA_MM,
+        unidadesLargura: unidades.largura,
+        unidadesAltura: unidades.altura,
+        espacoTextoUnidades: ESPACO_TEXTO_UNIDADES,
+        baseTextoUnidades: BASE_TEXTO_UNIDADES,
+        fonteTokenUnidades: FONTE_TOKEN_UNIDADES,
+      })
+      const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
+      const link = document.createElement('a')
+      link.href = url
+      link.download = `cartao-${emitida.publicId}.pdf`
+      link.click()
+      URL.revokeObjectURL(url)
+    } catch (e) {
+      // Sem isto a falha seria um clique que não faz nada — e esta tela é
+      // a única vez que o token existe fora do papel.
+      setErroPdf(e instanceof Error ? e.message : String(e))
+    }
   }
 
   const legivel = moduloMm !== null && moduloMm >= MODULO_MINIMO_MM
@@ -452,10 +496,21 @@ function CartaoEmitidoDialog({
                 cópia funcional. O desenho todo parte de o token existir só
                 no papel, e um .svg no disco (ainda mais dentro do OneDrive)
                 estende isso indefinidamente. */}
-            <p className="text-xs text-amber-700 dark:text-amber-400">
-              O arquivo contém o código do cartão — quem tiver ele imprime uma cópia que funciona.
-              Apaga depois de imprimir.
+            {/* Os dois arquivos têm o mesmo código; o que muda é o
+                trajeto até a gráfica. Ver a nota no topo de cartaoPdf.ts. */}
+            <p className="text-xs text-foreground/70">
+              Pra mandar pra gráfica, use o <strong>PDF</strong>: o número embaixo das barras não
+              depende de a máquina deles ter a fonte, e o preto já vai como 100% K, sem as outras
+              três cores. Peça pra imprimir <strong>a 100%, sem redimensionar</strong>, em cartão
+              branco. O .svg continua sendo o mesmo código, pra quem preferir editar em vetor.
             </p>
+            <p className="text-xs text-amber-700 dark:text-amber-400">
+              Os dois arquivos contêm o código do cartão — quem tiver eles imprime uma cópia que
+              funciona. Apaga depois de imprimir.
+            </p>
+            {erroPdf && (
+              <p className="text-xs text-destructive">Não consegui gerar o PDF: {erroPdf}</p>
+            )}
           </div>
         </div>
 
@@ -466,8 +521,11 @@ function CartaoEmitidoDialog({
           <Button variant="outline" onClick={() => window.print()} disabled={!svg}>
             Imprimir
           </Button>
-          <Button onClick={baixarSvg} disabled={!svg}>
+          <Button variant="outline" onClick={baixarSvg} disabled={!svg}>
             Baixar .svg
+          </Button>
+          <Button onClick={baixarPdf} disabled={!svg || !unidades}>
+            Baixar PDF
           </Button>
         </DialogFooter>
       </DialogContent>

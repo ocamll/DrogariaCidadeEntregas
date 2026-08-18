@@ -13,7 +13,7 @@ Google Drive do item 29 também sendo de 16/08.
 MVP fechou no item 6, e por cima dela entraram cancelamento, fechamento de
 caixa, gestão de usuários, tarifa/vales, permissões por filial, cidade,
 exportação em .xlsx e PDF, e envio ao Google Drive. Em 16 e 17/08 entrou a
-frente maior de todas — a cadeia de custódia da saída (itens 33 a 45),
+frente maior de todas — a cadeia de custódia da saída (itens 33 a 47),
 que já selou uma saída real de ponta a ponta.
 
 **Se você está retomando, comece por "Estado em 2026-08-17", no fim deste
@@ -1515,12 +1515,16 @@ renderizadas e a página do romaneio abrindo.
 Isso fecha a prova que faltava desde a etapa 3: a cadeia inteira funciona
 com dado real, online.
 
-**Ainda não testado:** o caminho offline ponta a ponta (registrar sem
-rede, religar, ver a fila drenar pela `sync-romaneio`), e o
-`conferir-canonico-no-console.js` — que continua sendo o único teste que
-prova que `montarCanonico` (TypeScript) e `romaneio_canonico` (SQL)
-produzem os mesmos bytes. Enquanto ele não rodar, o caminho offline está
-apoiado numa suposição não verificada.
+**Ainda não testado (quando este item foi escrito):** o caminho offline
+ponta a ponta (registrar sem rede, religar, ver a fila drenar pela
+`sync-romaneio`), e o `conferir-canonico-no-console.js`.
+
+*Atualização de 2026-08-17:* o canônico **foi conferido e bateu** —
+`iguais: true`, 873 bytes sobre 3 vales reais. O caminho offline deixou
+de estar apoiado numa suposição não verificada; falta só exercitá-lo de
+ponta a ponta, que agora é o item de maior risco em aberto. Ver "Estado
+em 2026-08-17" no fim do arquivo, inclusive pra ressalva de cobertura
+(os 3 vales sorteados não tinham acento nem transferência).
 
 **Dados de teste que ficaram:** `R-000001` (selado, válido) e `R-000002`
 (conflito, dos mesmos vales — nasceu do bug da FK). Entram na limpeza que
@@ -1622,6 +1626,187 @@ Junto com o item 41 (módulo velho em memória depois de HMR), fica o
 padrão: **nesta máquina, comportamento estranho em desenvolvimento merece
 um reload — e às vezes um restart do servidor — antes de virar
 investigação.**
+
+## 46. O cartão em PDF, e por que não bastava o .svg
+
+O usuário perguntou duas coisas: se o código de barras está o mais nítido
+possível, e como mandá-lo pra gráfica sem perder qualidade.
+
+**A primeira pergunta tem uma resposta que dispensa trabalho:** o arquivo
+é vetor, não tem resolução, não existe versão "mais nítida" dele. Mandar
+PNG de 1200 dpi seria pior, nunca melhor. O que decide se o leitor lê é
+um número físico — 0,262mm por módulo contra um piso de 0,19mm, ~38% de
+folga — e esse número já está no máximo que a largura do CR80 permite.
+
+**A segunda revelou dois furos que não são do desenho, e sim do trajeto
+até a gráfica.** Nenhum dos dois aparece na tela; os dois só aparecem
+depois de impresso:
+
+- **A fonte.** O token no `.svg` é texto vivo em Courier New. Máquina sem
+  a fonte substitui, a largura muda, e 60,4mm dentro de 75mm viram algo
+  que escapa do cartão. A gráfica imprimiria assim sem desconfiar — é
+  exatamente o mesmo erro que a primeira versão do `.svg` cometeu com
+  fonte 10 (81,8mm), só que dessa vez acontecendo na máquina deles,
+  depois de sair daqui, onde nenhuma medição minha alcança.
+- **O preto.** RGB(0,0,0) convertido por RIP vira preto composto das
+  quatro cores. Erro de registro é da ordem de décimos de milímetro — a
+  MESMA escala do módulo — então borra a borda das barras.
+
+Os dois se resolvem no formato: PDF com Courier base-14 (métrica é do
+formato, não da máquina) e preto gravado como CMYK 0/0/0/100. Vira botão
+"Baixar PDF" ao lado do "Baixar .svg", `src/lib/cartaoPdf.ts`.
+
+**A decisão que mais importa ali não é sobre PDF.** As barras são LIDAS
+do mesmo SVG que está na tela, não recodificadas: `barrasDoSvg` interpreta
+os `<path>` do bwip-js (linha vertical no centro de cada barra, com
+`stroke-width` = largura em módulos, logo `cx ± w/2`). Chamar o bwip-js de
+novo pro PDF criaria duas codificações do mesmo token capazes de divergir
+sem ninguém notar. É o problema das duas implementações do canônico — com
+a diferença de que aqui dá pra **evitá-lo**, e não só administrá-lo.
+
+**Como testei** (`npx tsx scripts/cartao-pdf.spec.mts`, 25 casos): página
+com 212,60pt × 57,24pt, que é 75,00 × 20,19mm exatos; `0. 0. 0. 1. k` no
+content stream descomprimido; 74 retângulos pra 73 barras mais o fundo;
+`/BaseFont /Courier` sem arquivo de fonte embutido; nenhum `rg`; zonas de
+silêncio começando em 10 e terminando em 276.
+
+E o caso que vale mais que os outros 24: as 73 barras lidas do SVG,
+comparadas **uma a uma** com o `raw()` do bwip-js. Todo o resto confere o
+SVG contra ele mesmo — se a minha leitura do `<path>` estivesse errada de
+um jeito consistente (meio módulo pra esquerda, por exemplo), passaria em
+tudo e o cartão sairia deslocado. `raw()` é outra saída do codificador,
+então é uma segunda opinião de verdade.
+
+**Duas correções que a medição impôs, de novo:**
+
+- `orientation: 'landscape'` não é decoração. Com `'portrait'` o jsPDF
+  ordena o `format` pelo menor lado e a página sairia 20 × 75, em pé.
+- O primeiro teste ACUSOU FALHA no preto CMYK e o PDF estava certo: o
+  jsPDF escreve `0.` e `1.`, com o ponto e sem casa decimal, e meu regex
+  exigia dígito depois do ponto. É a quarta vez neste projeto que um
+  teste "falha" por defeito do próprio teste. Conferir o instrumento
+  antes de concluir continua sendo a regra mais lucrativa daqui.
+
+**O que NÃO mudou, de propósito:** o formato do token, a largura do
+módulo, a geometria e o `.svg`, que continua sendo o desenho de origem e
+segue disponível pra quem preferir editar em vetor. O PDF é sobre o
+trajeto, não sobre o desenho.
+
+Build conferido: `jspdf` continua em chunk próprio (399 kB, só desce ao
+clicar) e `cartaoPdf.ts` não puxa nada pesado pro bundle inicial.
+
+## 47. Token v3 — encurtar pra poder testar em papel
+
+Logo depois do PDF ficar pronto, o usuário disse que estava achando o
+código muito longo e que precisava **testar num papel antes de mandar
+pra gráfica**: "precisa ser mais leve, mas mantendo segurança".
+
+**A primeira metade da resposta contraria a intuição, e é a lição do item
+43 de novo:** número de caracteres não é o que deixa o código largo. O v1
+alfanumérico tinha 36 caracteres e não cabia; o v2 numérico tem 42 e cabe
+com folga. Então "está muito longo" não se resolve olhando o token.
+
+**A segunda metade é que encurtar ajuda mesmo — só que por outro motivo.**
+O número que decide o teste em papel não é o milímetro por módulo, é
+**quantos pontos da impressora cabem num módulo**:
+
+    dígitos  módulos  mm/módulo  pontos/módulo @300dpi  folga sobre o piso
+    42 (v2)      286     0,2622                    3,1                +38%
+    30           220     0,3409                    4,0                +79%
+    26           198     0,3788                    4,5                +99%
+    22 (v3)      176     0,4261                    5,0               +124%
+
+A 3,1 pontos por módulo o arredondamento da impressora já vale ±16% na
+largura da barra — e papel comum espalha mais tinta que PVC. A 5,0 isso
+deixa de importar. Ou seja: o pedido tinha razão, mas por uma razão
+diferente da que o motivou.
+
+**O lado da segurança, quantificado antes de escolher.** A 50 tentativas
+por segundo contra o servidor, com 30 cartões ativos:
+
+    segredo   bits   um cartão específico   qualquer cartão
+    31 (v2)    103              absurdo            absurdo
+    19          63       3 bi de anos       106 mi de anos
+    15 (v3)     50        317 mil anos        11 mil anos
+
+Levei as três opções ao usuário com esses números; ele escolheu **22
+dígitos** (`3` + public_id de 6 + segredo de 15). Eu recomendava 26, por
+retorno decrescente — mas a escolha dele é defensável e o argumento é o
+mesmo que já está escrito no projeto desde o v1: **quem protege a
+credencial é o PIN, o bloqueio progressivo e a revogação**, não a
+entropia do cartão. Acertar o token não abre nada sozinho.
+
+**`public_id` caiu de 10 pra 6 dígitos** sem custo: ele não é segredo
+(fica em claro na tabela, é a chave de busca) e quem autentica é o
+`token_hash` conferido logo depois. Não colide com os de 10 dígitos já
+emitidos — comprimentos diferentes.
+
+### Três coisas que a medição pegou e que eu não teria pensado
+
+**1. A altura da barra estourou a especificação.** O teste acusou 16,19mm
+onde a spec diz 16mm. Causa: o bwip-js só produz altura em número inteiro
+de módulos, e as duas passadas deixavam ELE arredondar. Com o v2 o módulo
+era pequeno e o erro sumia no ruído; com o v3 ele é 1,6x maior e o erro
+apareceu. O alvo virou explícito e arredondado **pra baixo**
+(`Math.floor`), e as barras passaram a sair com 15,77mm — dentro, nunca
+fora. Bug latente desde a etapa 2, revelado só porque o módulo cresceu.
+
+**2. A tabela de formatos do CLAUDE.md estava sobre base errada.** Ela
+dividia 75mm pelos módulos do código **sem as duas zonas de silêncio**,
+que ocupam 20 módulos dentro dos mesmos 75mm. Por isso o cabeçalho da
+migration do v2 diz 0,282mm enquanto a tela sempre mostrou 0,262mm — a
+tela divide por `unidadesLargura`, que já inclui o padding. Nada foi
+decidido com o número errado (o v2 cabia pelas duas contas), mas a tabela
+foi corrigida.
+
+**3. Os números alfanuméricos daquela tabela não se reproduzem.** Fui
+remedir as linhas do v1 e das propostas base32/base64 e deram diferente
+do registrado. O motivo é real e interessante: **num token alfanumérico o
+bwip-js troca pra Set C sozinho nos trechos de dígitos**, então a largura
+depende da mistura de caracteres que o sorteio produzir — dois cartões do
+mesmo formato podem sair com larguras diferentes. Aquelas linhas viraram
+aproximações declaradas como tais, e isso virou argumento a favor do
+formato numérico: **largura previsível vale mais que largura pequena em
+média**, quando o que está em jogo é caber num cartão físico.
+
+### O que mudou de arquivo
+
+- `supabase/migrations/20260817130000_token_v3.sql` — parser com os três
+  formatos e emissão em v3. **Ainda não aplicada** (ver pendências).
+- `src/lib/tokenCartao.ts` **novo**: o parser saiu de `data/credenciais.ts`
+  pra `lib/`, **sem importar nada**. Ele é gêmeo de uma função SQL, e o
+  projeto já aprendeu com o canônico que gêmeo que só roda dentro do app
+  é gêmeo que ninguém confere. `credenciais.ts` reexporta, então nenhum
+  call site mudou.
+- `scripts/cartao-pdf.spec.mts` — 34 casos agora, incluindo 9 do parser
+  (os três formatos válidos e seis entradas que têm que ser recusadas).
+- `scripts/cartao-de-teste.mts` **novo** — gera cartão com token fictício
+  pro teste de impressão. Existe porque testar impressora não deveria
+  custar uma credencial de verdade: emitir pelo app revoga o cartão
+  anterior e o token só aparece uma vez. O token de teste é v3 bem
+  formado (o leitor lê, o formato se prova) mas **não existe no banco**,
+  então bipá-lo devolve "credencial não reconhecida" — exatamente o que
+  se quer de uma cobaia.
+
+**Cartões v1 e v2 continuam válidos.** Nenhum é reemitido.
+
+### Fecho: o v3 foi impresso e lido no mesmo dia
+
+Migration aplicada e conferida no banco (7 casos do parser + `pg_proc`
+confirmando a `emitir_credencial` nova), e logo depois o teste que
+motivou tudo: **cartão v3 impresso em laser, papel comum, e o leitor da
+farmácia transcreveu os 22 dígitos exatos.**
+
+Vale registrar o que isso prova e o que não prova. Prova a cadeia física
+inteira — formato do token → largura do módulo → impressão → leitura —
+com hardware real, e no substrato mais difícil (papel espalha mais tinta
+que PVC, então a gráfica tende a sair melhor que isto).
+
+**Não prova que o v3 era necessário.** O v2 talvez passasse igual;
+ninguém testou. O que o v3 comprou foi margem — 2,24x o piso do leitor
+contra 1,38x —, e margem não se testa no dia bom, se cobra no dia ruim:
+impressora pior, cartão sujo, leitor velho. É honesto dizer que a
+decisão foi de folga, não de necessidade demonstrada.
 
 ## Commits desta sessão
 
@@ -1788,6 +1973,15 @@ Sessão de 2026-08-16 — cadeia de custódia (itens 33 a 38):
     nenhum selo funcionar (item 40)
 33. `20260817120000_token_numerico_v2.sql` — token v2 numérico, e o
     parser que reconhece os dois formatos (item 43)
+34. `20260817130000_token_v3.sql` — token v3 de 22 dígitos, parser com os
+    TRÊS formatos (item 47). Aplicada em 2026-08-17 e **conferida no
+    banco**: os 7 casos do parser passaram no SQL Editor (v1, v2 e v3
+    válidos reconhecidos; token curto, longo, de versão desconhecida e
+    com letra no meio recusados), e `pg_proc` confirmou que a nova
+    `emitir_credencial` é a que está instalada. São os mesmos casos que
+    `scripts/cartao-pdf.spec.mts` roda do lado do TypeScript — é assim
+    que se prova que os dois gêmeos concordam, e não pela leitura dos
+    dois arquivos.
 
 **Fora de migration, e obrigatórios:**
 
@@ -1799,8 +1993,8 @@ Sessão de 2026-08-16 — cadeia de custódia (itens 33 a 38):
 - `VITE_ROMANEIO_KEY_ID` e `VITE_ROMANEIO_PUBKEY` no `.env` local **e**
   nas variáveis do Cloudflare Pages, com rebuild depois.
 
-Todas confirmadas rodando pelo usuário antes dos testes. Nenhuma migration
-pendente no momento em que esta sessão terminou.
+Todas confirmadas rodando pelo usuário. Nenhuma migration pendente ao fim
+desta sessão.
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
@@ -1819,41 +2013,99 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 
 ### Estado em 2026-08-17 — leia isto primeiro
 
-A cadeia de custódia (itens 33 a 45) está construída e **funcionando
+A cadeia de custódia (itens 33 a 47) está construída e **funcionando
 online**: uma saída real foi selada de ponta a ponta — cartão bipado, PIN
 conferido pelo servidor, duas assinaturas, romaneio `R-000001` com as
 assinaturas visíveis pelo chevron do vale.
+
+**E o elo físico fechou em 17/08**: cartão v3 impresso em laser sobre
+papel comum, bipado no leitor da farmácia, token de 22 dígitos
+transcrito exato. Do formato do token à leitura no balcão, nada nessa
+corrente é mais suposição. Ver o fecho do item 47 pro que o teste **não**
+prova.
+
+**E o canônico também**, no mesmo dia:
+`conferir-canonico-no-console.js` rodou contra dado real e voltou
+`iguais: true`, `primeiraDiferenca: -1`, 873 bytes sobre 3 vales. Era o
+item de maior risco em aberto — `montarCanonico` (TypeScript) e
+`romaneio_canonico` (SQL) produzindo os MESMOS bytes deixou de ser
+suposição. Leia a ressalva de cobertura logo abaixo antes de considerar
+o assunto encerrado.
 
 O trabalho vive na branch **`cadeia-de-custodia`**, já no GitHub. A
 `main` continua em `313a3e2` — o merge é decisão do usuário e ainda não
 foi feito.
 
 **Tudo que precisava de passo manual no Supabase já foi aplicado:** as
-oito migrations, o segredo `credencial_hmac` no Vault, a Edge Function
+nove migrations, o segredo `credencial_hmac` no Vault, a Edge Function
 `sync-romaneio` (nome dela no dashboard, não `sincronizar-romaneio`) e o
 secret `ROMANEIO_KEYS`.
 
 #### O que falta, em ordem de risco
 
-- [ ] **Rodar `scripts/conferir-canonico-no-console.js`.** Abre, copia
-      tudo, cola no console do navegador com o usuário logado. É o único
-      teste que prova que `montarCanonico` (TypeScript) e
-      `romaneio_canonico` (SQL) produzem os mesmos bytes. **Enquanto não
-      rodar, o caminho offline inteiro está apoiado numa suposição** — e
-      se divergirem, o sintoma é "a saída offline nunca sincroniza",
-      com a mensagem apontando pra "documento alterado" em vez de pra
-      causa. Custa dois minutos e é o item de maior risco em aberto.
+- [x] ~~**Rodar `scripts/conferir-canonico-no-console.js`.**~~ **PASSOU**,
+      em 2026-08-17: `iguais: true`, `primeiraDiferenca: -1`, 873 bytes
+      sobre 3 vales (V-000013, V-000015, V-000016). `montarCanonico` e
+      `romaneio_canonico` produzem os mesmos bytes contra dado real — o
+      caminho offline deixou de estar apoiado numa suposição.
+
+- [ ] **Repetir o teste do canônico com vale acentuado e com uma
+      transferência.** Não é zelo: o script pega os 3 primeiros vales
+      pendentes sem corrida, e os que ele pegou eram todos `cliente`, com
+      nome em ASCII puro ("Teste Convenio E2E") e `loja_origem_id` nulo.
+      Ficaram **sem cobertura cruzada** justamente as duas formas mais
+      prováveis de divergir:
+
+      - **acento** — o canônico é texto por linha, e a escolha do formato
+        foi feita pra fugir de escape de Unicode; em produção "José" e
+        "Conceição" são certeza, e ASCII puro não exercita isso;
+      - **transferência** — `tipo = 'transferencia'` com `loja_origem_id`
+        preenchido, campo que nos 3 vales saiu `-` nas três linhas.
+
+      O risco é baixo (os dois lados leem a mesma coluna UTF-8, e o lado
+      TS recebe a string por JSON, que preserva), mas é exatamente o tipo
+      de "baixo risco" que este teste existe pra não ter que assumir.
+      Custa lançar um vale de cliente com acento no nome e uma
+      transferência, e rodar o script de novo — os dois viram vale
+      pendente sem corrida na hora. O que ESTÁ coberto: ordenação, bloco
+      separado de pagamentos, e `convenio_id` nos dois estados (V-000013
+      tinha, os outros dois não).
 - [ ] **Testar a saída OFFLINE ponta a ponta**: devtools em modo
       offline, registrar a saída, religar, ver a fila drenar pela
       `sync-romaneio`. É o que exercita o envelope RSA e o
       `ROMANEIO_KEYS`, que nunca rodaram de verdade — só as peças foram
-      testadas isoladas. Rodar DEPOIS do teste do canônico: se o canônico
-      divergir, este falha por um motivo que parece outro.
-- [ ] **Imprimir o cartão e bipar no leitor do balcão.** O usuário ia
-      fazer isso em 17/08. Duas ressalvas: testar com o leitor da
-      farmácia e não com app de celular (app é bem mais tolerante), e
-      antes de laminar, se for laminar. Se falhar, o primeiro ajuste é
-      imprimir maior — não mexer no formato do token.
+      testadas isoladas. **Passou a ser o item de maior risco em aberto**,
+      agora que o canônico foi conferido: era ele que travava este, e o
+      pré-requisito está cumprido (se o canônico divergisse, este falharia
+      por um motivo que parece outro).
+- [x] ~~**Aplicar a migration `20260817130000_token_v3.sql`.**~~ Aplicada
+      e conferida em 2026-08-17: os 7 casos do parser passaram direto no
+      banco e `pg_proc` confirmou a `emitir_credencial` nova instalada.
+      O app já emite v3 (22 dígitos), e cartão v1/v2 continua válido.
+- [x] ~~**Imprimir o cartão e bipar no leitor do balcão.**~~ **PASSOU**,
+      em 2026-08-17. Cartão v3 impresso em **laser, papel comum**, e o
+      **leitor da farmácia** transcreveu o token exato — não "leu", que
+      seria fraco: devolveu os 22 dígitos certos.
+
+      Isso fecha o último elo físico da cadeia de custódia. A partir
+      daqui o cartão deixa de ser hipótese: formato do token → largura do
+      módulo → impressão → leitura, tudo provado ponta a ponta com
+      hardware real.
+
+      **Papel comum era o caso mais DIFÍCIL, não o mais fácil** — ele
+      espalha mais tinta que PVC, então a borda da barra fica pior. O
+      cartão da gráfica em PVC tende a ler melhor que isto, não pior.
+
+      **O que este teste NÃO prova, e convém não confundir:** que o v3
+      era necessário. O v2 talvez passasse igual — ninguém testou. O que
+      o v3 comprou foi **margem** (2,24x o piso do leitor contra 1,38x),
+      e margem é o que absorve impressora pior, cartão sujo e leitor
+      velho lá na frente. A decisão continua defensável mesmo que o v2
+      também funcionasse.
+
+      **Continua valendo pra tiragem definitiva:** pedir prova à gráfica
+      e bipar a prova antes da tiragem inteira; e se for laminar, testar
+      antes e usar **fosco** — brilho reflete e derruba leitor laser.
 - [x] ~~Apagar a pasta `.chaves-offline/`~~ — feito em 2026-08-17. A
       chave privada não existe mais nesta máquina; ela vive só no secret
       `ROMANEIO_KEYS` da Edge Function. **Consequência prática:** não há
@@ -1888,17 +2140,34 @@ Ideia pequena anotada e não feita: **atalho de quinzena** no relatório
 (1ª/2ª quinzena ao lado de Hoje/Este mês), já que o pagamento das teles
 segue esse ciclo.
 
-**Dos 3 buracos que levantei quando o usuário perguntou que ideias
-existiam além das obrigatórias, 2 foram feitos** (cancelamento no item
-17, eixo financeiro nos itens 18-19). Sobrou um:
+**Os 3 buracos que levantei quando o usuário perguntou que ideias
+existiam além das obrigatórias estão resolvidos**: cancelamento no item
+17, eixo financeiro nos itens 18-19, e o terceiro abaixo.
 
-- [x] ~~**Correção de entrega já assinada.**~~ **Não construir.** Em
-      2026-08-11 o usuário decidiu que vale já assinado **não recebe
-      alteração nenhuma** — nem por evento novo. A regra 7 do CLAUDE.md
-      ainda descreve a saída por evento apontando pro original, então
-      **a documentação e a decisão divergem**: falta o usuário explicar o
-      porquê pra eu acertar a regra. Até lá, não propor nem implementar.
-      Mesmo formato do buraco do cancelamento antes do item 17.
+- [x] ~~**Correção de entrega já assinada.**~~ **Resolvido — vale a regra
+      7 do CLAUDE.md como está escrita hoje.** Este item ficou dois dias
+      desatualizado e chegou a afirmar que documentação e decisão
+      divergiam; não divergem mais.
+
+      Histórico: em 2026-08-11 a decisão foi "vale assinado não recebe
+      alteração nenhuma, nem por evento novo"; em 2026-08-16 (item 33) o
+      usuário a reviu; em 2026-08-17 ele deu a razão que faltava —
+      **vale assinado pelo motoboy não é alterado, ele é selado, como já
+      acontece hoje.**
+
+      É essa frase que dissolve a aparente contradição. "Não alterar" e
+      "selar" são a mesma coisa dita de dois jeitos: o que a decisão de
+      11/08 proibia era **o documento mudar**, não a operação ter onde
+      registrar o que mudou depois. Por isso a separação entre *dado
+      assinado* e *dado operacional atual* não é brecha na regra — o
+      romaneio selado permanece intocado (é o que a trigger de
+      imutabilidade garante) e o PDF jamais é regenerado; a correção
+      vive ao lado, como evento, apontando pro original.
+
+      As três categorias de correção (cadastral / divergência
+      operacional / custódia e financeiro) estão na regra 7. A segunda é
+      o que o sistema já faz; a primeira e a terceira continuam **não
+      construídas**, e continuam precisando de sessão própria.
 
 ## Gaps conhecidos, não resolvidos
 

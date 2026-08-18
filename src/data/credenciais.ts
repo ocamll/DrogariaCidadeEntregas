@@ -1,4 +1,5 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { publicIdDoToken } from '@/lib/tokenCartao'
 import { supabase } from '@/lib/supabase'
 import { db, type CredencialEmCache } from '@/lib/db'
 
@@ -318,26 +319,11 @@ export async function sincronizarCacheDeCredenciais(): Promise<number> {
   return linhas.length
 }
 
-// O token vem do leitor como se tivesse sido digitado. Só o public_id é
-// usado aqui — o segredo não serve pra nada localmente e não é guardado.
-//
-// Espelha `public.public_id_do_token` (migration 20260817120000) e conhece
-// os dois formatos. Cartão v1 já impresso continua valendo; v2 é o que
-// cabe num CR80, porque Code 128 empacota dois dígitos por símbolo e
-// texto alfanumérico não.
-export function publicIdDoToken(token: string): string | null {
-  const limpo = token.trim()
-
-  // v2: 1 (versão) + 10 (public_id) + 31 (segredo) = 42 dígitos, sem
-  // separador — ponto no meio quebraria o modo numérico do Code 128.
-  if (/^2[0-9]{41}$/.test(limpo)) return limpo.slice(1, 11)
-
-  // v1: DCM1.<10>.<20>, alfabeto Crockford
-  const partes = limpo.split('.')
-  if (partes.length === 3 && partes[0] === 'DCM1' && partes[1].length === 10) return partes[1]
-
-  return null
-}
+// O parser do token mora em lib/tokenCartao.ts, sem dependência nenhuma,
+// pra poder ser testado fora do app — ele é gêmeo de uma função SQL. Fica
+// reexportado aqui porque é daqui que o resto do app sempre o importou
+// (`identificarNoCache`, logo abaixo, e a NovaCorrida).
+export { publicIdDoToken }
 
 export async function identificarNoCache(token: string): Promise<CredencialEmCache | null> {
   const publicId = publicIdDoToken(token)

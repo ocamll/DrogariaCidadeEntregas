@@ -26,3 +26,10 @@ dist-ssr
 
 # chaves geradas por scripts/gerar-chaves-offline.mjs — nunca commitar
 .chaves-offline/
+
+# cartões gerados — o ARQUIVO É O CARTÃO: quem tiver ele imprime uma cópia
+# que funciona. Pega tanto o `cartao-de-teste.*` do script quanto o
+# `cartao-<public_id>.*` que a tela de emissão baixa, caso alguém salve um
+# aqui dentro. Ver "O arquivo do cartão" no CLAUDE.md.
+cartao-*.pdf
+cartao-*.svg

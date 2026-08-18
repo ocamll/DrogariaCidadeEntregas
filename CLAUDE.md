@@ -100,6 +100,15 @@ Não são preferências. Violar qualquer uma é bug.
    e o chevron abre o que foi assinado. O PDF do romaneio jamais é
    regenerado com o valor novo.
 
+   **Vale assinado pelo motoboy não é alterado — ele é selado.** Essa é a
+   frase que resolve a confusão de quem lê a regra pela primeira vez e
+   acha que "imutável" e "aceita correção depois" se contradizem. Não se
+   contradizem: o selo é sobre o documento, não sobre a realidade. O que
+   está proibido é o documento mudar; o que continua permitido é a
+   operação ter onde registrar o que mudou **depois** dele. Proibir as
+   duas coisas juntas não protege nada — só empurra a correção pra fora
+   do sistema, pro WhatsApp e pra memória de quem estava no balcão.
+
    O risco que essa separação evita: tratar "o último evento de correção"
    como se o original nunca tivesse existido faria um relatório afirmar
    que o motoboy recebeu um endereço que ele nunca recebeu — e aí a
@@ -939,45 +948,85 @@ próprio selo — toda saída falharia, com o erro apontando pro lugar errado.
 ### O cartão
 
 ```
-2 0102030405 1234567890123456789012345678901
-│ └ public_id └ segredo (31 dígitos ≈ 103 bits)
+3 012345 678901234567890
+│ └ public_id  └ segredo (15 dígitos ≈ 50 bits)
 └ versão
 ```
 
-**Só dígitos, sem separador, largura fixa.** O banco guarda `public_id`
-em claro e `token_hash = HMAC-SHA256(segredo_do_Vault, token)`. Zero dado
-pessoal no cartão.
+**Só dígitos, sem separador, largura fixa, total PAR.** O banco guarda
+`public_id` em claro e `token_hash = HMAC-SHA256(segredo_do_Vault,
+token)`. Zero dado pessoal no cartão. O total par não é estética: dígito
+ímpar sobra fora do Set C e custa 11 módulos sozinho, em vez de dividir o
+símbolo com o vizinho.
 
 **Por que numérico, e por que o mais longo é o mais estreito.** Code 128
 tem um modo (Set C) que empacota DOIS dígitos por símbolo de 11 módulos;
 texto gasta 11 módulos por caractere, seja base32 ou base64. Medido com o
 codificador de verdade, para 75mm de área útil num CR80 (85,6mm menos 5mm
-de margem de cada lado) e piso de 0,19mm por módulo:
+de margem de cada lado) e piso de 0,19mm por módulo. **Os módulos incluem
+as duas zonas de silêncio de 10X**, que ocupam largura dentro dos mesmos
+75mm — esquecê-las infla o resultado em ~7%:
 
-| formato | car. | módulos | a 75mm |
-|---|---|---|---|
-| v1 `DCM1.<10>.<20>` base32 | 36 | 431 | 0,174mm ❌ |
-| `DC2.<6>.<24>` base32 | 35 | 420 | 0,179mm ❌ |
-| `DC2.<6>.<22>` base64url | 34 | 409 | 0,183mm ❌ |
-| **v2 `2<10><31>` dígitos** | **42** | **266** | **0,262mm ✅** |
+| formato | car. | módulos | a 75mm | |
+|---|---|---|---|---|
+| v1 `DCM1.<10>.<20>` base32 | 36 | 418 | 0,179mm | 0,9x ❌ |
+| `DC2.<6>.<24>` base32 | 35 | 429 | 0,175mm | 0,9x ❌ |
+| `DC2.<6>.<22>` base64url | 33 | 407 | 0,184mm | 1,0x ❌ |
+| v2 `2<10><31>` dígitos | 42 | 286 | 0,262mm | 1,4x |
+| **v3 `3<6><15>` dígitos** | **22** | **176** | **0,426mm** | **2,2x** ✅ |
+
+As três primeiras linhas são **aproximadas por natureza**, e isso é parte
+do argumento: num token alfanumérico o bwip-js troca pra Set C sozinho
+nos trechos de dígitos, então a largura muda conforme a mistura de
+caracteres que o sorteio produzir. Dois cartões do mesmo formato podem
+sair com larguras diferentes. As duas últimas linhas são exatas, sempre —
+todo token só de dígitos com o mesmo comprimento dá o mesmo número de
+módulos. **Formato de largura previsível vale mais que formato estreito
+em média**, quando o que está em jogo é caber num cartão físico.
 
 Trocar de alfabeto reduz caracteres, não módulos o bastante — nenhuma
 variação alfanumérica cabe. E **o separador é proibido**: um ponto no
 meio quebra a corrida numérica, força troca de set, e o mesmo token volta
-a 398 módulos.
+a quase 400 módulos.
 
 De quebra some o problema que o alfabeto Crockford existia pra mitigar:
 com só dígitos não há `O`/`0` nem `I`/`1`/`L` pra confundir.
 
-**103 bits não é concessão.** Quem protege a credencial é o PIN, o
-bloqueio progressivo e a revogação. O elo fraco é o cartão perdido, e a
-resposta pra esse é revogar — não adivinhar 2^103 pela rede. A folga de
-0,262mm perdoa impressora ruim, cartão sujo e leitor velho, que são
-riscos de verdade.
+**Por que o v3 encurtou, se o v2 já cabia.** O v2 cabe e foi lido num
+teste real. O que faltava era margem pra impressão fora do ideal — e o
+primeiro uso de verdade é um teste em papel comum, antes da gráfica. O
+número que decide isso não é o milímetro, é **quantos pontos da
+impressora cabem num módulo**: a 300dpi o v2 dava 3,1 pontos, onde o
+arredondamento já vale ±16% na largura da barra; o v3 dá 5,0. E papel
+comum espalha mais tinta que PVC.
 
-**Cartão v1 já impresso continua valendo.** `public_id_do_token` (SQL) e
-`publicIdDoToken` (TS) reconhecem os dois formatos, e são os únicos
-pontos do sistema que sabem que existe mais de um.
+**50 bits não é concessão.** Quem protege a credencial é o PIN, o
+bloqueio progressivo e a revogação. A 50 tentativas por segundo contra o
+servidor, quebrar um cartão específico levaria ~317 mil anos, e achar
+qualquer cartão válido ~11 mil — e acertar o token não dá acesso a nada,
+porque ainda falta o PIN com bcrypt de custo 12. O elo fraco é o cartão
+perdido, e a resposta pra esse é revogar, não torcer contra 2^50. Já a
+folga de 0,426mm perdoa impressora ruim, cartão sujo e leitor velho, que
+são riscos que **acontecem**.
+
+**`public_id` de 6 dígitos não enfraquece nada**: ele não é segredo (fica
+em claro na tabela e é a chave de busca), e o que autentica é o
+`token_hash` conferido logo depois. São 1 milhão de identificadores pra
+uma farmácia com dezenas de motoboys, e não colidem com os de 10 dígitos
+já emitidos — comprimentos diferentes, strings diferentes.
+
+**Cartão v1 e v2 já impressos continuam valendo.** `public_id_do_token`
+(SQL, migration `20260817130000`) e `publicIdDoToken`
+(`src/lib/tokenCartao.ts`) reconhecem os três formatos, e são os únicos
+pontos do sistema que sabem que existe mais de um. **Mudam sempre
+juntos** — divergirem não dá erro claro, dá "o cartão novo não é
+reconhecido offline", onde só o cliente responde.
+
+**A altura da barra sai em módulos inteiros, e o alvo tem que ser
+explícito e arredondado pra baixo.** O bwip-js não produz fração de
+módulo; deixá-lo arredondar sozinho fez a barra do v3 sair com 16,19mm,
+estourando a área de 16mm da especificação. Com o v2 isso passava
+despercebido, porque o módulo era pequeno e o erro também.
 
 ### O arquivo do cartão
 
@@ -1000,8 +1049,53 @@ caminho é baixar e levar pro software de impressão de cartão.
   cartão perdido não deve dizer de quem é nem de onde veio.
 
 **O arquivo É o cartão**: quem tiver ele imprime uma cópia que funciona.
-O desenho todo parte de o token existir só no papel, e um `.svg` no disco
-estende isso indefinidamente. A tela avisa pra apagar depois de imprimir.
+O desenho todo parte de o token existir só no papel, e um arquivo no disco
+(`.svg` ou `.pdf`, tanto faz) estende isso indefinidamente. A tela avisa
+pra apagar os dois depois de imprimir.
+
+#### O PDF, que é o formato pra mandar pra gráfica
+
+O `.svg` continua sendo o desenho de origem, mas quem sai daqui pra uma
+gráfica é o **PDF** (`src/lib/cartaoPdf.ts`, botão "Baixar PDF"). Ele não
+é um formato alternativo por gosto: fecha dois furos que só aparecem
+depois de impresso, quando já é tarde.
+
+- **A fonte.** No `.svg` o token é `<text font-family="Courier New">`,
+  texto vivo. Máquina sem essa fonte substitui por outra, a largura muda,
+  e um texto que mede 60,4mm dentro de 75mm pode escapar do cartão — a
+  gráfica imprimiria assim sem ter como desconfiar. No PDF a fonte é a
+  **Courier base-14**, cujas métricas fazem parte do formato e não da
+  máquina de quem abre. Mesmo avanço de 600/1000 em, então o texto sai
+  com a mesma largura de propósito, não por coincidência.
+- **O preto.** `rgb(0,0,0)` convertido pra CMYK por um RIP vira preto
+  **composto** das quatro cores, e aí erro de registro — décimos de
+  milímetro, a mesma escala do módulo — borra a borda das barras. O PDF
+  grava **CMYK 0/0/0/100** no arquivo, que é o que se pediria à gráfica
+  por escrito. Conferido no content stream: `0. 0. 0. 1. k`.
+- **A página É o cartão**: 75 × 20,19mm exatos, `orientation: 'landscape'`
+  (com `'portrait'` o jsPDF ordena o `format` pelo menor lado e a página
+  sai em pé). Não há o que redimensionar, e "tamanho real" no diálogo de
+  impressão deixa de ser ambíguo.
+- **O fundo é CMYK zerado** — branco por ausência de tinta, não tinta
+  branca. Como knockout ele ainda protege a zona de silêncio se a gráfica
+  assentar o cartão sobre arte colorida.
+
+**As barras não são recodificadas.** `barrasDoSvg` lê os `<path>` do
+MESMO SVG que está na tela: o bwip-js emite uma linha vertical no centro
+de cada barra com `stroke-width` = a largura em módulos, então a barra vai
+de `cx - w/2` a `cx + w/2`. Chamar o bwip-js uma segunda vez criaria duas
+codificações capazes de divergir sem ninguém notar — é o problema das duas
+implementações do canônico, e aqui dá pra **evitá-lo** em vez de
+administrá-lo. Se o PDF e o `.svg` discordarem, é bug de leitura daquele
+arquivo, nunca dois códigos diferentes.
+
+`npx tsx scripts/cartao-pdf.spec.mts` cobre 25 casos, e o que vale mais
+que os outros 24: as barras lidas do SVG são comparadas uma a uma com o
+`raw()` do bwip-js — outra saída do codificador, não o mesmo SVG contra si
+mesmo. Sem isso, um erro consistente de leitura passaria em tudo.
+
+**Nenhum dos dois arquivos identifica o motoboy**, nem no desenho nem nos
+metadados do PDF.
 
 **O admin nunca escolhe o PIN, logo nunca sabe.** "Redefinir" só apaga o
 hash; quem cria o novo é o motoboy, com o cartão na mão. É isso que torna
