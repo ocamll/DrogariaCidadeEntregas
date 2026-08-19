@@ -14,7 +14,7 @@ MVP fechou no item 6, e por cima dela entraram cancelamento, fechamento de
 caixa, gestão de usuários, tarifa/vales, permissões por filial, cidade,
 exportação em .xlsx e PDF, e envio ao Google Drive. De 16 a 19/08 entrou a
 frente maior de todas — a cadeia de custódia da saída (itens 33 a 57), que
-já foi exercitada nos três caminhos possíveis: online (`R-000001`),
+já foi exercitada nos três caminhos possíveis: online (`R-000003`),
 conflito com as assinaturas preservadas (`R-000004`) e offline
 sincronizada (`R-000010`), mais o cartão físico lido no leitor da farmácia
 e a credencial CR80 conferida contra o desenho original. O item 57 fechou
@@ -1525,6 +1525,24 @@ renderizadas e a página do romaneio abrindo.
 
 Isso fecha a prova que faltava desde a etapa 3: a cadeia inteira funciona
 com dado real, online.
+
+**Correção de 2026-08-19, achada pelo verificador de hash:** o `R-000001`
+está gravado com **`modo = 'offline_sincronizada'`**, não `online`. A
+conclusão deste item sobrevive — a cadeia funciona, e o caminho online
+está provado por seis outros romaneios (`R-000003`, `05`, `07`, `08`,
+`11`, `12`). O que estava errado era a citação.
+
+A explicação mais provável, e ela é **hipótese, não fato apurado**: a
+selagem caiu no caminho offline (foi pra fila e sincronizou depois) e eu
+registrei "online" pelo que a tela mostrava. É exatamente o defeito do
+item 40 — *"a tela chamando recusa do servidor de offline"* —, que estava
+em vigor naquele dia e foi corrigido logo em seguida.
+
+Vale registrar o método: isto não apareceu em revisão de código, nem em
+teste, nem lendo o NOTAS. Apareceu porque alguém finalmente **consultou o
+banco** com uma pergunta específica. É o mesmo padrão do item 51 (a aba
+"Transferências" virando "s"): defeito que nenhuma camada de código
+mostra.
 
 **Ainda não testado (quando este item foi escrito):** o caminho offline
 ponta a ponta (registrar sem rede, religar, ver a fila drenar pela
@@ -3070,9 +3088,20 @@ romaneio de retorno provavelmente vai subir também:
 ### Estado em 2026-08-19
 
 A cadeia de custódia (itens 33 a 57) está construída e **funcionando
-online**: uma saída real foi selada de ponta a ponta — cartão bipado, PIN
-conferido pelo servidor, duas assinaturas, romaneio `R-000001` com as
-assinaturas visíveis pelo chevron do vale.
+online**: saídas reais foram seladas de ponta a ponta — cartão bipado,
+PIN conferido pelo servidor, duas assinaturas, tudo visível pelo chevron
+do vale. Seis romaneios estão gravados com `modo = 'online'` (`R-000003`,
+`05`, `07`, `08`, `11`, `12`).
+
+*(Até 19/08 esta seção citava o `R-000001` como a prova do online. O
+verificador de hash mostrou que ele está gravado como
+`offline_sincronizada` — ver a correção no item 42.)*
+
+**E os 9 romaneios selados verificam criptograficamente.** Baseline de
+2026-08-19: **9 verificados, 9 válidos, 0 divergências**, 4 camadas cada
+(documento, as duas assinaturas, envelope). É a primeira vez que esses
+hashes são recomputados — até aqui o projeto gerava evidência sem
+conseguir conferi-la.
 
 **E o elo físico fechou em 17/08**: cartão v3 impresso em laser sobre
 papel comum, bipado no leitor da farmácia, token de 22 dígitos
@@ -3083,7 +3112,7 @@ prova.
 **E a saída OFFLINE fechou em 18/08**: `R-000010` selado com
 `modo = 'offline_sincronizada'`, vale indo pra `em_rota`. A cadeia está
 exercitada nos quatro estados que ela pode assumir — online
-(`R-000001`), conflito (`R-000004`), offline bem-sucedida (`R-000010`) —
+(`R-000003`), conflito (`R-000004`), offline bem-sucedida (`R-000010`) —
 mais o cartão lido no leitor físico. Ver os itens 48 e 50.
 
 **E o canônico também**, no mesmo dia:
@@ -3153,7 +3182,7 @@ secret `ROMANEIO_KEYS`.
       não responderia.
 
       Com isso a cadeia de custódia está exercitada por inteiro: online
-      (`R-000001`), conflito (`R-000004`), offline bem-sucedida
+      (`R-000003`), conflito (`R-000004`), offline bem-sucedida
       (`R-000010`), cartão físico lido no leitor da farmácia, e o
       canônico conferido byte a byte contra o SQL.
 - [x] ~~**Aplicar a migration `20260817130000_token_v3.sql`.**~~ Aplicada

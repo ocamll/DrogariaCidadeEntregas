@@ -1486,9 +1486,34 @@ Quatro regras, e a última é a que mais importa:
 4. **Não escrever "todos têm que passar" antes de medir pela primeira
    vez.** O gate é: *rodar o baseline sobre todos os romaneios selados;
    qualquer divergência precisa ser explicada antes de prosseguir.*
-   Esperado 100%; se der, o baseline vira `N verificados / N válidos /
-   0 divergências`, e depois de `papel_no_momento` tem que continuar
-   exatamente assim.
+
+#### O BASELINE, medido em 2026-08-19
+
+```
+9 verificados · 9 válidos · 0 divergências
+4 camadas cada: documento, assinatura interna, assinatura motoboy, envelope
+```
+
+**Este é o número que a etapa 2A tem que devolver depois de
+`papel_no_momento` entrar no INSERT.** Diferente dele, para.
+
+Duas coisas que o baseline provou de passagem:
+
+- **A reconstrução do fuso estava certa.** Se UTC estivesse errado, as
+  camadas `assinatura:*` divergiriam todas e a `documento` passaria — ela
+  não tem timestamp na fórmula. Esse padrão não apareceu.
+- **A regra 2 se provou sozinha.** Três dos nove são
+  `offline_sincronizada` (`R-000001`, `06`, `10`), e eles só batem porque
+  o último componente sai de `romaneios.modo`. Um verificador com
+  `'online'` fixo teria falhado exatamente nesses três.
+
+E ele achou uma coisa que não é sobre hash: **o `R-000001` está gravado
+como `offline_sincronizada`**, enquanto o NOTAS o citava em quatro
+lugares como a prova do caminho online. A conclusão sobrevive (seis
+outros romaneios são `online`); a citação estava errada. Corrigido no
+item 42 do NOTAS, com a hipótese — a selagem provavelmente caiu no
+caminho offline e foi registrada como online pelo que a tela mostrava,
+que é o defeito do item 40, em vigor naquele dia.
 
 **O que o verificador NÃO verifica, declarado antes de rodar** — senão o
 primeiro baseline mostra "divergências" que não são, e alguém entra em
