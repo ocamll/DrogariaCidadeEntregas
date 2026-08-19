@@ -10,13 +10,10 @@ import { writeFileSync } from 'node:fs'
 import { montarRomaneioPdf } from '../src/lib/romaneioPdf.ts'
 import type { RomaneioCompleto } from '../src/data/romaneios.ts'
 
-import { readFile } from 'node:fs/promises'
 // A logo é buscada por fetch, porque no app isso roda no navegador. Aqui
-// o fetch lê de public/ — é o mesmo byte que o app serve.
-globalThis.fetch = (async (url: string) => {
-  const texto = await readFile('public' + String(url), 'utf8')
-  return { ok: true, status: 200, text: async () => texto }
-}) as unknown as typeof fetch
+// o dublê lê de public/ — é o mesmo byte que o app serve.
+import { instalarFetchDePublic } from './fetchDePublic.mts'
+instalarFetchDePublic()
 
 const traco = (pontos: [number, number][]) => [
   { points: pontos.map(([x, y]) => ({ x, y, time: 0, pressure: 0.5 })) },

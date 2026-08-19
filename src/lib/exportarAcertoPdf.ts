@@ -1,6 +1,6 @@
 import type { Relatorio, RelatorioAgencia, FiltroPeriodo } from '@/data/relatorios'
 import { formatBRL } from '@/lib/money'
-import { carregarImagemDaMarca, LOGO_URL, LOGO_PROPORCAO } from '@/lib/marca'
+import { carregarImagemDaMarca, LOGO_DOCUMENTO_URL, LOGO_PROPORCAO, COR_MARCA } from '@/lib/marca'
 
 // PDF do acerto com a agência — o documento que acompanha o pagamento da
 // quinzena. Diferente da planilha, ele é feito pra ser impresso, assinado
@@ -23,8 +23,7 @@ const STATUS_LABEL: Record<string, string> = {
   cancelada: 'Cancelada',
 }
 
-// vermelho da marca (`--primary`, #ed1d24) — o mesmo do app e da planilha
-const COR_MARCA: [number, number, number] = [237, 29, 36]
+// o vermelho da marca vem de `lib/marca.ts`, junto com as logos
 const COR_CABECALHO: [number, number, number] = [243, 244, 246]
 const COR_TOTAL: [number, number, number] = [254, 243, 199]
 const COR_ALERTA: [number, number, number] = [185, 28, 28]
@@ -53,15 +52,19 @@ function nomeDoArquivo(filtro: FiltroPeriodo): string {
   return `acerto-agencia-${filtro.dataInicio}-a-${filtro.dataFim}.pdf`
 }
 
-// A logo agora vem do módulo da marca, que já entrega o PNG embutido como
-// data URL — é a forma que o jsPDF aceita. Some junto o  que existia
-// só pra medir dimensão: a proporção é constante e conhecida.
+// A logo vem do módulo da marca, que já entrega o PNG como data URL — é a
+// forma que o jsPDF aceita. Some junto o `<img>` que existia só pra medir
+// dimensão: a proporção é constante e conhecida.
+//
+// É a versão de DOCUMENTO (502 × 80). Nos 82mm desta faixa a de tela
+// daria ~625 dpi, quatro vezes o que qualquer impressora aproveita, e
+// engordava o arquivo à toa.
 //
 // Documento sem logo ainda é um documento, então uma falha aqui não
 // derruba a exportação inteira.
 async function carregarLogo(): Promise<string | null> {
   try {
-    return await carregarImagemDaMarca(LOGO_URL)
+    return await carregarImagemDaMarca(LOGO_DOCUMENTO_URL)
   } catch {
     return null
   }

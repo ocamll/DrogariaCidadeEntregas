@@ -7,7 +7,7 @@
 // são base-14 (métrica do formato, não da máquina) e — o que mais
 // importa — os três textos CABEM medidos com a métrica real, em vez da
 // estimativa que o SVG usa.
-import { readFile } from 'node:fs/promises'
+import { instalarFetchDePublic } from './fetchDePublic.mts'
 import { inflateSync } from 'node:zlib'
 import { jsPDF } from 'jspdf'
 import { montarCredencialPdf, carregarAssetsCredencial } from '../src/lib/credencialPdf.ts'
@@ -25,10 +25,7 @@ function checa(nome: string, condicao: boolean, extra = '') {
   if (!condicao) falhas++
 }
 
-globalThis.fetch = (async (url: string) => {
-  const texto = await readFile('public' + String(url), 'utf8')
-  return { ok: true, status: 200, text: async () => texto }
-}) as unknown as typeof fetch
+instalarFetchDePublic()
 
 const TOKEN = '3012345678901234567890'
 const base: MotoboyCredentialData = {

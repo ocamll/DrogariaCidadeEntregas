@@ -15,13 +15,10 @@ import { montarRomaneioPdf, duracaoDaCorrida } from '../src/lib/romaneioPdf.ts'
 import type { RomaneioCompleto } from '../src/data/romaneios.ts'
 import { limparCacheDaMarca } from '../src/lib/marca.ts'
 
-import { readFile } from 'node:fs/promises'
 // A logo é buscada por fetch, porque no app isso roda no navegador. Aqui
-// o fetch lê de public/ — é o mesmo byte que o app serve.
-globalThis.fetch = (async (url: string) => {
-  const texto = await readFile('public' + String(url), 'utf8')
-  return { ok: true, status: 200, text: async () => texto }
-}) as unknown as typeof fetch
+// o dublê lê de public/ — é o mesmo byte que o app serve.
+import { instalarFetchDePublic } from './fetchDePublic.mts'
+instalarFetchDePublic()
 
 let falhas = 0
 function checa(nome: string, condicao: boolean, extra = '') {
@@ -213,6 +210,38 @@ checa(
 console.log('\n--- a logo da marca ---')
 checa('logo presente na via da farmácia', contarImagens(daFarmacia) > 0)
 checa('logo presente na via da agência', contarImagens(daAgencia) > 0)
+
+// A FAIXA É O QUE FAZ O LETREIRO EXISTIR. A arte da marca traz "Drogaria
+// Cidade" em BRANCO — medido: zero pixels escuros na região do letreiro.
+// Sem uma faixa colorida atrás, o romaneio saía com a cruz solta e sem o
+// nome da farmácia, e ninguém notava porque a cruz aparecia. Foi assim
+// que o documento ficou entre 16 e 19/08.
+//
+// O jsPDF normaliza a cor pra 0–1 e grava com DUAS casas decimais, não
+// três: #ed1d24 sai como `0.93 0.11 0.14 rg`. Conferido nos bytes, não
+// suposto — a primeira versão deste teste acusou falha num PDF correto
+// justamente por esperar três casas, que é a mesma armadilha já paga
+// duas vezes no spec da credencial.
+//
+// Cor sozinha não bastaria: o documento tem outros elementos vermelhos.
+// O que prova a faixa é ela atravessar a página inteira a partir de x=0,
+// então o teste lê o retângulo que vem logo depois da cor.
+function faixaDaMarca(pdf: string): { x: number; largura: number } | null {
+  const achado = pdf.match(/0\.93 0\.11 0\.14 rg\s+([\d.]+) [\d.]+ ([\d.]+) -?[\d.]+ re/)
+  return achado ? { x: Number(achado[1]), largura: Number(achado[2]) } : null
+}
+const LARGURA_A4_PT = 595.28
+for (const [via, pdf] of [
+  ['farmácia', daFarmacia],
+  ['agência', daAgencia],
+] as const) {
+  const faixa = faixaDaMarca(pdf)
+  checa(
+    `faixa da marca atrás da logo — via da ${via}`,
+    !!faixa && faixa.x === 0 && Math.abs(faixa.largura - LARGURA_A4_PT) < 0.5,
+    faixa ? `x=${faixa.x} largura=${faixa.largura.toFixed(2)}pt` : 'nenhuma faixa'
+  )
+}
 
 // Documento sem logo ainda é um documento: uma falha de rede não pode
 // derrubar a emissão de um comprovante de custódia. Precisa limpar o

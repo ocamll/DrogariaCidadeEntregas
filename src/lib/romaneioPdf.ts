@@ -32,7 +32,7 @@
 import type { RomaneioCompleto } from '@/data/romaneios'
 import { formatBRL } from '@/lib/money'
 import { textoGeo } from '@/lib/geolocalizacao'
-import { carregarImagemDaMarca, LOGO_URL, LOGO_PROPORCAO } from '@/lib/marca'
+import { carregarImagemDaMarca, LOGO_DOCUMENTO_URL, LOGO_PROPORCAO, COR_MARCA } from '@/lib/marca'
 
 export type ViaDoRomaneio = 'farmacia' | 'agencia'
 
@@ -100,22 +100,43 @@ export async function montarRomaneioPdf(
 
   // ---------------- cabeçalho ----------------
   //
-  // A logo é a mesma da credencial e do acerto — um lugar só
-  // (`lib/marca.ts`), com cache por sessão. Documento sem logo ainda é um
-  // documento: uma falha de rede aqui não pode derrubar a emissão inteira
-  // de um comprovante de custódia.
+  // A logo vem do módulo da marca (`lib/marca.ts`), um lugar só, com
+  // cache por sessão. Aqui é a versão de DOCUMENTO (502 × 80): a de tela
+  // daria ~900 dpi nestes 56mm e custava 130 kB por arquivo, num PDF que
+  // sobe pro Drive nas duas vias a cada saída. Documento sem logo ainda é
+  // um documento: uma falha de rede aqui não pode derrubar a emissão
+  // inteira de um comprovante de custódia.
   let logo: string | null = null
   try {
-    logo = await carregarImagemDaMarca(LOGO_URL)
+    logo = await carregarImagemDaMarca(LOGO_DOCUMENTO_URL)
   } catch {
     logo = null
   }
 
   if (logo) {
     const alturaLogo = 9
-    // Proporção constante e conhecida (2008 × 320); não precisa medir.
-    doc.addImage(logo, 'PNG', M, y - 6, LOGO_PROPORCAO * alturaLogo, alturaLogo, undefined, 'FAST')
-    y += 7
+    // A FAIXA NÃO É DECORAÇÃO. O letreiro "Drogaria Cidade" da arte é
+    // BRANCO — desenhado direto no papel branco, sumia, e o romaneio saía
+    // com a cruz solta e sem o nome da farmácia. O PDF do acerto sempre
+    // teve a faixa e por isso nunca mostrou o problema; este ganhou logo
+    // depois e herdou o desenho sem ela.
+    const alturaFaixa = alturaLogo + 8
+    doc.setFillColor(COR_MARCA[0], COR_MARCA[1], COR_MARCA[2])
+    doc.rect(0, 0, largura, alturaFaixa, 'F')
+    // Proporção constante e conhecida (2008 × 320, igual à de tela); não
+    // precisa medir.
+    doc.addImage(
+      logo,
+      'PNG',
+      M,
+      (alturaFaixa - alturaLogo) / 2,
+      LOGO_PROPORCAO * alturaLogo,
+      alturaLogo,
+      undefined,
+      // 'FAST' liga a compressão: sem ele o jsPDF grava o bitmap cru.
+      'FAST'
+    )
+    y = alturaFaixa + M
   }
 
   doc.setFont('helvetica', 'bold')

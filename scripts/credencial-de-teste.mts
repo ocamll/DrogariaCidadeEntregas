@@ -7,13 +7,12 @@
 // cartão anterior do motoboy e o token só aparece uma vez. O token daqui
 // é v3 bem formado (o leitor lê, o formato se prova) mas NÃO existe no
 // banco, então bipá-lo devolve "credencial não reconhecida".
-import { readFile, writeFile } from 'node:fs/promises'
+import { writeFile } from 'node:fs/promises'
+import { instalarFetchDePublic } from './fetchDePublic.mts'
 import { generateMotoboyCredential, formatTokenForDisplay } from '../src/lib/credencialMotoboy.ts'
 import { montarCredencialPdf, carregarAssetsCredencial } from '../src/lib/credencialPdf.ts'
 
-globalThis.fetch = (async (u: string) => ({
-  ok: true, status: 200, text: async () => readFile('public' + String(u), 'utf8'),
-})) as never
+instalarFetchDePublic()
 
 const TOKEN = '3000000000000000000000'
 const dados = {

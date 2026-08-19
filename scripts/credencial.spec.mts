@@ -6,7 +6,7 @@
 // navegador. Aqui o `fetch` é trocado por leitura de disco — é o mesmo
 // arquivo de `public/`, então o que o teste exercita é o mesmo byte que o
 // app serve.
-import { readFile } from 'node:fs/promises'
+import { instalarFetchDePublic } from './fetchDePublic.mts'
 import bwipjs from 'bwip-js'
 import {
   generateMotoboyCredential,
@@ -24,11 +24,7 @@ function checa(nome: string, condicao: boolean, extra = '') {
 }
 
 // `fetch` lendo de public/, que é de onde o app serve.
-globalThis.fetch = (async (url: string) => {
-  const caminho = 'public' + String(url)
-  const texto = await readFile(caminho, 'utf8')
-  return { ok: true, status: 200, text: async () => texto }
-}) as unknown as typeof fetch
+instalarFetchDePublic()
 
 const TOKEN = '3012345678901234567890'
 const base: MotoboyCredentialData = {
