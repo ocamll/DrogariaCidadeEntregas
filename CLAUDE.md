@@ -1431,12 +1431,16 @@ código enfileira `fechamento_corrida`.**
    pré e pós-voo no próprio arquivo.
 2. **2A — prova de integridade e canônico. GATE OBRIGATÓRIO.**
    Nenhuma linha de `selar_romaneio_retorno` antes desta fechar:
-   1. verificador de hash dos romaneios de saída
-   2. rodar contra os reais e **registrar o baseline**
-   3. canônico do retorno em TypeScript
-   4. canônico do retorno em SQL
-   5. `canonico-retorno.spec.mts`
-   6. `conferir-canonico-retorno-no-console.js`
+   1. ~~verificador de hash dos romaneios de saída~~ — **feito**
+      (`20260819130000_verificador_de_hash.sql`)
+   2. ~~rodar contra os reais e registrar o baseline~~ — **feito**:
+      `9 verificados · 9 válidos · 0 divergências`
+   3. **golden vectors do DCRR1, revisados à mão** — antes de qualquer
+      implementação, senão dois gêmeos que concordam não provam nada
+   4. canônico do retorno em TypeScript, conferido contra os vetores
+   5. canônico do retorno em SQL, conferido contra os MESMOS vetores
+   6. `canonico-retorno.spec.mts` e
+      `conferir-canonico-retorno-no-console.js` (TS × SQL, dado real)
    7. `papel_no_momento` no INSERT da saída
    8. rodar o verificador **de novo**
    9. provar que nenhum hash existente mudou nem deixou de verificar
@@ -1453,6 +1457,143 @@ verificador vem antes de `papel_no_momento` porque sem ele "nada moveu"
 é uma afirmação, não uma medição — o mesmo método do §22 e do §49, onde
 medir o "antes" no mesmo instrumento foi o que impediu concluir certo por
 sorte.
+
+#### DCRR1 — o canônico do retorno, CONGELADO em 2026-08-19
+
+Congelado antes de existir código, e congelar aqui importa: **depois que
+o primeiro romaneio de retorno real for selado, o significado byte a byte
+de `DCRR1` vira parte permanente do histórico.**
+
+**O princípio: o retorno assina só o que ele ACRESCENTA.** Tudo que a
+saída já selou é referenciado, nunca copiado. Repetir cria uma segunda
+fonte para o mesmo fato, que pode discordar da primeira — e aí existem
+dois documentos assinados afirmando coisas diferentes, sem desempate.
+
+```
+DCRR1
+saida        <uuid do romaneio de saída>
+saida_hash   <document_hash da saída>
+motoboy      <uuid>
+responsavel  <uuid>
+v   <entrega_id>  <desfecho>  <motivo>  <detalhe>
+v   ...
+pr  <entrega_id>  <pagamento_id>  <forma>  <valor_cents>  <troco_cents>
+pr  ...
+```
+
+Convenções idênticas às do `DCR1`, sem exceção: TAB como separador, `-`
+para nulo, ids em minúscula, ordenação por code unit (`collate "C"` no
+SQL), vales ordenados por `entrega_id`, pagamentos em bloco próprio
+**depois** de todos os vales com ordenação dupla (`entrega_id`, depois
+`pagamento_id`), sem `\n` final. `DCRR1` difere de `DCR1` no 4º byte —
+os dois tipos de documento não podem ser confundidos.
+
+**O que NÃO entra, e por quê:**
+
+| fora | razão |
+|---|---|
+| `tenant`, `loja`, `corrida` | deriváveis da saída, que `saida` + `saida_hash` identificam inequivocamente |
+| **`numero_vale`** | o retorno não deve ter a **capacidade** de afirmar o número do vale. Se a saída disser `V-000521` e o retorno `V-000512`, qual vale? |
+| `vales <n>` | derivável contando as linhas `v`; os prefixos já dão o enquadramento |
+| cliente, endereço, valores, `quantidade_vales` | já selados na saída |
+| totais | deriváveis — e todo campo redundante é mais uma chance de os gêmeos divergirem |
+| custódia de papel | tem prazo próprio; o papel volta dias depois, e selar isso assinaria pendência rotineiramente aberta |
+| `divergente = true` | derivado da comparação previsto × realizado |
+| **qualquer relógio** | ver a regra abaixo |
+
+**`saida_hash` é o `document_hash` da saída, nunca o `final_hash`.** O
+motivo é o offline: quando o retorno é registrado, o `document_hash` já
+existe localmente, mas o `final_hash` só nasce quando o servidor sela — e
+o motoboy pode voltar com a rede ainda caída. É o único identificador
+criptográfico que **os dois lados conhecem** no instante da assinatura.
+
+Isto **não** é o "encadeamento de hash entre eventos" da lista Fora.
+Aquilo é cadeia global entre eventos; isto é um documento referenciando o
+documento que ele fecha, que é inerente ao que um retorno é.
+
+**`motoboy` e `responsavel` ficam** — são os dois participantes da nova
+transferência de custódia, e são fato novo. O servidor **exige a
+igualdade** com quem de fato assinou:
+
+```
+canonico.motoboy      = assinatura_motoboy.motoboy_id
+canonico.responsavel  = assinatura_loja.user_id
+```
+
+Sem isso existiria "documento diz João, assinatura é Pedro".
+
+##### As regras que decorrem
+
+**1. Nenhum timestamp, e o teste vale para qualquer campo futuro: se o
+cliente não sabe antes de selar, não entra.** O canônico é o que o
+navegador assina, e offline não há servidor a consultar — um `now()` de
+servidor é impossível por construção, e o relógio do dispositivo é o que
+a regra 8 manda não usar sozinho. Os tempos ficam em
+`corridas.retorno_em`/`retorno_em_local` e `romaneios.selado_em`, que a
+fórmula da assinatura já amarra.
+
+**2. Normalização é parte do CANÔNICO; validação é do servidor.** As
+regras de negócio —
+
+```
+desfecho = entregue    → motivo = '-'  e  detalhe = '-'
+desfecho = insucesso   → motivo obrigatório
+motivo   = outro       → detalhe obrigatório e não vazio
+```
+
+— têm que ser aplicadas **dentro do construtor do canônico**, idênticas
+nos dois lados. Se ficarem só na validação, um input malformado passa por
+um lado e não pelo outro e os bytes divergem, que é o modo de falha sem
+erro claro. Validação rejeita; normalização não pode divergir.
+
+**3. Escaping reusa `texto_para_canonico` verbatim** —
+`translate(texto, E'\t\n\r', '   ')` com `coalesce(…, '-')`, e o gêmeo TS
+`replace(/[\t\n\r]/g, ' ')`. **Ele não é injetivo**: `"a\tb"` e `"a b"`
+dão o mesmo canônico, então o hash cobre a forma sanitizada e não a
+original, que é o que o snapshot guarda. Para nome e endereço isso nunca
+importou; com texto livre colado, importa saber. Escape reversível seria
+injetivo e é a alternativa recusada: criaria uma segunda convenção de
+escaping num projeto cujo risco nº 1 é divergência de gêmeos.
+
+**4. `pagamento_id` é uuidv7 do cliente** (regra 5) — é o que permite ele
+entrar no canônico sem violar a regra 1.
+
+##### A divergência deixa de ser um botão
+
+Durante o retorno **não existe** "marcar divergência". O operador informa
+o que de fato voltou (forma, valor, troco), o servidor compara com o
+previsto da saída, e se diferir grava na MESMA transação: pagamento
+realizado selado, evento `pagamento_alterado`, e `status_financeiro`.
+
+**A divergência é consequência dos fatos, não uma decisão manual** — e é
+isso que impede "o caixa registrou o retorno e esqueceu de clicar".
+
+`marcarDivergencia` **continua existindo** para o outro caso: o que se
+descobre depois do retorno já selado (contagem de dinheiro, conferência
+posterior, problema achado no dia seguinte).
+
+##### Golden vectors ANTES do SQL
+
+A ordem de construção é do usuário, e a razão é sutil: TS implementa um
+bug → SQL copia o mesmo entendimento → os dois concordam → o teste passa.
+Dois gêmeos que concordam não provam que estão certos.
+
+```
+contrato DCRR1 → golden vectors revisados à mão
+  → TypeScript → teste contra os vetores
+  → SQL        → teste contra os MESMOS vetores
+  → comparação TS ↔ SQL contra dado real
+```
+
+Com os vetores passam a existir **três** referências, não duas. Vale
+notar que o canônico da SAÍDA tem só duas (`canonico.spec.mts` testa
+propriedades, `conferir-canonico-no-console.js` compara TS×SQL) — os
+golden vectors são melhoria sobre o que existe, e vale considerar
+retrofitá-los lá depois.
+
+Fixtures obrigatórias: acentuação, Unicode fora do BMP, TAB, CRLF, LF,
+string vazia, null, `motivo = outro` com detalhe, detalhe com espaços nas
+pontas, pagamentos fora de ordem no input, e um vale só contra vários.
 
 #### O verificador de hash — o que o projeto nunca teve
 
