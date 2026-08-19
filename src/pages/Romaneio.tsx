@@ -1,5 +1,8 @@
+import { useState } from 'react'
 import { useRomaneio } from '@/data/romaneios'
 import { BlocoAssinatura } from '@/components/Custodia'
+import { baixarArquivo } from '@/lib/credencialDownload'
+import type { ViaDoRomaneio } from '@/lib/romaneioPdf'
 import { formatBRL } from '@/lib/money'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -34,6 +37,34 @@ export function Romaneio({
   onVoltar: () => void
 }) {
   const { data, isLoading, isError, error } = useRomaneio(romaneioId)
+  const [ocupado, setOcupado] = useState<ViaDoRomaneio | null>(null)
+  const [erroPdf, setErroPdf] = useState<string | null>(null)
+
+  // O `data` só existe depois dos early returns, então a função é
+  // declarada aqui e lê o valor no momento do clique.
+  async function baixar(via: ViaDoRomaneio) {
+    if (!data) return
+    setErroPdf(null)
+    setOcupado(via)
+    try {
+      // Import dinâmico: é ele que puxa o jspdf, e ninguém deve baixar
+      // 400 kB só por abrir a página do romaneio.
+      const { montarRomaneioPdf } = await import('@/lib/romaneioPdf')
+      // TODO: quando a correção cadastral por evento existir (categoria 1
+      // da regra 7), as correções entram aqui — a seção do PDF já está
+      // pronta pra recebê-las.
+      const bytes = await montarRomaneioPdf(data, via, [])
+      baixarArquivo(
+        new Blob([bytes], { type: 'application/pdf' }),
+        `romaneio-${data.numero}-${via}.pdf`,
+        'application/pdf'
+      )
+    } catch (e) {
+      setErroPdf(e instanceof Error ? e.message : String(e))
+    } finally {
+      setOcupado(null)
+    }
+  }
 
   if (isLoading) return <p className="p-4 text-sm text-muted-foreground">Carregando…</p>
   if (isError) {
@@ -54,9 +85,23 @@ export function Romaneio({
 
   return (
     <div className="mx-auto max-w-3xl">
-      <Button variant="ghost" className="mb-3" onClick={onVoltar}>
-        ← Voltar
-      </Button>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <Button variant="ghost" onClick={onVoltar}>
+          ← Voltar
+        </Button>
+        {/* Duas vias porque os destinatários são dois: a da agência omite
+            o valor da compra, que é dado comercial da farmácia e não
+            entra no acerto. */}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" disabled={!!ocupado} onClick={() => void baixar('farmacia')}>
+            {ocupado === 'farmacia' ? 'Gerando…' : 'PDF — via da farmácia'}
+          </Button>
+          <Button variant="outline" disabled={!!ocupado} onClick={() => void baixar('agencia')}>
+            {ocupado === 'agencia' ? 'Gerando…' : 'PDF — via da agência'}
+          </Button>
+        </div>
+      </div>
+      {erroPdf && <p className="mb-3 text-sm text-destructive">{erroPdf}</p>}
 
       <Card>
         <CardHeader>

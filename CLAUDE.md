@@ -996,6 +996,47 @@ depois de reconectar. Só um F5 destravava.
   cairia no guard e não faria nada: a sensação exata de botão quebrado
   que o usuário relatou.
 
+### O PDF do romaneio
+
+Construído em 2026-08-18. `src/lib/romaneioPdf.ts`, botões na página do
+romaneio, chunk próprio (o jspdf só desce ao clicar).
+
+**A regra que governa o arquivo inteiro: ele sai do SNAPSHOT, nunca do
+dado vigente.** Os vales vêm de `romaneios.payload`, congelado no
+instante da selagem — não da tabela `entregas`, que pode ter mudado.
+
+É a regra 7 aplicada. Se um endereço foi corrigido depois, o PDF continua
+mostrando o que o motoboy assinou, e a correção entra numa **seção
+separada** ("Correções posteriores à assinatura"), com a frase de que o
+documento acima não muda. Montar do dado vivo pareceria funcionar
+perfeitamente e faria o romaneio afirmar que o motoboy recebeu um
+endereço que ele nunca recebeu.
+
+- **Duas vias.** `farmacia` leva tudo; `agencia` **omite o valor da
+  compra**, que é dado comercial da farmácia e não entra no acerto — ela
+  precisa do valor da entrega, não do que o cliente comprou.
+- **Os quatro relógios finalmente têm tela.** Retirada, retorno e duração
+  saem de `corridas.saida_em`/`retorno_em`, existentes e sem uso desde
+  2026-08-10. A duração usa o relógio do SERVIDOR nos dois lados: misturar
+  servidor com dispositivo daria um intervalo que não aconteceu. É o
+  insumo do relatório de tempo médio, que passa a ser calculável
+  **retroativamente**.
+- **Corrida ainda aberta é dita, não omitida** — "retorno: corrida ainda
+  aberta". Campo ausente e corrida em andamento não podem se parecer.
+- **As assinaturas são vetor**, redesenhadas dos pontos como na tela. Sem
+  imagem embutida: o banco guarda traços, e o PDF pode sair em qualquer
+  tamanho.
+- **O rodapé é o que prova**: `final_hash`, `document_hash`, IP,
+  geolocalização (com o rótulo de cache quando for o caso) e a frase de
+  que **este PDF é uma renderização do registro, não a fonte da
+  verdade**.
+
+`npx tsx scripts/romaneio-pdf.spec.mts` cobre 30 casos, e o primeiro é o
+que importa: um romaneio cujo snapshot diverge de propósito do "dado de
+hoje", exigindo que o PDF mostre o snapshot.
+`scripts/romaneio-de-exemplo.mts` gera as duas vias com dado fictício,
+pra conferir desenho sem depender do banco.
+
 ### Geolocalização: por que ela nunca bloqueia
 
 Revisto em 2026-08-18, quando o usuário pediu que ela fosse obrigatória
@@ -1226,9 +1267,9 @@ agora só roda nos specs, como padrão-ouro contra o qual
   valide sem rede). Avaliado e recusado: provaria só que o cartão foi
   emitido por nós — não presença (isso é o PIN), não revogação
   (impossível offline), e o servidor revalida tudo no sync.
-- **PDF do romaneio e envio ao Drive.** A arquitetura já está pronta pra
-  eles: snapshot → hashes → assinaturas → PDF. O PDF nunca é fonte da
-  verdade.
+- ~~**PDF do romaneio.**~~ **Construído em 2026-08-18**
+  (`src/lib/romaneioPdf.ts`) — ver a seção própria abaixo. O **envio ao
+  Drive** continua fora, e é o próximo passo dessa frente.
 - **Portal da agência.** `profiles.papel` já aceita `'agencia'` desde o
   schema inicial; falta a policy.
 - **Romaneio de retorno.** Nada impede — o de saída não assume ser único.

@@ -613,6 +613,14 @@ export type RomaneioCompleto = CustodiaDoVale & {
   criadoPorNome: string | null
   ip: string | null
   geolocalizacao: unknown
+  /** Os quatro relógios da corrida. Servidor manda; dispositivo acompanha. */
+  corrida: {
+    saidaEm: string | null
+    saidaEmLocal: string | null
+    retornoEm: string | null
+    retornoEmLocal: string | null
+    status: string | null
+  } | null
 }
 
 async function buscarRomaneio(romaneioId: string): Promise<RomaneioCompleto | null> {
@@ -621,6 +629,13 @@ async function buscarRomaneio(romaneioId: string): Promise<RomaneioCompleto | nu
     .select(
       'id, numero, status, modo, selado_em, ocorrido_em_local, recebido_em_servidor, ' +
         'final_hash, document_hash, canonico, payload, conflito, ip, geolocalizacao, ' +
+        // Os quatro relógios da corrida. Existem desde 2026-08-10 e nunca
+        // tiveram tela: são eles que dão retirada, retorno e, mais pra
+        // frente, tempo médio de entrega. O do SERVIDOR é o que vale como
+        // fato (`saida_em`/`retorno_em`, carimbados por trigger); o do
+        // dispositivo fica ao lado porque o PC do balcão pode estar
+        // errado e a regra 8 manda guardar os dois.
+        'corridas(saida_em, saida_em_local, retorno_em, retorno_em_local, status), ' +
         'lojas(nome), profiles(nome)'
     )
     .eq('id', romaneioId)
@@ -655,6 +670,15 @@ async function buscarRomaneio(romaneioId: string): Promise<RomaneioCompleto | nu
     criadoPorNome: r.profiles?.nome ?? null,
     ip: r.ip,
     geolocalizacao: r.geolocalizacao,
+    corrida: r.corridas
+      ? {
+          saidaEm: r.corridas.saida_em,
+          saidaEmLocal: r.corridas.saida_em_local,
+          retornoEm: r.corridas.retorno_em,
+          retornoEmLocal: r.corridas.retorno_em_local,
+          status: r.corridas.status,
+        }
+      : null,
     assinaturas: (assinaturas as unknown as LinhaAssinatura[])
       .map(mapAssinatura)
       .sort((a, b) => ordemDeAssinatura(a) - ordemDeAssinatura(b)),
