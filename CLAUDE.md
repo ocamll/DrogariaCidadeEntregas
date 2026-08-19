@@ -1292,10 +1292,47 @@ nulo por construção, e no Postgres nulo não colide com nulo.
 
 #### O signatário interno não é "o caixa"
 
-Na saída normalmente é o caixa; no retorno pode ser gerente ou admin.
-Então o modelo novo usa `tipo_signatario = 'responsavel_loja'` e guarda
-**`papel_no_momento`** (`caixa` | `gerente` | `admin`) à parte. A tela
-continua mostrando "Recebido por Ana Souza — Gestora".
+**A saída continua `caixa`. O retorno nasce `responsavel_loja`.**
+Decidido em 2026-08-19, e não é meio-termo: são dois momentos com regras
+diferentes. Na Nova Corrida quem entrega a custódia é o caixa; no retorno
+quem recebe pode ser caixa, gerente ou admin, e o rótulo tem que
+comportar os três.
+
+A vantagem prática decidiu: **`selar_romaneio_interno` e a fórmula do
+hash da saída não são tocados**. Reabrir a função mais crítica do projeto
+por uniformidade conceitual seria risco sem retorno.
+
+Se um dia a regra de negócio disser que outra pessoa pode entregar a
+corrida na saída, aí sim reconsiderar — como decisão funcional própria,
+nunca preventivamente.
+
+O retorno guarda também **`papel_no_momento`** (`caixa` | `gerente` |
+`admin`), e a tela mostra "Recebido por Ana Souza — Gestora".
+
+**Ressalva medida em 2026-08-19, e ela vale para quem for construir:** o
+sistema **não impõe** que a saída seja feita por um caixa. "Nova corrida"
+não tem gate de papel — o botão aparece para qualquer autenticado — e
+`selar_romaneio_interno` só checa escopo de filial. Então um gerente pode
+selar uma saída hoje, e a linha fica `tipo_signatario = 'caixa'` com o
+`user_id` dele. O rótulo é **estrutural** ("o lado da farmácia"), não uma
+afirmação sobre o cargo de quem assinou — e é assim que ele deve ser
+lido e exibido, sob pena de a tela afirmar o que não sabe.
+
+Por isso, decidido junto: **a saída passa a gravar `papel_no_momento`
+também**, na etapa 2. É uma coluna a mais no INSERT da assinatura, lida
+de `profiles` no instante da selagem — **não encosta na fórmula do
+hash**, que continua idêntica byte a byte. Sem ela, responder "quem
+entregou essa corrida, caixa ou gerente?" seis meses depois exigiria
+olhar `profiles.papel`, que é o papel de hoje.
+
+A distinção que torna isso seguro, e que precisa continuar valendo:
+**a identidade do signatário interno nunca vem do cliente.** Online,
+`selar_romaneio` sequer aceita um `p_caixa_id` — passa `auth.uid()`.
+Offline, a Edge Function valida o JWT, confere contra o dono da operação
+na fila e passa `p_caixa_id: auth.user.id`. Ler `profiles` por esse id é
+ler o cargo de uma identidade já provada. **Se alguém um dia fizer o id
+entrar por parâmetro do cliente, `papel_no_momento` vira registro falso
+com cara de auditoria** — pior que não ter.
 
 `papel_no_momento` existe porque `profiles.papel` é o papel **atual**: se
 alguém for promovido, um romaneio de seis meses atrás passaria a afirmar
@@ -1390,8 +1427,14 @@ código enfileira `fechamento_corrida`.**
 #### As seis etapas, e onde está o risco
 
 1. Migration: `romaneios.tipo`, os dois índices parciais, `tipo_signatario`
-   ampliado, `papel_no_momento`, FK do retorno para a saída
-2. Canônico do retorno + `selar_romaneio_retorno` transacional
+   ampliado, `papel_no_momento`, FK do retorno para a saída — **escrita
+   em 2026-08-19** (`20260819120000_romaneio_de_retorno_schema.sql`), com
+   as consultas de pré e pós-voo no próprio arquivo
+2. Canônico do retorno + `selar_romaneio_retorno` transacional, mais
+   `papel_no_momento` no INSERT da saída (sem tocar na fórmula do hash).
+   **Reexecutar o fluxo de saída inteiro depois** — cartão, PIN, as duas
+   assinaturas, canônico, hashes e selo — para provar que continua
+   idêntico
 3. Tela: Retorno de Corrida vira o fluxo do documento
 4. Fila offline: `romaneio_retorno`, envelope, `sync-romaneio`
 5. Fluxo excepcional (online)
