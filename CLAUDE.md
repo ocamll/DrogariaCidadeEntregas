@@ -996,6 +996,45 @@ depois de reconectar. Só um F5 destravava.
   cairia no guard e não faria nada: a sensação exata de botão quebrado
   que o usuário relatou.
 
+### Geolocalização: por que ela nunca bloqueia
+
+Revisto em 2026-08-18, quando o usuário pediu que ela fosse obrigatória
+pra selagem. **Não pode ser**, e o motivo é de hardware, não de desenho:
+
+O PC do balcão não tem GPS. O navegador resolve posição mandando os WiFi
+vizinhos pro serviço do Google — **isso exige rede**. Offline não existe
+a quem perguntar. Exigir coordenada seria proibir saída sem internet, ou
+seja, desligar o caminho que o projeto passou dias provando.
+
+E mesmo online, geolocalização de desktop por WiFi erra de centenas de
+metros a quilômetros. Como prova de que "o caixa estava na farmácia", a
+sessão autenticada diz mais.
+
+**O que dá pra fazer, e está feito** (`src/lib/geolocalizacao.ts`):
+
+- `aquecerGeolocalizacao()` pede uma leitura quando a Nova Corrida monta
+  com internet — mesmo lugar onde o cache de credenciais é atualizado. É
+  o que deixa algo recente guardado pro caso de a rede cair depois.
+- Ao selar: tenta leitura fresca (8s, prazo maior que os 3s de antes,
+  porque 3s não davam tempo de alguém RESPONDER ao pedido de permissão);
+  não vindo, aceita a do cache do navegador (até 10 min).
+- **A leitura de cache é rotulada como tal.** `obtida_em` guarda o
+  horário real da medição e `origem` diz `fresca` ou `cache`, e a tela
+  escreve "leitura de 11:25, não do momento da selagem". Apresentar uma
+  leitura de duas horas antes como se fosse do instante seria a tela
+  afirmando o que não sabe — o defeito que este projeto já pagou três
+  vezes.
+- **Sem coordenada, grava-se o MOTIVO**: `negada`, `sem_suporte`,
+  `indisponivel`, `expirou`. "Não registrada" e "negada pelo usuário" são
+  fatos diferentes numa cadeia de custódia, e um campo vazio não
+  distingue os dois. O retorno nunca é `null`: sempre há uma afirmação.
+- Permissão negada **não** tenta o cache: insistir só faria o motoboy
+  esperar, e a resposta não mudaria.
+
+`npx tsx scripts/geolocalizacao.spec.mts` cobre os cinco caminhos com um
+dublê de `navigator.geolocation` — é a única forma de exercitar "negada"
+e "offline sem cache" sem depender de permissão de navegador nem de rede.
+
 ### Ordem dentro da transação do selo
 
 `corrida → vales em rota → romaneio → vínculo → assinaturas`. O UPDATE dos

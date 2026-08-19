@@ -4,6 +4,7 @@ import {
   type AssinaturaDoRomaneio,
   type CustodiaDoVale,
 } from '@/data/romaneios'
+import { textoGeo } from '@/lib/geolocalizacao'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -116,13 +117,6 @@ function Linha({ rotulo, valor }: { rotulo: string; valor: string | null }) {
       <span className="break-all">{valor}</span>
     </div>
   )
-}
-
-function textoGeo(geo: unknown): string | null {
-  if (!geo || typeof geo !== 'object') return null
-  const g = geo as { lat?: number; lon?: number; precisao_m?: number }
-  if (typeof g.lat !== 'number' || typeof g.lon !== 'number') return null
-  return `${g.lat.toFixed(5)}, ${g.lon.toFixed(5)}${g.precisao_m ? ` (±${Math.round(g.precisao_m)}m)` : ''}`
 }
 
 export function BlocoAssinatura({ assinatura }: { assinatura: AssinaturaDoRomaneio }) {

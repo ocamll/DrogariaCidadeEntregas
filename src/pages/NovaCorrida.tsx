@@ -11,7 +11,6 @@ import {
   selarRomaneio,
   ErroDoServidor,
   documentHashLocal,
-  capturarGeolocalizacao,
   type SaidaOfflineInput,
 } from '@/data/romaneios'
 import {
@@ -25,6 +24,7 @@ import {
   publicIdDoToken,
 } from '@/data/credenciais'
 import { selarSegredos, calcularOfflineEventHash, envelopeDisponivel } from '@/lib/envelope'
+import { capturarGeolocalizacao, aquecerGeolocalizacao } from '@/lib/geolocalizacao'
 import { useOnline } from '@/lib/useOnline'
 import {
   enfileirarOperacao,
@@ -120,7 +120,14 @@ function NovaCorridaFluxo({
   // quando a tela monta e houver internet; se falhar, o cache anterior
   // continua valendo — que é exatamente pra isso que ele existe.
   useEffect(() => {
-    if (navigator.onLine) void sincronizarCacheDeCredenciais().catch(() => {})
+    if (navigator.onLine) {
+      void sincronizarCacheDeCredenciais().catch(() => {})
+      // Aquece a posição enquanto há rede. No PC do balcão não há GPS: o
+      // navegador resolve por WiFi, o que EXIGE rede — então é agora ou
+      // nunca. Sem isto, uma saída offline fica sem coordenada nenhuma,
+      // porque na hora de selar já não há a quem perguntar.
+      void aquecerGeolocalizacao().catch(() => {})
+    }
   }, [])
 
   // Vale que já saiu numa operação AINDA NA FILA não pode reaparecer aqui.

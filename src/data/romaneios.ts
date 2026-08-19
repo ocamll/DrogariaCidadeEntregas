@@ -208,58 +208,6 @@ export async function autorizarSaida(
 }
 
 // =====================================================================
-// Geolocalização
-//
-// Nunca bloqueia a saída. A regra funcional (§23) é registrar quando
-// estiver disponível — e no PC do balcão ela costuma não estar: sem GPS,
-// permissão negada, ou uma resposta que demora segundos. Um motoboy
-// esperando o navegador decidir é pior que um campo nulo.
-// =====================================================================
-
-const TIMEOUT_GEO_MS = 3000
-
-export function capturarGeolocalizacao(): Promise<{
-  lat: number
-  lon: number
-  precisao_m: number
-} | null> {
-  return new Promise((resolve) => {
-    if (typeof navigator === 'undefined' || !navigator.geolocation) {
-      resolve(null)
-      return
-    }
-
-    // Resolve uma vez só: o timeout do navegador nem sempre dispara (aba
-    // em segundo plano, permissão pendente), então o nosso é quem
-    // garante que a promessa termina.
-    let respondido = false
-    const responder = (valor: { lat: number; lon: number; precisao_m: number } | null) => {
-      if (respondido) return
-      respondido = true
-      resolve(valor)
-    }
-
-    const relogio = setTimeout(() => responder(null), TIMEOUT_GEO_MS)
-
-    navigator.geolocation.getCurrentPosition(
-      (posicao) => {
-        clearTimeout(relogio)
-        responder({
-          lat: posicao.coords.latitude,
-          lon: posicao.coords.longitude,
-          precisao_m: posicao.coords.accuracy,
-        })
-      },
-      () => {
-        clearTimeout(relogio)
-        responder(null)
-      },
-      { enableHighAccuracy: false, timeout: TIMEOUT_GEO_MS, maximumAge: 60_000 }
-    )
-  })
-}
-
-// =====================================================================
 // Saída registrada offline
 //
 // A tela sela o envelope SEMPRE (online ou não) e tenta o caminho online
