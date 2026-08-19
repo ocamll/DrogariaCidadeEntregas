@@ -11,7 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from '@/components/ui/card'
-import logo from '@/assets/logo.png'
+import { LOGO_URL } from '@/lib/marca'
 
 export function Login() {
   const [email, setEmail] = useState('')
@@ -28,7 +28,7 @@ export function Login() {
 
   return (
     <div className="flex min-h-svh flex-col items-center justify-center gap-6 bg-primary p-4">
-      <img src={logo} alt="Drogaria Cidade" className="h-16 w-auto" />
+      <img src={LOGO_URL} alt="Drogaria Cidade" className="h-16 w-auto" />
       <Card className="w-full max-w-sm">
         <CardHeader>
           <CardTitle>Tele-entrega</CardTitle>

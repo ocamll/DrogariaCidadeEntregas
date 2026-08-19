@@ -1,6 +1,6 @@
 import type { Relatorio, RelatorioAgencia, FiltroPeriodo } from '@/data/relatorios'
 import { formatBRL } from '@/lib/money'
-import logoUrl from '@/assets/logo.png'
+import { carregarImagemDaMarca, LOGO_URL, LOGO_PROPORCAO } from '@/lib/marca'
 
 // PDF do acerto com a agência — o documento que acompanha o pagamento da
 // quinzena. Diferente da planilha, ele é feito pra ser impresso, assinado
@@ -53,28 +53,16 @@ function nomeDoArquivo(filtro: FiltroPeriodo): string {
   return `acerto-agencia-${filtro.dataInicio}-a-${filtro.dataFim}.pdf`
 }
 
-// A logo vem do bundle como URL; o jsPDF precisa dela em data URL. O
-// tamanho natural é lido junto pra a proporção não ser chutada.
-async function carregarLogo(): Promise<{ dataUrl: string; largura: number; altura: number } | null> {
+// A logo agora vem do módulo da marca, que já entrega o PNG embutido como
+// data URL — é a forma que o jsPDF aceita. Some junto o  que existia
+// só pra medir dimensão: a proporção é constante e conhecida.
+//
+// Documento sem logo ainda é um documento, então uma falha aqui não
+// derruba a exportação inteira.
+async function carregarLogo(): Promise<string | null> {
   try {
-    const resposta = await fetch(logoUrl)
-    const blob = await resposta.blob()
-    const dataUrl = await new Promise<string>((resolve, reject) => {
-      const leitor = new FileReader()
-      leitor.onload = () => resolve(leitor.result as string)
-      leitor.onerror = () => reject(new Error('falha ao ler a logo'))
-      leitor.readAsDataURL(blob)
-    })
-    const dimensoes = await new Promise<{ largura: number; altura: number }>((resolve, reject) => {
-      const img = new Image()
-      img.onload = () => resolve({ largura: img.naturalWidth, altura: img.naturalHeight })
-      img.onerror = () => reject(new Error('falha ao medir a logo'))
-      img.src = dataUrl
-    })
-    return { dataUrl, ...dimensoes }
+    return await carregarImagemDaMarca(LOGO_URL)
   } catch {
-    // documento sem logo ainda é um documento; não vale derrubar a
-    // exportação inteira por causa da imagem
     return null
   }
 }
@@ -129,20 +117,13 @@ export async function montarPdf(
   let x = margem
   if (logo) {
     const alturaLogo = 13
-    const larguraLogo = (logo.largura / logo.altura) * alturaLogo
+    // A proporção é constante e conhecida (2008 × 320), então não precisa
+    // ser medida com um `<img>` a cada exportação.
+    const larguraLogo = LOGO_PROPORCAO * alturaLogo
     // o 'FAST' no fim liga a compressão da imagem: sem ele o jsPDF grava
-    // o bitmap cru e uma logo de 8 kB vira ~165 kB dentro do PDF, que
-    // depois sobem pro Drive a cada envio.
-    doc.addImage(
-      logo.dataUrl,
-      'PNG',
-      x,
-      (alturaFaixa - alturaLogo) / 2,
-      larguraLogo,
-      alturaLogo,
-      undefined,
-      'FAST'
-    )
+    // o bitmap cru e a logo vira centenas de kB dentro do PDF, que depois
+    // sobem pro Drive a cada envio.
+    doc.addImage(logo, 'PNG', x, (alturaFaixa - alturaLogo) / 2, larguraLogo, alturaLogo, undefined, 'FAST')
     x += larguraLogo + 6
   }
 

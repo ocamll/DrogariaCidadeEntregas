@@ -32,6 +32,7 @@
 import type { RomaneioCompleto } from '@/data/romaneios'
 import { formatBRL } from '@/lib/money'
 import { textoGeo } from '@/lib/geolocalizacao'
+import { carregarImagemDaMarca, LOGO_URL, LOGO_PROPORCAO } from '@/lib/marca'
 
 export type ViaDoRomaneio = 'farmacia' | 'agencia'
 
@@ -98,6 +99,25 @@ export async function montarRomaneioPdf(
   const mostrarCompra = via === 'farmacia'
 
   // ---------------- cabeçalho ----------------
+  //
+  // A logo é a mesma da credencial e do acerto — um lugar só
+  // (`lib/marca.ts`), com cache por sessão. Documento sem logo ainda é um
+  // documento: uma falha de rede aqui não pode derrubar a emissão inteira
+  // de um comprovante de custódia.
+  let logo: string | null = null
+  try {
+    logo = await carregarImagemDaMarca(LOGO_URL)
+  } catch {
+    logo = null
+  }
+
+  if (logo) {
+    const alturaLogo = 9
+    // Proporção constante e conhecida (2008 × 320); não precisa medir.
+    doc.addImage(logo, 'PNG', M, y - 6, LOGO_PROPORCAO * alturaLogo, alturaLogo, undefined, 'FAST')
+    y += 7
+  }
+
   doc.setFont('helvetica', 'bold')
   doc.setFontSize(15)
   doc.text('Romaneio de saída', M, y)

@@ -13,6 +13,15 @@
 import { inflateSync } from 'node:zlib'
 import { montarRomaneioPdf, duracaoDaCorrida } from '../src/lib/romaneioPdf.ts'
 import type { RomaneioCompleto } from '../src/data/romaneios.ts'
+import { limparCacheDaMarca } from '../src/lib/marca.ts'
+
+import { readFile } from 'node:fs/promises'
+// A logo é buscada por fetch, porque no app isso roda no navegador. Aqui
+// o fetch lê de public/ — é o mesmo byte que o app serve.
+globalThis.fetch = (async (url: string) => {
+  const texto = await readFile('public' + String(url), 'utf8')
+  return { ok: true, status: 200, text: async () => texto }
+}) as unknown as typeof fetch
 
 let falhas = 0
 function checa(nome: string, condicao: boolean, extra = '') {
@@ -182,9 +191,43 @@ console.log('\n--- assinaturas em vetor ---')
 checa('nome do motoboy', daFarmacia.includes('Silva'))
 checa('agência do motoboy', daFarmacia.includes('Gabrielense'))
 checa('credencial mascarada, nunca o token', daFarmacia.includes('1233') && !daFarmacia.includes('171233' + '0'))
-// Os traços viram linhas vetoriais: operador `l` do PDF, nenhuma imagem.
-checa('sem imagem embutida', !daFarmacia.includes('/Subtype /Image'))
-checa('desenhou linhas', (daFarmacia.match(/\d+\.\d+ \d+\.\d+ l\b/g) ?? []).length > 5)
+// Os traços viram linhas vetoriais (operador `l` do PDF). A ÚNICA imagem
+// do documento é a logo — se aparecer mais de uma, alguma assinatura
+// virou bitmap, e aí ela deixa de escalar e engorda o arquivo.
+const contarImagens = (pdf: string) => (pdf.match(/\/Subtype\s*\/Image/g) ?? []).length
+checa('assinaturas desenhadas como linhas', (daFarmacia.match(/\d+\.\d+ \d+\.\d+ l\b/g) ?? []).length > 5)
+
+// A prova de que assinatura não virou bitmap não é a contagem absoluta —
+// a logo é PNG com transparência, e o jsPDF emite imagem + máscara alfa,
+// então uma logo já conta 2. O que prova é a contagem NÃO CRESCER quando
+// entram assinaturas.
+const semAssinaturas = textoDoPdf(
+  await montarRomaneioPdf({ ...romaneio, assinaturas: [] }, 'farmacia')
+)
+checa(
+  'imagens não crescem com as assinaturas',
+  contarImagens(daFarmacia) === contarImagens(semAssinaturas),
+  `${contarImagens(daFarmacia)} com duas assinaturas, ${contarImagens(semAssinaturas)} sem nenhuma`
+)
+
+console.log('\n--- a logo da marca ---')
+checa('logo presente na via da farmácia', contarImagens(daFarmacia) > 0)
+checa('logo presente na via da agência', contarImagens(daAgencia) > 0)
+
+// Documento sem logo ainda é um documento: uma falha de rede não pode
+// derrubar a emissão de um comprovante de custódia. Precisa limpar o
+// cache, senão a carga anterior serve — que é o comportamento certo em
+// produção e o que atrapalha aqui.
+limparCacheDaMarca()
+const fetchOriginal = globalThis.fetch
+globalThis.fetch = (async () => {
+  throw new Error('rede fora')
+}) as unknown as typeof fetch
+const semLogo = textoDoPdf(await montarRomaneioPdf(romaneio, 'farmacia'))
+globalThis.fetch = fetchOriginal
+limparCacheDaMarca()
+checa('sem rede, o PDF sai mesmo assim', semLogo.includes('R-000010'))
+checa('e sai sem imagem nenhuma', contarImagens(semLogo) === 0)
 
 console.log('\n--- geolocalização rotulada ---')
 checa(

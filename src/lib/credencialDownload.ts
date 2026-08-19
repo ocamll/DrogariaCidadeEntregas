@@ -51,10 +51,9 @@ export function baixarSvg(svg: string, filename: string): void {
  * quando isso acontecer mesmo assim.
  */
 export async function downloadMotoboyCredential(
-  data: MotoboyCredentialData,
-  assetsBaseUrl?: string
+  data: MotoboyCredentialData
 ): Promise<GeneratedCredential> {
-  const gerada = await generateMotoboyCredential(data, assetsBaseUrl)
+  const gerada = await generateMotoboyCredential(data)
 
   baixarSvg(gerada.frontSvg, 'credencial-motoboy-frente.svg')
   window.setTimeout(() => baixarSvg(gerada.backSvg, 'credencial-motoboy-verso.svg'), 300)

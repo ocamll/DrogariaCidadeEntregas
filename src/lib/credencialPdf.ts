@@ -35,6 +35,12 @@ import {
   ajustarNomeParaCaber,
   type MotoboyCredentialData,
 } from './credencialMotoboy'
+import { carregarAssetsDaMarca, type AssetsDaMarca } from './marca'
+
+// Reexportado pra quem já chamava daqui — o carregamento agora é o mesmo
+// de toda a marca, com cache por sessão.
+export { carregarAssetsDaMarca as carregarAssetsCredencial }
+export type { AssetsDaMarca as AssetsCredencial }
 
 const LARGURA_MM = 85.6
 const ALTURA_MM = 54
@@ -44,32 +50,9 @@ const VERMELHO: [number, number, number] = [0xc9, 0x14, 0x1a]
 const BARCODE = { x: 5.3, y: 16.791477, larguraMm: 75, alturaMm: 15.767 } as const
 const PAINEL = { x: 3.6, y: 13.25, w: 78.4, h: 22.85, r: 1.8 } as const
 
-export type AssetsCredencial = { logo: string; cruz: string }
-
-/**
- * Busca os assets uma vez. Separado do desenho pra permitir gerar SVG e
- * PDF a partir das MESMAS imagens, sem duas idas à rede.
- */
-export async function carregarAssetsCredencial(
-  assetsBaseUrl = '/credencial'
-): Promise<AssetsCredencial> {
-  const pegar = async (arquivo: string) => {
-    const r = await fetch(`${assetsBaseUrl}/${arquivo}`)
-    if (!r.ok) throw new Error(`Não consegui carregar ${arquivo} (${r.status}).`)
-    const m = (await r.text()).match(/href="(data:image\/png;base64,[^"]+)"/)
-    if (!m) throw new Error(`Imagem incorporada não encontrada em ${arquivo}`)
-    return m[1]
-  }
-  const [logo, cruz] = await Promise.all([
-    pegar('logo-drogaria-cidade-generativa.svg'),
-    pegar('cruz-drogaria-cidade-generativa.svg'),
-  ])
-  return { logo, cruz }
-}
-
 export async function montarCredencialPdf(
   data: MotoboyCredentialData,
-  assets: AssetsCredencial
+  assets: AssetsDaMarca
 ): Promise<ArrayBuffer> {
   // Import dinâmico + optimizeDeps, como manda a convenção do projeto.
   const { jsPDF, GState } = await import('jspdf')

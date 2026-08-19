@@ -17,8 +17,10 @@
 //    o desenho evita. Por isso: gera e devolve, quem chama baixa. Nada
 //    persiste.
 //
-// 2. Os assets são buscados de `/credencial/` em vez de lidos do disco.
-//    A extração do PNG embutido é a mesma do spec.
+// 2. Os assets vêm de `lib/marca.ts` (buscados de `/marca/`) em vez de
+//    lidos do disco. A extração do PNG embutido é a mesma do spec, e o
+//    carregamento é compartilhado com o PDF do acerto, o do romaneio e o
+//    cabeçalho do app.
 //
 // O TOKEN É SEMPRE O v3, DE 22 DÍGITOS
 //
@@ -29,6 +31,7 @@
 // gerador exige o formato em vez de deixar passar torto.
 
 import { generateCode128Svg } from './code128'
+import { carregarImagemDaMarca, LOGO_URL, CRUZ_URL } from './marca'
 
 export type MotoboyCredentialData = {
   /** O token formatado para leitura humana (grupos de 6). */
@@ -54,22 +57,6 @@ function escapeXml(value: string): string {
     .replaceAll('>', '&gt;')
     .replaceAll('"', '&quot;')
     .replaceAll("'", '&apos;')
-}
-
-/**
- * Os SVGs entregues trazem a imagem generativa embutida como PNG. Extrai
- * o data URI pra incorporá-lo direto na credencial, que é o que garante
- * que o arquivo final não dependa de nada externo pra abrir na gráfica.
- */
-async function extractEmbeddedImage(url: string): Promise<string> {
-  const resposta = await fetch(url)
-  if (!resposta.ok) throw new Error(`Não consegui carregar ${url} (${resposta.status}).`)
-  const source = await resposta.text()
-
-  const match = source.match(/href="(data:image\/png;base64,[^"]+)"/)
-  if (!match) throw new Error(`Imagem incorporada não encontrada em ${url}`)
-
-  return match[1]
 }
 
 function validateData(data: MotoboyCredentialData): void {
@@ -199,14 +186,13 @@ export function corposDaCredencial(data: MotoboyCredentialData): CorposDaCredenc
 }
 
 export async function generateMotoboyCredential(
-  data: MotoboyCredentialData,
-  assetsBaseUrl = '/credencial'
+  data: MotoboyCredentialData
 ): Promise<GeneratedCredential> {
   validateData(data)
 
   const [logoImage, crossImage] = await Promise.all([
-    extractEmbeddedImage(`${assetsBaseUrl}/logo-drogaria-cidade-generativa.svg`),
-    extractEmbeddedImage(`${assetsBaseUrl}/cruz-drogaria-cidade-generativa.svg`),
+    carregarImagemDaMarca(LOGO_URL),
+    carregarImagemDaMarca(CRUZ_URL),
   ])
 
   const tokenDisplay = escapeXml(data.tokenDisplay)

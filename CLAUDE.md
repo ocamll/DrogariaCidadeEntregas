@@ -996,6 +996,42 @@ depois de reconectar. Só um F5 destravava.
   cairia no guard e não faria nada: a sensação exata de botão quebrado
   que o usuário relatou.
 
+### A marca num lugar só
+
+Trocada em 2026-08-18 pela versão nova, a mesma da credencial do motoboy.
+`src/lib/marca.ts` é o único ponto que sabe onde os arquivos estão.
+
+Quatro coisas usam: o cabeçalho do app, a tela de login, a credencial, o
+PDF do acerto e o do romaneio. Antes disso havia **duas cópias da mesma
+extração** espalhadas pelos geradores da credencial, e a logo antiga
+entrava por `import` do bundle em dois componentes.
+
+- **A logo nova é 2008 × 320; a antiga era 502 × 80** — mesma proporção,
+  quatro vezes a resolução. Foi essa coincidência que permitiu trocar sem
+  mexer em layout nenhum: `LOGO_PROPORCAO` substituiu o `<img>` que o PDF
+  do acerto criava só pra medir dimensão a cada exportação.
+- **Os arquivos do designer ficam intactos**, em `public/marca/`. Eles
+  carregam o PNG DUAS vezes (`href` e `xlink:href`, byte a byte
+  idênticos — o segundo é fallback de renderizador antigo). Dava pra
+  cortar pela metade, mas o dia em que alguém comparar o que está no repo
+  com o que foi entregue vale mais que os 137 kB. A extração pega a
+  primeira ocorrência.
+- **Cache por sessão.** Sem ele, gerar credencial e PDF do acerto na
+  mesma sessão baixaria ~1,8 MB duas vezes. `limparCacheDaMarca()` existe
+  só pros testes: sem ela não há como exercitar "a rede caiu e a logo não
+  veio", porque a primeira carga bem-sucedida serve todas as seguintes.
+- **Documento sem logo ainda é um documento.** Falha ao carregar não
+  derruba a emissão — vale pro acerto e vale ainda mais pro romaneio, que
+  é comprovante de custódia.
+- **O custo é peso.** O cabeçalho passou de 8,5 kB (PNG) para um SVG de
+  273 kB, e o PDF do romaneio de 5 kB para 130 kB. É uma busca por sessão,
+  cacheada pelo navegador, num PC que abre o app uma vez por turno.
+
+**O `favicon.svg` NÃO é a logo da farmácia** — é um ícone roxo genérico
+que veio do template do Vite e nunca foi trocado. Não entrou nesta troca
+porque não era "a logo antiga em PNG", mas continua sendo um ícone que
+não tem nada a ver com a Drogaria Cidade.
+
 ### O PDF do romaneio
 
 Construído em 2026-08-18. `src/lib/romaneioPdf.ts`, botões na página do

@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import logo from '@/assets/logo.png'
+import { LOGO_URL } from '@/lib/marca'
 
 const PAPEL_LABEL: Record<AuthProfile['papel'], string> = {
   caixa: 'Caixa',
@@ -33,7 +33,7 @@ export function AppLayout({ children }: { children: ReactNode }) {
     <div className="flex min-h-svh flex-col">
       <header className="flex items-center justify-between bg-primary px-4 py-3 text-primary-foreground">
         <div className="flex items-center gap-3">
-          <img src={logo} alt="Drogaria Cidade" className="h-9 w-auto" />
+          <img src={LOGO_URL} alt="Drogaria Cidade" className="h-9 w-auto" />
           <p className="text-xs opacity-90">
             {profile.nome} · {PAPEL_LABEL[profile.papel]}
             {profile.lojaNome ? ` · ${profile.lojaNome}` : ''}
