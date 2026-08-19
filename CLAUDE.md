@@ -1440,7 +1440,9 @@ código enfileira `fechamento_corrida`.**
       inválidos congelam **o que é PERMITIDO serializar**, fechando a
       divergência "TS aceita, SQL rejeita" — que bytes idênticos para
       entradas válidas nunca pegariam
-   4. canônico do retorno em TypeScript, conferido contra os vetores
+   4. ~~canônico do retorno em TypeScript, conferido contra os
+      vetores~~ — **feito** (`src/lib/canonicoRetorno.ts`), com as três
+      responsabilidades separadas: validar, normalizar, serializar
    5. canônico do retorno em SQL, conferido contra os MESMOS vetores
    6. `canonico-retorno.spec.mts` e
       `conferir-canonico-retorno-no-console.js` (TS × SQL, dado real)
