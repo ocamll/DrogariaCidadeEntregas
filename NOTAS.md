@@ -3016,11 +3016,22 @@ correção do item 32. Vale começar pelo acerto, que é um clique num
 terreno conhecido; se ele estiver quebrado, é melhor descobrir ali do que
 no meio de uma frente nova.
 
-A próxima frente é o **romaneio de retorno**, e a conversa de desenho que
-ele exigia **já aconteceu, em 2026-08-19**. O desenho fechado está no
-CLAUDE.md, seção "O Romaneio de Retorno — desenho fechado, código não
-começado". **Comece por lá, não por aqui**: são seis etapas, e metade das
-decisões existe pra evitar uma segunda migration conceitual logo depois.
+A próxima frente é o **romaneio de retorno**. A conversa de desenho que
+ele exigia **já aconteceu, em 2026-08-19**, e a **etapa 1 (schema) já foi
+aplicada e conferida** — ver a migration
+`20260819120000_romaneio_de_retorno_schema.sql`.
+
+**O que vem agora é a etapa 2A, e ela é GATE.** Nenhuma linha de
+`selar_romaneio_retorno` antes de ela fechar. A ordem exata, o
+verificador de hash e as quatro regras dele estão no CLAUDE.md, seção
+"O Romaneio de Retorno". **Comece por lá, não por aqui.**
+
+O item que talvez surpreenda quem retomar: **a 2A começa por construir um
+verificador de hash dos romaneios de SAÍDA**, que não tem nada de retorno
+nele. Ele existe porque a 2A também acrescenta `papel_no_momento` ao
+INSERT da saída, e sem verificador "não mudou nada" seria leitura de
+código, não medição. De quebra fecha um buraco antigo: até aqui o projeto
+**gerava** evidência criptográfica sem conseguir **verificá-la**.
 
 O resumo do que ficou decidido, pra dar contexto ao que está lá:
 

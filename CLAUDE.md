@@ -1424,21 +1424,81 @@ de corridas históricas sem romaneio de retorno porque nasceram antes da
 regra — o que não pode é abrir buraco novo. **Depois da migration, nenhum
 código enfileira `fechamento_corrida`.**
 
-#### As seis etapas, e onde está o risco
+#### As etapas, e o gate que a 2A impõe
 
-1. Migration: `romaneios.tipo`, os dois índices parciais, `tipo_signatario`
-   ampliado, `papel_no_momento`, FK do retorno para a saída — **escrita
-   em 2026-08-19** (`20260819120000_romaneio_de_retorno_schema.sql`), com
-   as consultas de pré e pós-voo no próprio arquivo
-2. Canônico do retorno + `selar_romaneio_retorno` transacional, mais
-   `papel_no_momento` no INSERT da saída (sem tocar na fórmula do hash).
-   **Reexecutar o fluxo de saída inteiro depois** — cartão, PIN, as duas
-   assinaturas, canônico, hashes e selo — para provar que continua
-   idêntico
-3. Tela: Retorno de Corrida vira o fluxo do documento
-4. Fila offline: `romaneio_retorno`, envelope, `sync-romaneio`
-5. Fluxo excepcional (online)
-6. PDF do retorno + Drive
+1. **Schema** — feito e conferido em 2026-08-19
+   (`20260819120000_romaneio_de_retorno_schema.sql`), com as consultas de
+   pré e pós-voo no próprio arquivo.
+2. **2A — prova de integridade e canônico. GATE OBRIGATÓRIO.**
+   Nenhuma linha de `selar_romaneio_retorno` antes desta fechar:
+   1. verificador de hash dos romaneios de saída
+   2. rodar contra os reais e **registrar o baseline**
+   3. canônico do retorno em TypeScript
+   4. canônico do retorno em SQL
+   5. `canonico-retorno.spec.mts`
+   6. `conferir-canonico-retorno-no-console.js`
+   7. `papel_no_momento` no INSERT da saída
+   8. rodar o verificador **de novo**
+   9. provar que nenhum hash existente mudou nem deixou de verificar
+   10. fluxo E2E da saída: cartão → PIN → assinaturas → canônico →
+       hashes → selo
+3. **2B** — `selar_romaneio_retorno` transacional
+4. **2C** — fila offline: `romaneio_retorno`, envelope, `sync-romaneio`
+5. **2D** — tela: Retorno de Corrida vira o fluxo do documento
+6. Fluxo excepcional (online), depois PDF do retorno + Drive
+
+**A ordem não é burocracia.** A tela é a parte fácil; o contrato canônico
+entre navegador e Postgres é o que precisa estar fechado primeiro. E o
+verificador vem antes de `papel_no_momento` porque sem ele "nada moveu"
+é uma afirmação, não uma medição — o mesmo método do §22 e do §49, onde
+medir o "antes" no mesmo instrumento foi o que impediu concluir certo por
+sorte.
+
+#### O verificador de hash — o que o projeto nunca teve
+
+Até aqui o sistema **gerava** evidência criptográfica sem **conseguir
+verificá-la**: `signature_hash` e `final_hash` eram calculados, gravados
+e exibidos truncados, nunca recomputados. A etapa 2A fecha isso, e o
+insumo já está todo no banco:
+
+```
+signature_hash = digest(
+     romaneios.document_hash
+  |  assinaturas.tipo_signatario        ← LIDO DA LINHA
+  |  assinaturas.user_id  ou  motoboy_id
+  |  assinaturas.strokes::text
+  |  romaneios.selado_em                ← é o `v_agora` da fórmula
+  |  'sessao_autenticada'  ou  romaneios.modo
+)
+final_hash = digest(document_hash | hash_caixa | hash_motoboy)
+```
+
+Quatro regras, e a última é a que mais importa:
+
+1. **Reproduzir a fórmula histórica exatamente** — concatenação, ordem,
+   casts, representação dos `strokes`, timestamp e literais. Não "uma
+   fórmula equivalente".
+2. **`tipo_signatario` vem da linha**, nunca fixado. Uma função que
+   fixasse o literal falharia nos romaneios da outra era — é por isso que
+   esta regra se prova sozinha aqui.
+3. **Read-only.** Nunca "corrigir" hash. Divergiu, ele reporta romaneio,
+   hash gravado, hash recalculado e qual camada divergiu — e para.
+4. **Não escrever "todos têm que passar" antes de medir pela primeira
+   vez.** O gate é: *rodar o baseline sobre todos os romaneios selados;
+   qualquer divergência precisa ser explicada antes de prosseguir.*
+   Esperado 100%; se der, o baseline vira `N verificados / N válidos /
+   0 divergências`, e depois de `papel_no_momento` tem que continuar
+   exatamente assim.
+
+**O que o verificador NÃO verifica, declarado antes de rodar** — senão o
+primeiro baseline mostra "divergências" que não são, e alguém entra em
+pânico ou, pior, "conserta":
+
+| o quê | por quê |
+|---|---|
+| romaneios em **conflito** (`R-000002`, `R-000004`) | não têm `final_hash` nem corrida, e as assinaturas deles vivem em `romaneios.conflito`, não em `assinaturas` |
+| assinaturas **legadas** (`romaneio_id IS NULL`) | o `hash_sha256` delas vem da fórmula do schema inicial, que é outra coisa |
+| romaneios **offline sincronizados** (`R-000010`) | verificam sim — mas só se o último componente vier de `romaneios.modo`, e não do literal `'online'`. É o segundo caso que prova a regra 2 |
 
 **A etapa 2 é a perigosa**, e por um motivo específico: o canônico do
 retorno tem mais campos que o da saída — desfecho por vale, previsto
