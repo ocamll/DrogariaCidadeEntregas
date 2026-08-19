@@ -436,10 +436,18 @@ e confundi-las foi o bug original:
   capacidade de gestão.** Até 2026-08-12 quem liberava ver outra loja era
   `is_gerente()` — que apesar do nome quer dizer "gerente OU admin" —, e
   por isso gerente e admin enxergavam exatamente a mesma coisa. Hoje
-  `is_gerente()` sobrevive com um uso só: a trigger
-  `fn_entrega_protege_conferencia`, porque *poder conferir* não é
-  *enxergar outra filial*. O gerente confere, e alcança só a filial dele
-  porque o UPDATE cai na policy de `entregas`.
+  `is_gerente()` tem **dois** usos, e os dois são "capacidade de gestão no
+  turno", nunca "enxergar outra filial":
+
+  | onde | por quê |
+  |---|---|
+  | trigger `fn_entrega_protege_conferencia` | *poder conferir* não é *enxergar outra filial*. O gerente confere, e alcança só a filial dele porque o UPDATE cai na policy de `entregas` |
+  | autorizar **retorno excepcional** (decidido em 2026-08-19, ainda não construído) | destravar um fechamento é operação de turno, e o admin é o dono — não está no balcão de cada filial às 20h |
+
+  **O segundo uso é ampliação deliberada, não deriva.** Está escrito aqui
+  para que não pareça descuido quando alguém reler. E ele não se confunde
+  com **`redefinir_pin`, que continua exigindo `is_admin()`**: destravar
+  um retorno é operação de turno; zerar credencial é ato administrativo.
 - **`eventos` é o único que não sai de uma troca de função** — a tabela não
   tem `loja_id`, só `entrega_id`/`corrida_id` (nullable). O escopo do
   gerente passa pela entrega/corrida dona, via `pode_ver_entrega`/
@@ -1234,6 +1242,169 @@ sessão autenticada diz mais.
 dublê de `navigator.geolocation` — é a única forma de exercitar "negada"
 e "offline sem cache" sem depender de permissão de navegador nem de rede.
 
+### O Romaneio de Retorno — desenho fechado, código não começado
+
+Decidido com o usuário em 2026-08-19, **antes de qualquer código**, a
+pedido dele. Nada disto está construído. Quem for construir: leia esta
+seção inteira primeiro, porque metade das decisões existe para evitar uma
+segunda migration conceitual logo depois.
+
+**A ideia central: são dois documentos, e o segundo nunca altera o
+primeiro.**
+
+```
+CORRIDA
+├── ROMANEIO DE SAÍDA      snapshot do que saiu, 2 assinaturas, hashes
+├── EVENTOS DA CORRIDA     entrega, insucesso, divergência
+└── ROMANEIO DE RETORNO    snapshot do resultado, referência à saída,
+                           2 assinaturas, hashes próprios
+```
+
+O retorno **referencia** a saída e nunca a modifica — é a regra 7 aplicada
+de novo. Reconstruir "o que voltou" a partir de um romaneio que foi sendo
+alterado é exatamente o que este desenho existe para impedir.
+
+#### O bloqueio que motivou a conversa, e a saída
+
+```sql
+create unique index assinaturas_corrida_signatario
+  on public.assinaturas (corrida_id, tipo_signatario);
+```
+
+Cada corrida aceita UMA assinatura de caixa e UMA de motoboy. O retorno
+precisa de um segundo par. A unicidade correta passa a ser por
+**documento**, não por corrida — com dois índices parciais, para não
+reescrever nada:
+
+```sql
+UNIQUE (romaneio_id,  tipo_signatario) WHERE romaneio_id IS NOT NULL
+UNIQUE (corrida_id,   tipo_signatario) WHERE romaneio_id IS NULL
+```
+
+O segundo protege as assinaturas legadas (do fluxo anterior ao romaneio,
+que têm `romaneio_id` nulo) pela regra antiga. Nenhum dado histórico é
+tocado.
+
+Em `romaneios` entra `tipo` (`saida` | `retorno`) mais
+`UNIQUE (corrida_id, tipo)`, que impede dois retornos acidentais. **Ele
+isenta os conflitos de graça**: romaneio em conflito tem `corrida_id`
+nulo por construção, e no Postgres nulo não colide com nulo.
+
+#### O signatário interno não é "o caixa"
+
+Na saída normalmente é o caixa; no retorno pode ser gerente ou admin.
+Então o modelo novo usa `tipo_signatario = 'responsavel_loja'` e guarda
+**`papel_no_momento`** (`caixa` | `gerente` | `admin`) à parte. A tela
+continua mostrando "Recebido por Ana Souza — Gestora".
+
+`papel_no_momento` existe porque `profiles.papel` é o papel **atual**: se
+alguém for promovido, um romaneio de seis meses atrás passaria a afirmar
+que o ato foi praticado por um gerente. Mesmo defeito que a regra 7
+descreve, noutra coluna.
+
+**E AQUI ESTÁ A ARMADILHA QUE QUASE PASSOU.** O literal do papel entra no
+hash da assinatura:
+
+```sql
+v_hash_caixa := encode(digest(
+  v_hash || '|caixa|' || p_caixa_id::text || '|' || ...
+```
+
+Renomear `caixa` → `responsavel_loja` nas linhas existentes **quebraria a
+verificação de todo romaneio já selado** — o digest foi calculado com
+`|caixa|`. Por isso o CHECK é **ampliado, nunca renomeado**: as saídas
+antigas ficam `caixa` para sempre, o modelo novo nasce `responsavel_loja`.
+O vocabulário dividido é um fato datado, como o token v1/v2/v3.
+
+Hoje **nada recomputa esses hashes** — eles são gravados e exibidos
+truncados, nunca conferidos —, então o risco é latente. Mas fica a regra,
+que custa uma linha agora e uma migration depois: **um verificador de hash
+tem que ler `tipo_signatario` da própria linha, jamais fixar o literal.**
+No retorno, `papel_no_momento` entra no hash desde o primeiro dia — é
+fórmula nova, não há o que retrofitar.
+
+#### Numeração: identidade opaca, rótulo no papel
+
+`numero` continua vindo da sequência (`R-000843`), e `tipo` carrega o
+significado. **Não** vira `R-000842-S` / `R-000842-R`: os romaneios
+existentes são `R-000001…` sem sufixo e imutáveis, então o esquema criaria
+uma mistura permanente, e o `-R` teria que ser derivado do irmão por
+trigger. Quem está com o papel na mão acha o irmão porque **o PDF
+imprime** "Romaneio de Retorno · referente à Saída R-000842".
+
+#### O retorno substitui o fechamento manual
+
+Decisão explícita do usuário: **não existem dois caminhos para encerrar
+uma corrida.** A tela "Retorno de Corrida" evolui para produzir e selar o
+documento, e só o selo finaliza a corrida.
+
+```
+em rota → marcar Entregue/Insucesso → pagamentos e documentos
+        → snapshot → cartão + PIN do motoboy → assinatura do motoboy
+        → assinatura do responsável da loja → selar → fechar corrida
+```
+
+Tudo numa operação transacional. `fecharCorrida` sobrevive **dentro**
+dela, nunca como ação de usuário.
+
+**Cartão e PIN de novo, sim** — são duas transferências de custódia em
+sentidos opostos (farmácia→motoboy na saída, motoboy→farmácia no
+retorno), e reaproveitar a autenticação das 18h42 para provar um ato das
+20h17 não prova nada. O bloqueio progressivo que já existe (30s → 2min →
+5min → teto de 15min, zerado por um acerto) é adequado e **não precisa
+mudar**.
+
+#### O fluxo excepcional é ONLINE por construção
+
+Se o servidor recusar o PIN, aparece "Solicitar intervenção do gestor":
+motivo obrigatório, assinatura manuscrita do motoboy mesmo assim,
+identidade de quem autorizou, evento de auditoria próprio, e o documento
+**marcado no rosto** como autenticação excepcional. Nunca bypass
+silencioso, nunca para caixa comum — `is_gerente()`.
+
+**Offline isso não existe, e não é omissão.** Offline não há rejeição de
+PIN em tempo real: cartão e PIN são selados no envelope RSA e o servidor
+decide na sincronização. Não há a quem o servidor diga "não". Motoboy com
+credencial bloqueada assinando offline vira conflito no sync, com a prova
+preservada — o caso do `R-000004`.
+
+#### `fechamento_corrida` na fila: drenar, não converter
+
+Um item `fechamento_corrida` pendente no IndexedDB **não pode virar** um
+romaneio de retorno: faltam assinatura, PIN e snapshot, que nunca foram
+coletados. Descartar seria a perda silenciosa que a chave própria da fila
+veio corrigir em 16/08. Então:
+
+| release | comportamento |
+|---|---|
+| N (o do retorno) | escreve **só** `romaneio_retorno`; ainda **lê** `fechamento_corrida` legado |
+| N+1 | ainda lê o legado, por segurança |
+| depois | remove o handler, confirmada a fila drenada |
+
+O item legado executa o comportamento antigo, fecha a corrida e grava
+auditoria `fechamento_legado_sem_romaneio_retorno`. Vai existir um punhado
+de corridas históricas sem romaneio de retorno porque nasceram antes da
+regra — o que não pode é abrir buraco novo. **Depois da migration, nenhum
+código enfileira `fechamento_corrida`.**
+
+#### As seis etapas, e onde está o risco
+
+1. Migration: `romaneios.tipo`, os dois índices parciais, `tipo_signatario`
+   ampliado, `papel_no_momento`, FK do retorno para a saída
+2. Canônico do retorno + `selar_romaneio_retorno` transacional
+3. Tela: Retorno de Corrida vira o fluxo do documento
+4. Fila offline: `romaneio_retorno`, envelope, `sync-romaneio`
+5. Fluxo excepcional (online)
+6. PDF do retorno + Drive
+
+**A etapa 2 é a perigosa**, e por um motivo específico: o canônico do
+retorno tem mais campos que o da saída — desfecho por vale, previsto
+contra realizado, motivo de insucesso. São **dois gêmeos TypeScript/SQL de
+novo**, com mais superfície para divergir em um byte. Ele precisa do seu
+próprio `canonico.spec.mts` e do seu próprio
+`conferir-canonico-no-console.js`, separados dos da saída. Ver "As duas
+implementações gêmeas" acima antes de escrever qualquer um dos dois lados.
+
 ### Ordem dentro da transação do selo
 
 `corrida → vales em rota → romaneio → vínculo → assinaturas`. O UPDATE dos
@@ -1431,7 +1602,10 @@ agora só roda nos specs, como padrão-ouro contra o qual
   na página do romaneio, duas vias. Ver "Google Drive".
 - **Portal da agência.** `profiles.papel` já aceita `'agencia'` desde o
   schema inicial; falta a policy.
-- **Romaneio de retorno.** Nada impede — o de saída não assume ser único.
+- **Romaneio de retorno.** **Desenho fechado em 2026-08-19, código não
+  começado** — ver a seção própria abaixo. Ele deixou de ser "nada
+  impede" e virou uma frente de seis etapas, com decisões já tomadas que
+  precisam ser lidas antes de escrever a primeira linha.
 - **Correção cadastral por evento** (categoria 1 da regra 7).
 
 ---
@@ -1587,6 +1761,15 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
    atômica, (4) fila offline com dono e envelope, (5) tela da Nova
    Corrida, (6) custódia no vale e página do romaneio. Ver "Cadeia de
    custódia" acima.
+10. ~~Envio do romaneio ao Drive~~ — feito em 2026-08-19. Botão por
+    romaneio e **sangria no fim do dia** (aba Fechamento), em
+    `Romaneios › Filial › mês › dia › via`. Testado contra o Google de
+    verdade. Ver "Google Drive" acima.
+11. **Romaneio de Retorno** — **desenho fechado em 2026-08-19, código não
+    começado.** Outra frente de seis etapas; as decisões estão na seção
+    "O Romaneio de Retorno" acima e precisam ser lidas antes da primeira
+    linha. A etapa perigosa é a 2, o canônico — dois gêmeos
+    TypeScript/SQL de novo, com mais campos que o da saída.
 
 ---
 

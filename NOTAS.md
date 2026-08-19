@@ -2916,6 +2916,93 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
+## 58. O desenho do Romaneio de Retorno, fechado antes do código
+
+Sessão de 2026-08-19, depois do Drive. O usuário trouxe a modelagem
+pronta e pediu conversa antes de qualquer linha — o que se provou certo,
+porque a conversa mudou duas das decisões dele.
+
+**A proposta dele estava certa no núcleo:** a assinatura hoje está presa
+à *corrida* e deveria estar presa ao *documento*; o retorno é um segundo
+documento que referencia a saída e nunca a altera; unicidade por
+`romaneio_id` com índices parciais, sem reescrever histórico. Nada disso
+precisou de ajuste.
+
+O desenho final está no CLAUDE.md. Aqui fica o que a conversa **achou**.
+
+### O que o código respondeu, e que ninguém teria adivinhado
+
+**O papel do signatário está dentro do hash.**
+
+```sql
+v_hash_caixa := encode(digest(
+  v_hash || '|caixa|' || p_caixa_id::text || '|' || ...
+```
+
+Ele queria renomear `tipo_signatario` de `caixa` pra `responsavel_loja`,
+com um argumento bom (no retorno quem recebe pode ser gerente). Mas o
+literal entra no `signature_hash`, e o `final_hash` é
+`digest(document_hash | hash_caixa | hash_motoboy)` — renomear as linhas
+existentes quebraria a verificação de **todo romaneio já selado**.
+
+É a regra 7 alcançando um lugar onde ninguém procuraria: o vocabulário
+virou dado assinado. A saída foi ampliar o CHECK em vez de renomear, e o
+efeito colateral é bom — `papel_no_momento` vira coluna própria, que era
+o que ele queria de verdade, e entra no hash do retorno desde o dia um.
+
+**Ressalva honesta: nada recomputa esses hashes hoje.** São gravados e
+exibidos truncados, nunca conferidos. Então o risco é latente, não ativo.
+O que fica registrado é a regra pro dia em que alguém escrever um
+verificador: ler `tipo_signatario` da linha, jamais fixar o literal.
+
+**O bloqueio progressivo que ele propôs já existe.** Ele desenhou
+"3 erros → pequeno atraso, mais → bloqueio temporário, gestor recupera".
+O banco já faz exatamente isso desde 16/08: 30s → 2min → 5min → teto de
+15min, e um acerto zera o contador. A preocupação com "5 erros e ninguém
+fecha o dia" nunca foi o comportamento. Uma sessão economizada por ir
+olhar em vez de aceitar a premissa.
+
+**`redefinir_pin` exige `is_admin()`, não gestor.** A decisão dele dizia
+"Gestor/Admin conclui o excepcional", mas o gerente não tem esse poder
+hoje — e não é acidente, é a separação de 12/08 entre escopo de filial e
+capacidade de gestão. O problema prático: o admin é o dono, não está no
+balcão de cada filial às 20h, então excepcional restrito a admin
+**paralisaria justamente o caso que ele existe pra destravar**. Ele
+confirmou `is_gerente()`, e ficou registrado como ampliação deliberada —
+segundo uso daquela função, que até aqui tinha um só.
+
+### Duas coisas que simplificaram por si
+
+**O fluxo excepcional é online por construção.** Offline não existe
+"não foi possível autenticar": o PIN é selado no envelope RSA e o
+servidor decide na sincronização. Não há a quem o servidor diga "não".
+Uma máquina de estados a menos, de graça.
+
+**`UNIQUE (corrida_id, tipo)` isenta os conflitos sozinho** — romaneio em
+conflito tem `corrida_id` nulo por construção, e no Postgres nulo não
+colide. Não precisa de índice parcial ali.
+
+### A decisão de escopo que ele tomou, e o que ela custa
+
+O retorno **substitui** o fechamento manual. Não vão existir dois
+caminhos pra encerrar uma corrida — mesma família do "notificar não tira
+da fila": dois caminhos pro mesmo fato, nenhum definitivo.
+
+O custo é a fila offline. Um `fechamento_corrida` pendente no IndexedDB
+**não tem como virar** um romaneio de retorno: falta assinatura, PIN e
+snapshot, que nunca foram coletados. Ficou uma janela de compatibilidade
+de duas releases, com o item legado executando o comportamento antigo e
+gravando auditoria própria. Descartar em silêncio seria a perda que a
+chave própria da fila veio corrigir em 16/08.
+
+### O tamanho
+
+Seis etapas, como a saída. A perigosa é a 2: o canônico do retorno tem
+mais campos que o da saída — desfecho por vale, previsto contra
+realizado, motivo de insucesso —, então são dois gêmeos TypeScript/SQL de
+novo com mais superfície pra divergir num byte. Spec próprio e
+`conferir-canonico-no-console.js` próprio, separados dos da saída.
+
 ### PRÓXIMA SESSÃO: romaneio de retorno — comece por aqui
 
 ~~Envio do romaneio ao Drive~~ — **feito em 2026-08-19** (item 57).
@@ -2929,14 +3016,30 @@ correção do item 32. Vale começar pelo acerto, que é um clique num
 terreno conhecido; se ele estiver quebrado, é melhor descobrir ali do que
 no meio de uma frente nova.
 
-A próxima frente combinada é o **romaneio de retorno**. Ele precisa de
-conversa de desenho ANTES de código, e tem um bloqueio concreto já
-descoberto: `create unique index assinaturas_corrida_signatario on
-public.assinaturas (corrida_id, tipo_signatario)` — cada corrida aceita
-UMA assinatura de caixa e UMA de motoboy, e o retorno precisa de um
-segundo par. A migration tem que incluir `romaneio_id` na unicidade, com
-índice parcial, porque as assinaturas antigas têm `romaneio_id` nulo e no
-Postgres nulo não colide com nulo.
+A próxima frente é o **romaneio de retorno**, e a conversa de desenho que
+ele exigia **já aconteceu, em 2026-08-19**. O desenho fechado está no
+CLAUDE.md, seção "O Romaneio de Retorno — desenho fechado, código não
+começado". **Comece por lá, não por aqui**: são seis etapas, e metade das
+decisões existe pra evitar uma segunda migration conceitual logo depois.
+
+O resumo do que ficou decidido, pra dar contexto ao que está lá:
+
+- unicidade das assinaturas passa a ser por **documento**
+  (`romaneio_id`), com índice parcial preservando as legadas;
+- `romaneios.tipo` (`saida`|`retorno`) + `UNIQUE (corrida_id, tipo)`;
+- o retorno **substitui** o fechamento manual — não existirão dois
+  caminhos pra encerrar uma corrida;
+- cartão + PIN do motoboy **de novo** no retorno, porque são duas
+  transferências de custódia em sentidos opostos;
+- fluxo excepcional autorizado por `is_gerente()`, **só online**;
+- `fechamento_corrida` na fila é **drenado por handler legado**, nunca
+  convertido nem descartado.
+
+E o que a conversa descobriu no código, que é o que mais vale:
+**o literal do papel do signatário entra no `signature_hash`**
+(`v_hash || '|caixa|' || …`). Renomear `caixa` → `responsavel_loja` nas
+linhas existentes quebraria a verificação de todo romaneio já selado. Por
+isso o CHECK é ampliado, nunca renomeado. Detalhe completo no CLAUDE.md.
 
 **Armadilhas do Drive que continuam valendo** (tudo em
 `src/lib/googleDrive.ts` e na seção "Google Drive" do CLAUDE.md), porque o
@@ -2955,7 +3058,7 @@ romaneio de retorno provavelmente vai subir também:
 
 ### Estado em 2026-08-19
 
-A cadeia de custódia (itens 33 a 56) está construída e **funcionando
+A cadeia de custódia (itens 33 a 57) está construída e **funcionando
 online**: uma saída real foi selada de ponta a ponta — cartão bipado, PIN
 conferido pelo servidor, duas assinaturas, romaneio `R-000001` com as
 assinaturas visíveis pelo chevron do vale.
