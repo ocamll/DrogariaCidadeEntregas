@@ -33,3 +33,10 @@ dist-ssr
 # aqui dentro. Ver "O arquivo do cartão" no CLAUDE.md.
 cartao-*.pdf
 cartao-*.svg
+
+# AGENTS.md — convenção que OUTRAS ferramentas de IA usam pra ler
+# instruções de projeto (o Codex, da OpenAI, entre elas). O arquivo que
+# apareceu aqui é uma cópia do CLAUDE.md, gerada fora das sessões de
+# trabalho e já desatualizada quando nasceu. Fica de fora do repositório
+# porque duas fontes de verdade é pior que uma: a fonte é o CLAUDE.md.
+AGENTS.md
