@@ -1,4 +1,4 @@
-# Notas de trabalho — 2026-08-09 a 2026-08-17
+# Notas de trabalho — 2026-08-09 a 2026-08-19
 
 Registro de trabalho, não é documentação permanente do projeto (isso é o
 CLAUDE.md). Decisões duráveis já foram incorporadas lá; aqui fica o que é
@@ -12,13 +12,23 @@ Google Drive do item 29 também sendo de 16/08.
 **Onde o projeto está:** funcionalmente completo. A checklist "Dentro" do
 MVP fechou no item 6, e por cima dela entraram cancelamento, fechamento de
 caixa, gestão de usuários, tarifa/vales, permissões por filial, cidade,
-exportação em .xlsx e PDF, e envio ao Google Drive. Em 16 e 17/08 entrou a
-frente maior de todas — a cadeia de custódia da saída (itens 33 a 47),
-que já selou uma saída real de ponta a ponta.
+exportação em .xlsx e PDF, e envio ao Google Drive. De 16 a 19/08 entrou a
+frente maior de todas — a cadeia de custódia da saída (itens 33 a 56), que
+já foi exercitada nos três caminhos possíveis: online (`R-000001`),
+conflito com as assinaturas preservadas (`R-000004`) e offline
+sincronizada (`R-000010`), mais o cartão físico lido no leitor da farmácia
+e a credencial CR80 conferida contra o desenho original.
 
-**Se você está retomando, comece por "Estado em 2026-08-17", no fim deste
-arquivo.** É lá que está o que falta, em ordem de risco, e o que já foi
-aplicado no Supabase.
+**O que NÃO existe ainda, e é fácil supor errado:** não há deploy — nem
+conta na Cloudflare, nem site no ar. Tudo rodou em localhost, numa
+máquina só. A premissa de dois dispositivos (PC do caixa + tablet do
+motoboy) nunca foi exercitada de verdade.
+
+**Se você está retomando, comece por "PRÓXIMA SESSÃO", perto do fim deste
+arquivo.** É lá que está o trabalho combinado e as duas perguntas que
+precisam de resposta antes de começar. Logo abaixo dela, "Estado em
+2026-08-19" traz o que falta em ordem de risco e o que já foi aplicado no
+Supabase.
 
 ## 1. Fila offline nas outras 4 escritas
 
@@ -2342,6 +2352,126 @@ Registradas pra não voltarem como alarme a cada sessão:
   Faz sentido: limpar antes significaria recriar massa de teste a cada
   frente nova.
 
+## 54. Geolocalização: o que dá e o que não dá pra fazer offline
+
+O usuário pediu que a geolocalização fosse **obrigatória** pra selagem
+("é fundamental"), e perguntou se dava pra capturar coordenada de alguma
+forma sem rede.
+
+**Obrigatória não pode ser, e o motivo é de hardware.** O PC do balcão
+não tem GPS. O navegador resolve posição mandando os WiFi vizinhos pro
+serviço do Google — isso EXIGE rede. Offline não existe a quem
+perguntar. Exigir coordenada seria proibir saída sem internet, ou seja,
+desligar o caminho que a gente passou dias provando (itens 48 a 50).
+
+E mesmo online, geolocalização de desktop por WiFi erra de centenas de
+metros a quilômetros. Como prova de que "o caixa estava na farmácia", a
+sessão autenticada diz mais.
+
+**O que dá, e virou o desenho:**
+
+- `aquecerGeolocalizacao()` pede uma leitura quando a Nova Corrida monta
+  com internet — mesmo lugar do cache de credenciais. É isso que faz uma
+  saída offline ter coordenada.
+- Ao selar: leitura fresca com 8s (antes 3s, curtos demais pra alguém
+  RESPONDER ao pedido de permissão — que é onde a permissão se decide);
+  não vindo, aceita a do cache do navegador, até 10 minutos.
+- **A leitura de cache é ROTULADA**: `obtida_em` guarda o horário real da
+  medição, `origem` diz `fresca` ou `cache`, e a tela escreve "leitura de
+  11:25, não do momento da selagem".
+- **Sem coordenada, grava o MOTIVO** (`negada`, `sem_suporte`,
+  `indisponivel`, `expirou`). O retorno nunca é `null`.
+
+**Por que o usuário achava que não existia:** ela estava implementada
+desde a etapa 3, mas devolvia `null` em silêncio e o campo sumia da tela.
+"Não registrada" e "negada" eram indistinguíveis. Era o buraco, não a
+ausência.
+
+A função saiu de `data/romaneios.ts` pra `lib/geolocalizacao.ts` porque
+passou a ter ramificação de verdade. `scripts/geolocalizacao.spec.mts`
+cobre os cinco caminhos com um dublê de `navigator.geolocation` — única
+forma de exercitar "negada" e "offline sem cache" sem depender de
+permissão nem de rede.
+
+Nada muda nos gêmeos do `offline_event_hash`: os dois lados serializam o
+que recebem.
+
+## 55. O PDF do romaneio
+
+Pedido junto com "envio ao Drive" e "romaneio de retorno". Feito primeiro
+porque é autocontido e é a fundação dos outros dois.
+
+**A decisão que governa o arquivo inteiro: ele sai do SNAPSHOT.** Os
+vales vêm de `romaneios.payload`, congelado na selagem — não de
+`entregas`, que pode ter mudado. Correção posterior aparece em **seção
+separada**, com a frase de que o documento acima não muda.
+
+O usuário confirmou explicitamente: *"é pra aparecer o que foi assinado,
+e se foi corrigido, aparecer como evento posterior"*.
+
+**Duas vias**, porque os destinatários são dois. A da agência **omite o
+valor da compra** — decisão dele: a agência precisa do valor da entrega
+pro acerto, não do que o cliente comprou. A justificativa dele pra
+agência ter acesso: no futuro painel da agência ela verá o histórico dos
+vales que fez no mês. *(O painel continua fora de escopo — falta a policy
+de `'agencia'`.)*
+
+**Os quatro relógios finalmente têm tela.** Retirada, retorno e duração
+saem de `corridas.saida_em`/`retorno_em`, que existem desde 2026-08-10 e
+nunca tiveram superfície. O usuário pediu isso achando que faltava
+capturar; faltava só exibir. **Consequência boa: o relatório de tempo
+médio poderá ser calculado retroativamente**, sobre todas as corridas já
+fechadas.
+
+A duração usa o relógio do SERVIDOR nos dois lados — misturar com o do
+dispositivo daria um intervalo que não aconteceu. Corrida ainda aberta é
+DITA ("corrida ainda aberta"), não omitida.
+
+Assinaturas em vetor, redesenhadas dos pontos. Rodapé com `final_hash`,
+`document_hash`, IP, geolocalização e a frase de que o PDF é renderização
+do registro, **não a fonte da verdade**.
+
+`scripts/romaneio-pdf.spec.mts`, 30+ casos. O primeiro é o que importa:
+um romaneio cujo snapshot diverge de propósito do "dado de hoje".
+`scripts/romaneio-de-exemplo.mts` gera as duas vias com dado fictício.
+
+## 56. A logo nova, e a marca num lugar só
+
+O usuário mandou trocar a logo do romaneio pela nova (a mesma da
+credencial) e, junto, "tudo que usava a logo antiga em PNG".
+
+Mapeados e trocados: cabeçalho do app, tela de login, PDF do acerto,
+credencial (já usava a nova) e o PDF do romaneio, que ganhou logo pela
+primeira vez. `src/assets/logo.png` apagado.
+
+**Coincidência que facilitou tudo:** a nova é 2008 × 320 e a antiga era
+502 × 80 — exatamente quatro vezes, mesma proporção. Nenhum layout mudou.
+
+`src/lib/marca.ts` virou o único ponto que sabe onde os arquivos estão.
+Antes havia duas cópias da mesma extração de PNG embutido nos geradores
+da credencial. De quebra sumiu o `<img>` que o PDF do acerto criava só
+pra MEDIR a dimensão da logo a cada exportação.
+
+**Os arquivos do designer ficam intactos** em `public/marca/`, com a
+duplicata `href`/`xlink:href` e tudo. Comparar o repo com o que foi
+entregue vale mais que os 137 kB.
+
+**Um teste precisou mudar, e a correção é mais interessante que a
+falha.** Havia um `sem imagem embutida`, criado pra provar que as
+assinaturas são vetor; passou a falhar corretamente, porque agora existe
+uma imagem legítima. Mas contagem absoluta também não serve: a logo é PNG
+com transparência e o jsPDF emite **imagem + máscara alfa**, então uma
+logo conta 2. O que prova é a contagem **não crescer** quando entram
+assinaturas.
+
+**Custo:** cabeçalho de 8,5 kB para 273 kB, PDF do romaneio de 5 kB para
+130 kB. Uma busca por sessão, cacheada. O peso do PDF importa porque ele
+vai subir pro Drive.
+
+**O `favicon.svg` não é a logo da farmácia** — é ícone roxo genérico do
+template do Vite, nunca trocado. Não entrou porque não era "a logo antiga
+em PNG", mas continua sem relação com a Drogaria Cidade.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -2553,9 +2683,58 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### Estado em 2026-08-17 — leia isto primeiro
+### PRÓXIMA SESSÃO: envio do romaneio ao Drive — comece por aqui
 
-A cadeia de custódia (itens 33 a 47) está construída e **funcionando
+Combinado com o usuário em 2026-08-19: a próxima frente é **subir o PDF
+do romaneio ao Google Drive**. O PDF ficou pronto (item 55); falta só o
+envio.
+
+**Duas decisões que eu levantei e ele ainda não respondeu.** Pergunte
+antes de construir, porque mudam o desenho:
+
+1. **Em que pasta os romaneios ficam?** O acerto usa
+   `Drogaria Cidade Entregas - Acertos › Acertos dd-mm-aaaa a dd-mm-aaaa`.
+   Romaneio é outro tipo de documento e sai um por corrida, não um por
+   quinzena — algo como `Romaneios › 2026-08` parece caber melhor, mas é
+   escolha dele.
+2. **Sobe as duas vias ou só a da agência?** A da farmácia já fica no
+   banco; a da agência é a que existe pra ser compartilhada.
+
+**O que reaproveitar, e as armadilhas já pagas** (tudo em
+`src/lib/googleDrive.ts` e na seção "Google Drive" do CLAUDE.md):
+
+- **Pedir o token é a PRIMEIRA coisa depois do clique**, antes de gerar
+  o PDF. Gerar leva centenas de ms e o pop-up deixa de contar como
+  resposta ao gesto do usuário — o navegador bloqueia. Isso já quebrou
+  uma vez (item 32).
+- O script do Google é pré-carregado quando a tela monta (`prepararDrive`).
+- Escopo `drive.file`, token só na memória, sem refresh token.
+- Reenviar o mesmo período cai na mesma subpasta em vez de duplicar — o
+  romaneio precisa de regra equivalente, provavelmente por número
+  (`R-000010`).
+
+**Duas coisas novas a considerar:**
+
+- **O PDF agora pesa ~130 kB** por causa da logo (item 56). Subir as duas
+  vias de toda corrida é volume real; vale pensar se sobe sempre ou sob
+  demanda.
+- **Nada disso foi testado no ar**, porque não há deploy. O envio ao
+  Drive em produção exige `VITE_GOOGLE_CLIENT_ID` nas variáveis do
+  Cloudflare **e** a URL do Pages nas origens autorizadas do cliente
+  OAuth — e o deploy inteiro ainda não existe (ver pendências).
+
+Depois do Drive, o usuário pediu o **romaneio de retorno**. Ele precisa de
+conversa de desenho ANTES de código, e tem um bloqueio concreto já
+descoberto: `create unique index assinaturas_corrida_signatario on
+public.assinaturas (corrida_id, tipo_signatario)` — cada corrida aceita
+UMA assinatura de caixa e UMA de motoboy, e o retorno precisa de um
+segundo par. A migration tem que incluir `romaneio_id` na unicidade, com
+índice parcial, porque as assinaturas antigas têm `romaneio_id` nulo e no
+Postgres nulo não colide com nulo.
+
+### Estado em 2026-08-19
+
+A cadeia de custódia (itens 33 a 56) está construída e **funcionando
 online**: uma saída real foi selada de ponta a ponta — cartão bipado, PIN
 conferido pelo servidor, duas assinaturas, romaneio `R-000001` com as
 assinaturas visíveis pelo chevron do vale.
