@@ -2,10 +2,14 @@
 // `document_hash` do DCRR1.
 //
 // ATENÇÃO: este arquivo é a implementação GÊMEA de
-// `public.romaneio_retorno_canonico` (etapa 2A item 5, ainda não
-// escrita). As duas precisam produzir os MESMOS BYTES, sempre. Se
-// divergirem, o sintoma não é erro claro — é "o retorno offline nunca
-// sincroniza", meses depois.
+// `public.romaneio_retorno_canonico` (migration 20260819140000). As duas
+// precisam produzir os MESMOS BYTES e recusar as MESMAS entradas PELO
+// MESMO MOTIVO, sempre. Se divergirem, o sintoma não é erro claro — é "o
+// retorno offline nunca sincroniza", meses depois.
+//
+// MEXEU NUM LADO, MEXA NO OUTRO, e rode os dois testes:
+// `npx tsx scripts/canonico-retorno.spec.mts` aqui, e o SQL que
+// `scripts/dcrr1-sql.spec.mts` gera, lá.
 //
 // O CONTRATO MANDA, ESTA FUNÇÃO OBEDECE. Os oito vetores válidos e os
 // doze inválidos de `scripts/dcrr1-vetores.mts` foram escritos à mão a
@@ -210,7 +214,7 @@ export function validarRetorno(entrada: EntradaRetorno): MotivoRejeicao | null {
       }
       // Descartar em silêncio seria sumir com dinheiro que alguém
       // digitou. Recusa, pra a tela poder perguntar.
-      if (vale.pagamentosRealizados.length > 0) return 'pagamento_em_insucesso'
+      if ((vale.pagamentosRealizados ?? []).length > 0) return 'pagamento_em_insucesso'
     } else if (
       vale.motivo !== null &&
       vale.motivo !== undefined &&
@@ -222,7 +226,9 @@ export function validarRetorno(entrada: EntradaRetorno): MotivoRejeicao | null {
       return 'motivo_invalido'
     }
 
-    for (const pagamento of vale.pagamentosRealizados) {
+    // `?? []` espelha o `coalesce(…, '[]')` do lado SQL: campo
+    // ausente é lista vazia nos DOIS, senão um estoura e o outro aceita.
+    for (const pagamento of vale.pagamentosRealizados ?? []) {
       if (pagamentos.has(pagamento.pagamentoId)) return 'pagamento_duplicado'
       pagamentos.add(pagamento.pagamentoId)
 
@@ -287,7 +293,7 @@ export function normalizarRetorno(entrada: EntradaRetorno): RetornoNormalizado {
         desfecho: vale.desfecho,
         motivo: entregue ? '-' : textoCanonico(vale.motivo),
         detalhe: entregue ? '-' : textoCanonico(vale.detalhe),
-        pagamentos: vale.pagamentosRealizados
+        pagamentos: (vale.pagamentosRealizados ?? [])
           .map((pagamento) => ({
             entregaId: idCanonico(vale.entregaId),
             pagamentoId: idCanonico(pagamento.pagamentoId),

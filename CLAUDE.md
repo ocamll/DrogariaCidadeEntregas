@@ -1443,7 +1443,10 @@ código enfileira `fechamento_corrida`.**
    4. ~~canônico do retorno em TypeScript, conferido contra os
       vetores~~ — **feito** (`src/lib/canonicoRetorno.ts`), com as três
       responsabilidades separadas: validar, normalizar, serializar
-   5. canônico do retorno em SQL, conferido contra os MESMOS vetores
+   5. ~~canônico do retorno em SQL, conferido contra os MESMOS
+      vetores~~ — **escrito** (`20260819140000_canonico_retorno.sql`),
+      espelhando o aninhamento e a ordem de validação. Falta APLICAR e
+      rodar o SQL que `scripts/dcrr1-sql.spec.mts` gera
    6. `canonico-retorno.spec.mts` e
       `conferir-canonico-retorno-no-console.js` (TS × SQL, dado real)
    7. `papel_no_momento` no INSERT da saída
@@ -1526,6 +1529,70 @@ canonico.responsavel  = assinatura_loja.user_id
 ```
 
 Sem isso existiria "documento diz João, assinatura é Pedro".
+
+##### De onde vem cada fato — parâmetro ou banco
+
+**Nenhum fato acrescentado pelo Romaneio de Retorno pode ser obtido de
+uma coluna mutável do estado operacional para reconstruir o canônico. Os
+fatos assinados vêm do input estruturado do retorno; o banco é usado para
+validar identidade, pertencimento, integridade e permissões.**
+
+Isso parece contradizer a saída, e não contradiz — mas a diferença
+**precisa** estar escrita, senão alguém "conserta" um dos dois para
+combinar com o outro. `romaneio_canonico` LÊ de `entregas` (cliente,
+endereço, valores), e está certo. A regra que reconcilia os dois:
+
+> O canônico **lê do banco** o que PREEXISTE ao ato, e recebe **por
+> parâmetro** o que o ato DECLARA.
+
+| | saída | retorno |
+|---|---|---|
+| natureza do fato | já estava lá; ninguém digita ao assinar | é declarado no ato, pelas duas partes |
+| de onde vem | `entregas` | parâmetro `jsonb` |
+| se mudar entre assinar e selar | os bytes mudam e a assinatura deixa de valer — **é feature**, e o comentário da função diz isso | não há o que mudar: a transação é que vai gravar |
+
+Ler `desfecho` ou `detalhe` de `entregas` para montar o canônico do
+retorno seria circular — o canônico dependeria do que a própria transação
+está prestes a escrever. E `observacoes`, onde o `fecharCorrida` hoje
+guarda o detalhe do insucesso, é coluna de uso geral que qualquer coisa
+reescreve.
+
+**O servidor não recebe canônico pronto.** Ele recebe dados
+estruturados, reconstrói o DCRR1 sozinho e compara com o `document_hash`
+que o cliente assinou. O parâmetro é `jsonb` **aninhado**, espelhando o
+modelo do TypeScript:
+
+```json
+[{ "entrega_id": "…", "desfecho": "entregue", "motivo": null,
+   "detalhe": null,
+   "pagamentos_realizados": [
+     { "pagamento_id": "…", "forma": "pix",
+       "valor_cents": 12345, "troco_cents": 0 }]}]
+```
+
+O aninhamento não é organização: é o que impede o SQL de reabrir, com um
+`select` plano de `pagamentos`, o caso que o TypeScript fechou por
+construção — pagamento apontando para vale que não está no documento.
+
+**ORDEM DE VALIDAÇÃO ≠ ORDEM DE SERIALIZAÇÃO.** A validação percorre na
+ordem RECEBIDA (`with ordinality` no SQL), porque o motivo reportado
+depende dela e os dois gêmeos têm que reportar o mesmo. Só depois de
+válida a entrada é normalizada, ordenada e serializada.
+
+**E a mesma entrada alimenta a transação.** Não "parâmetro gera canônico,
+depois lê tabela para atualizar": o `p_retorno` gera o DCRR1, valida o
+hash, grava o desfecho das entregas, grava os pagamentos, gera os eventos
+e fecha a corrida. O fato assinado é literalmente o fato aplicado — e
+offline isso deixa de ser elegância e vira necessidade, porque entre
+assinar às 18h42 e sincronizar às 19h10 o estado operacional pode ter
+mudado.
+
+O que o banco confere antes de selar (recebo por parâmetro **não**
+significa confiar no cliente): a saída existe e está selada; o
+`saida_hash` bate com o `document_hash` persistido; a corrida é daquela
+saída; cada `entrega_id` pertence ao romaneio de saída; não falta nem
+sobra vale; o motoboy é o da custódia; o responsável é a identidade
+server-side; e o retorno ainda pode ser selado.
 
 ##### As regras que decorrem
 
