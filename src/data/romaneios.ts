@@ -623,36 +623,25 @@ export type RomaneioCompleto = CustodiaDoVale & {
   } | null
 }
 
-async function buscarRomaneio(romaneioId: string): Promise<RomaneioCompleto | null> {
-  const { data, error } = await supabase
-    .from('romaneios')
-    .select(
-      'id, numero, status, modo, selado_em, ocorrido_em_local, recebido_em_servidor, ' +
-        'final_hash, document_hash, canonico, payload, conflito, ip, geolocalizacao, ' +
-        // Os quatro relógios da corrida. Existem desde 2026-08-10 e nunca
-        // tiveram tela: são eles que dão retirada, retorno e, mais pra
-        // frente, tempo médio de entrega. O do SERVIDOR é o que vale como
-        // fato (`saida_em`/`retorno_em`, carimbados por trigger); o do
-        // dispositivo fica ao lado porque o PC do balcão pode estar
-        // errado e a regra 8 manda guardar os dois.
-        'corridas(saida_em, saida_em_local, retorno_em, retorno_em_local, status), ' +
-        'lojas(nome), profiles(nome)'
-    )
-    .eq('id', romaneioId)
-    .maybeSingle()
+// As colunas que `RomaneioCompleto` exige, num lugar só. A página do
+// romaneio e a sangria do dia montam o PDF pelo mesmo
+// `montarRomaneioPdf`, então precisam exatamente do mesmo formato — duas
+// listas de colunas que precisam concordar é a classe de divergência que
+// este projeto já paga caro nos gêmeos do canônico.
+const SELECT_ROMANEIO =
+  'id, numero, status, modo, selado_em, ocorrido_em_local, recebido_em_servidor, ' +
+  'final_hash, document_hash, canonico, payload, conflito, ip, geolocalizacao, ' +
+  // Os quatro relógios da corrida. Existem desde 2026-08-10 e nunca
+  // tiveram tela: são eles que dão retirada, retorno e, mais pra frente,
+  // tempo médio de entrega. O do SERVIDOR é o que vale como fato
+  // (`saida_em`/`retorno_em`, carimbados por trigger); o do dispositivo
+  // fica ao lado porque o PC do balcão pode estar errado e a regra 8
+  // manda guardar os dois.
+  'corridas(saida_em, saida_em_local, retorno_em, retorno_em_local, status), ' +
+  'lojas(nome), profiles(nome)'
 
-  if (error) throw error
-  if (!data) return null
-
-  // eslint-disable-next-line @typescript-eslint/no-explicit-any
-  const r = data as any
-
-  const { data: assinaturas, error: erroAssinatura } = await supabase
-    .from('assinaturas')
-    .select(SELECT_ASSINATURAS)
-    .eq('romaneio_id', romaneioId)
-  if (erroAssinatura) throw erroAssinatura
-
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function mapRomaneio(r: any, assinaturas: AssinaturaDoRomaneio[]): RomaneioCompleto {
   return {
     romaneioId: r.id,
     numero: r.numero,
@@ -679,10 +668,27 @@ async function buscarRomaneio(romaneioId: string): Promise<RomaneioCompleto | nu
           status: r.corridas.status,
         }
       : null,
-    assinaturas: (assinaturas as unknown as LinhaAssinatura[])
-      .map(mapAssinatura)
-      .sort((a, b) => ordemDeAssinatura(a) - ordemDeAssinatura(b)),
+    assinaturas: [...assinaturas].sort((a, b) => ordemDeAssinatura(a) - ordemDeAssinatura(b)),
   }
+}
+
+async function buscarRomaneio(romaneioId: string): Promise<RomaneioCompleto | null> {
+  const { data, error } = await supabase
+    .from('romaneios')
+    .select(SELECT_ROMANEIO)
+    .eq('id', romaneioId)
+    .maybeSingle()
+
+  if (error) throw error
+  if (!data) return null
+
+  const { data: assinaturas, error: erroAssinatura } = await supabase
+    .from('assinaturas')
+    .select(SELECT_ASSINATURAS)
+    .eq('romaneio_id', romaneioId)
+  if (erroAssinatura) throw erroAssinatura
+
+  return mapRomaneio(data, (assinaturas as unknown as LinhaAssinatura[]).map(mapAssinatura))
 }
 
 export function useRomaneio(romaneioId: string | null) {
@@ -691,6 +697,100 @@ export function useRomaneio(romaneioId: string | null) {
     queryFn: () => buscarRomaneio(romaneioId as string),
     enabled: !!romaneioId,
   })
+}
+
+// Teto explícito, como toda query deste projeto desde o item 13: o
+// `max-rows` do PostgREST cortaria em silêncio. Um dia com mais de 200
+// saídas numa filial não existe; se existir, a tela avisa em vez de
+// arquivar metade sem ninguém notar.
+export const TETO_SANGRIA = 200
+
+/**
+ * Os romaneios que o servidor RECEBEU na data escolhida, com tudo que o
+ * PDF precisa.
+ *
+ * **Varre por `recebido_em_servidor`, arquiva por `ocorrido_em_local`** —
+ * e a assimetria é o ponto, não descuido:
+ *
+ * - varrer pelo recebimento garante que **nada é perdido**. Cada romaneio
+ *   chega ao servidor exatamente uma vez, num dia só, então a sangria
+ *   daquele dia o alcança. Varrer pelo `ocorrido_em_local` abriria um
+ *   buraco permanente: uma saída offline de segunda que sincroniza terça
+ *   não entraria na sangria de terça (a data dela é segunda) e a de
+ *   segunda já rodou sem ela — ninguém a pegaria nunca mais.
+ * - arquivar pelo `ocorrido_em_local` põe o documento no dia em que a
+ *   retirada aconteceu no balcão, que é o dia que alguém procura.
+ *
+ * O efeito prático é que a sangria de hoje pode subir um romaneio pra
+ * pasta de ontem. Isso é o certo, e a tela diz quando acontece.
+ *
+ * É também a coluna do índice `(tenant_id, loja_id, recebido_em_servidor)`.
+ */
+async function buscarRomaneiosRecebidosEm(filtro: {
+  data: string
+  lojaId: string
+}): Promise<RomaneioCompleto[]> {
+  const inicio = new Date(`${filtro.data}T00:00:00`)
+  const fim = new Date(`${filtro.data}T00:00:00`)
+  fim.setDate(fim.getDate() + 1)
+
+  let q = supabase
+    .from('romaneios')
+    .select(SELECT_ROMANEIO)
+    .gte('recebido_em_servidor', inicio.toISOString())
+    .lt('recebido_em_servidor', fim.toISOString())
+    .order('recebido_em_servidor', { ascending: true })
+    .limit(TETO_SANGRIA)
+
+  // A RLS já prende caixa e gerente à própria filial; o filtro existe pro
+  // ADMIN, que enxerga o tenant inteiro e precisa escolher de qual filial
+  // está fazendo a sangria. Mesmo motivo do filtro em `Fechamento`.
+  if (filtro.lojaId) q = q.eq('loja_id', filtro.lojaId)
+
+  const { data, error } = await q
+  if (error) throw error
+  if (!data || data.length === 0) return []
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const linhas = data as any[]
+
+  // Uma consulta pras assinaturas de todos, não uma por romaneio: a
+  // sangria de um dia movimentado abriria dezenas de round-trips.
+  const { data: assinaturas, error: erroAssinatura } = await supabase
+    .from('assinaturas')
+    .select(SELECT_ASSINATURAS)
+    .in(
+      'romaneio_id',
+      linhas.map((r) => r.id)
+    )
+  if (erroAssinatura) throw erroAssinatura
+
+  const porRomaneio = new Map<string, AssinaturaDoRomaneio[]>()
+  for (const linha of assinaturas as unknown as LinhaAssinatura[]) {
+    const lista = porRomaneio.get(linha.romaneio_id) ?? []
+    lista.push(mapAssinatura(linha))
+    porRomaneio.set(linha.romaneio_id, lista)
+  }
+
+  return linhas.map((r) => mapRomaneio(r, porRomaneio.get(r.id) ?? []))
+}
+
+export function useRomaneiosRecebidosEm(filtro: { data: string; lojaId: string }) {
+  return useQuery({
+    queryKey: ['romaneios-do-dia', filtro.data, filtro.lojaId],
+    queryFn: () => buscarRomaneiosRecebidosEm(filtro),
+  })
+}
+
+/**
+ * O instante que decide em que pasta do dia o romaneio é arquivado.
+ *
+ * `ocorrido_em_local` primeiro porque a saída pertence ao dia em que ela
+ * aconteceu no balcão. Ele é nullable, e `recebido_em_servidor` é a única
+ * coluna garantida — por isso a cadeia termina nele.
+ */
+export function quandoAconteceu(r: RomaneioCompleto): string {
+  return r.ocorridoEmLocal ?? r.seladoEm ?? r.recebidoEmServidor
 }
 
 export const AUTH_METHOD_LABEL: Record<string, string> = {

@@ -13,11 +13,12 @@ Google Drive do item 29 também sendo de 16/08.
 MVP fechou no item 6, e por cima dela entraram cancelamento, fechamento de
 caixa, gestão de usuários, tarifa/vales, permissões por filial, cidade,
 exportação em .xlsx e PDF, e envio ao Google Drive. De 16 a 19/08 entrou a
-frente maior de todas — a cadeia de custódia da saída (itens 33 a 56), que
+frente maior de todas — a cadeia de custódia da saída (itens 33 a 57), que
 já foi exercitada nos três caminhos possíveis: online (`R-000001`),
 conflito com as assinaturas preservadas (`R-000004`) e offline
 sincronizada (`R-000010`), mais o cartão físico lido no leitor da farmácia
-e a credencial CR80 conferida contra o desenho original.
+e a credencial CR80 conferida contra o desenho original. O item 57 fechou
+o envio do romaneio ao Drive.
 
 **O que NÃO existe ainda, e é fácil supor errado:** não há deploy — nem
 conta na Cloudflare, nem site no ar. Tudo rodou em localhost, numa
@@ -25,10 +26,10 @@ máquina só. A premissa de dois dispositivos (PC do caixa + tablet do
 motoboy) nunca foi exercitada de verdade.
 
 **Se você está retomando, comece por "PRÓXIMA SESSÃO", perto do fim deste
-arquivo.** É lá que está o trabalho combinado e as duas perguntas que
-precisam de resposta antes de começar. Logo abaixo dela, "Estado em
-2026-08-19" traz o que falta em ordem de risco e o que já foi aplicado no
-Supabase.
+arquivo.** É lá que está o trabalho combinado. Logo abaixo dela, "Estado
+em 2026-08-19" traz o que falta em ordem de risco e o que já foi aplicado
+no Supabase. **O trabalho vive na `main`** — a `cadeia-de-custodia` já foi
+mergeada e está para trás.
 
 ## 1. Fila offline nas outras 4 escritas
 
@@ -2472,6 +2473,238 @@ vai subir pro Drive.
 template do Vite, nunca trocado. Não entrou porque não era "a logo antiga
 em PNG", mas continua sem relação com a Drogaria Cidade.
 
+## 57. O romaneio sobe ao Drive — e a logo estava aparecendo pela metade
+
+Sessão de 2026-08-19. O usuário respondeu as duas perguntas que ficaram
+anotadas na retomada anterior, e acrescentou uma terceira coisa que virou
+o achado da sessão.
+
+**As respostas:** os romaneios vão pra `Romaneios › <Filial> › <mês> › <dia> › <via>`;
+sobem as **duas** vias; e o envio é por **botão** na página do romaneio,
+não automático na selagem.
+
+**Uma delas ele reviu no mesmo dia**, e a revisão é boa. A resposta
+original incluía um segundo destino, `Romaneios › Geral › <mês>`, com
+todas as filiais juntas — construí, mostrei, e ele desfez: *"achei que
+seria uma ideia boa mas não faz sentido, ninguém vai preferir procurar
+uma agulha no palheiro"*. Está certo, e vale registrar por quê: uma pasta
+que acumula tudo não resolve busca, só a adia. Quem procura um romaneio
+sabe de que filial ele é.
+
+Com a Geral saiu junto a capacidade de `enviarAoDrive` aceitar **vários**
+destinos, que nasceu só pra servi-la. Deixá-la seria flexibilidade morta
+esperando um segundo chamador que não existe — e o projeto já decidiu
+isso antes, quando apagou o `cartaoPdf.ts` órfão no item 53. O spec
+ganhou o caso `nenhum nível se chama "Geral"` pelo mesmo motivo dos
+`v2 não é mais lido`: sem ele, "tirei" e "esqueci de tirar" ficariam
+indistinguíveis.
+
+### O achado: o letreiro nunca apareceu no romaneio
+
+Junto das respostas veio "altera a logo dos PDFs de volta para a inicial,
+documento não precisa de tanta qualidade quanto o sistema". Fui conferir
+se a "inicial" era outra marca — e não era: recuperei a antiga do git
+(`git show 31d93de^:src/assets/logo.png`) e extraí a nova de dentro do
+`.svg`, e são **a mesma arte**, 502 × 80 contra 2008 × 320. O pedido era
+sobre peso, não sobre identidade visual. Isso resolveu a ambiguidade sem
+precisar perguntar de novo.
+
+Mas ao olhar as duas imagens apareceu outra coisa. Decodifiquei os pixels
+das duas: na região do letreiro, **cor média rgb(255,255,255) e 0,0% de
+pixels escuros**. O "Drogaria Cidade" da arte é branco.
+
+O PDF do **acerto** pinta uma faixa vermelha e desenha a logo em cima —
+sempre funcionou. O do **romaneio** desenhava direto no papel branco.
+Resultado: desde 18/08, quando o romaneio ganhou logo, ele saía com a
+cruz solta e **sem o nome da farmácia**, pagando 130 kB por isso.
+
+Ninguém notou porque a cruz aparecia. É o tipo de defeito que passa por
+revisão de código, `tsc`, lint, build e até pelo spec — que checava
+"tem imagem", e tinha.
+
+**A faixa entrou** (`COR_MARCA`, que mudou de `exportarAcertoPdf.ts` pra
+`marca.ts`, porque saber desenhar a marca inclui saber o fundo que ela
+exige). E ganhou teste: a faixa tem que começar em x=0 e ter a largura da
+página, senão "tem faixa" e "tem qualquer retângulo vermelho" ficariam
+indistinguíveis.
+
+**Sexta vez que um teste meu falhou com o arquivo correto.** Escrevi a
+asserção esperando `0.929 0.114 0.141 rg` e o jsPDF grava com DUAS casas:
+`0.93 0.11 0.14 rg`. Está anotado neste arquivo desde o item 52 e eu
+passei por cima. Da segunda vez fui medir nos bytes em vez de supor.
+
+**Peso: 130 kB → 16 kB**, oito vezes menor. Importa porque agora são
+quatro arquivos por saída subindo pro Drive.
+
+### O envio
+
+- `enviarAoDrive` deixou de receber um período e passa a receber um
+  **caminho de pasta** — uma lista de nomes que ele percorre criando o
+  que faltar. O acerto continua indo pra pasta do período; o romaneio vai
+  pra filial/mês. Nada é memorizado entre chamadas de propósito: id de
+  pasta guardado vira id de pasta que o usuário apagou, e aí o envio
+  pousaria dentro da lixeira sem reclamar.
+- **Reenviar substitui.** Procura o arquivo pelo nome exato na pasta e,
+  achando, faz `PATCH` com `uploadType=media`: troca só o conteúdo,
+  preservando id, nome e link. O Drive aceita cinco arquivos homônimos na
+  mesma pasta sem reclamar, e num documento de custódia isso é pior que
+  inútil. **Vale pro acerto também**, que antes só reaproveitava a pasta.
+- **O mês vem do relógio do servidor.** `selado_em`, ou o recebimento
+  quando não há selo (romaneio de conflito). Regra 8: o relógio do PC do
+  balcão pode estar errado, e romaneio arquivado no mês errado é romaneio
+  que ninguém acha.
+- `AAAA-MM` e não "agosto de 2026" — o Drive ordena pasta por nome.
+
+### Onde a linha do testável foi traçada
+
+`googleDrive.ts` lê `import.meta.env`, então não roda em `npx tsx`. Em vez
+de contornar com `?.` (que poderia atrapalhar a substituição estática do
+Vite justamente na variável que governa a integração inteira), separei:
+
+- **`src/lib/caminhosNoDrive.ts`** decide QUAIS pastas e **não importa
+  nada** — mesma disciplina de `canonico.ts` e `tokenCartao.ts`.
+  `scripts/caminhosNoDrive.spec.mts`, 25 casos, incluindo os que fariam um
+  romaneio sumir (filial nula, filial só com espaços, `' Matriz '` criando
+  uma segunda pasta, acento preservado) e a ordenação dos meses na virada
+  de ano.
+- **`googleDrive.ts`** ficou só com o transporte, e reexporta a nomeação
+  pra nenhum call site mudar — o mesmo arranjo de `credenciais.ts` com
+  `tokenCartao.ts`.
+
+O envio de verdade **não tem e não vai ter** teste automatizado: depende
+de consentimento OAuth, que é autenticação e não se faz em nome do
+usuário. O que dava pra provar, provei com um Drive falso em memória, no
+navegador, com o módulo de verdade:
+
+    1ª vez  → 4 pastas, 2 arquivos, 0 atualizados
+    2ª vez  → 2 arquivos (SEM duplicata), 2 atualizados, conteúdo = v2
+    3ª vez  → outro DIA, 5 pastas: só a pasta do dia nasceu
+    4ª vez  → outra filial, 8 pastas: a raiz não duplicou
+
+Virou `scripts/conferir-envio-drive-no-console.js`, pelo mesmo motivo e no
+mesmo formato do `conferir-canonico-no-console.js`.
+
+### A sangria do fim do dia, e a pergunta que a motivou
+
+Depois de tudo pronto o usuário perguntou: *"Todos os romaneios vão subir
+no drive?"* Não iam — e a resposta expôs o buraco. O botão da página do
+romaneio é "compartilhar ESTE romaneio agora", e o caminho até ele é
+longo: **não existe lista de romaneios no sistema**, você chega num pelo
+vale (expandir o chevron → "Ver documento"). Subir tudo significaria fazer
+isso a cada saída, várias vezes por dia, dependendo de alguém lembrar. Um
+arquivo que depende de ninguém esquecer não é um arquivo.
+
+Ele escolheu **"sangria" no fim do dia**, mais a pasta por dia pra evitar
+bagunça. Foi pra aba **Fechamento**, que já É a tela do fim do dia e já
+tinha os dois controles necessários — data com atalho "Hoje" e filial pro
+admin. Zero controle novo.
+
+**A assimetria que decide se funciona:** varre por
+`recebido_em_servidor`, arquiva por `ocorrido_em_local`. Varrer pelo
+`ocorrido_em_local` abriria um buraco permanente — saída offline de
+segunda que sincroniza terça não entraria na sangria de terça (a data dela
+é segunda) e a de segunda já rodou sem ela. Ninguém a pegaria nunca mais.
+Arquivar pelo recebimento poria a retirada no dia errado. Então: varre por
+quando o servidor soube, arquiva por quando aconteceu — e a tela avisa
+quando um romaneio foi pra pasta de outro dia, senão pareceria erro.
+
+**Duas correções no formato que ele propôs**, e as duas são de fora do
+navegador. Ele pediu `Mês (02/2026)` e `Dia (01/02)`; ficou `2026-02` e
+`2026-02-01`, porque o **Google Drive para Desktop renomeia pasta com `/`**
+ao sincronizar pro disco, e porque `01/2027` cairia entre `01/2026` e
+`02/2026` na ordenação por nome. A estrutura pedida é a mesma.
+
+**E uma armadilha que só a pasta por DIA revelou.** Eu vinha fatiando a
+string ISO (`.slice(0, 7)`), o que dá o dia em **UTC**. Uma saída às 21h em
+São Gabriel é `T00:30Z` do dia seguinte — arquivada no dia errado, e a
+sangria daquela noite não a acharia na pasta que acabou de criar. Com
+pasta por mês isso errava uma vez por mês; com pasta por dia, **toda
+noite**.
+
+Virou `src/lib/datas.ts`, que é também a definição de "o dia" da aba
+Fechamento (era uma cópia local chamada `localDateStr`; agora é a mesma
+função — as duas discordarem faria a sangria arquivar num dia e a tela
+mostrar outro).
+
+O teste foi montado pra ser **independente de fuso**: o instante é
+construído a partir de uma data local (`new Date(2026, 7, 18, 21, 30)`) em
+vez de uma string UTC fixa. Confirmei que ele discrimina de verdade nesta
+máquina (`America/Sao_Paulo`): o jeito ingênuo dava `2026-08-19` para uma
+saída das 21h30 do dia 18. Num runner em UTC o teste passaria sem provar
+nada — por isso a construção importa mais que a asserção.
+
+### O primeiro envio real, e a pasta por via
+
+**Funcionou contra o Google de verdade** — primeira vez que o envio ao
+Drive passou por consentimento OAuth real, fechando um item que estava
+aberto desde a correção do item 32.
+
+Vendo o resultado, o usuário pediu uma pasta por via dentro do dia. Ficou
+`Via da farmácia` / `Via da agência` — **"agência" e não "tele"**, que é
+como ele falou: o sistema inteiro chama de agência (Cadastros, "A pagar à
+agência", relatório por agência) e o Drive não é lugar pra um segundo
+vocabulário.
+
+**O nome do arquivo continua trazendo a via**, apesar de a pasta agora
+dizer. PDF baixado e mandado por e-mail sai da pasta, e fora dela o nome
+é a única coisa que diz qual via é. Manter também evitou trocar a chave
+de dedupe — o que já estava no Drive continua reconhecível.
+
+**Consequência avisada, não resolvida:** os arquivos do envio anterior
+ficam soltos na pasta do dia, ao lado das subpastas novas. O app não
+apaga nada no Drive e não deveria; a limpeza é manual.
+
+**Duas vias viraram dois destinos, e isso ressuscitou o cache que eu
+tinha removido.** Sem ele, cada romaneio refaria a busca de
+raiz/filial/mês/dia duas vezes — medido no Drive falso: **6 buscas de
+pasta com cache contra 30 sem**, pros mesmos 3 romaneios. Mas o cache é
+do CHAMADOR (`novoCachePastas()`), não do módulo: memorizado
+indefinidamente, id de pasta vira id de pasta que o usuário apagou, e o
+envio pousaria na lixeira sem reclamar. Vivendo só durante uma sangria,
+essa janela não existe.
+
+**E ele impõe uma regra:** envios que compartilham cache têm que ser
+sequenciais. Escrevi o script de conferência com `Promise.all` e percebi
+antes de rodar — as duas vias errariam o cache juntas e criariam a mesma
+pasta duas vezes. O app já era sequencial; o script passou a ser, porque
+script de conferência tem que espelhar o app, não o que ficaria bonito
+nele.
+
+**Sétima vez que um teste meu falhou com o código certo**: três casos do
+spec comparavam `caminho.slice(2)` com `[mês, dia]`, e a via entrou como
+terceiro elemento. Virou `slice(2, 4)`.
+
+**Um susto que valeu:** `npx tsc -b` **não cobre `scripts/`** — só `src`.
+Uma chamada com argumento faltando no spec passou pelo typecheck e só
+apareceu ao rodar o spec. Não confiar no `tsc` pra validar mudança em
+script.
+
+E o script de conferência passou a ser rodado **como arquivo**, buscado
+do repositório e executado num `AsyncFunction`, em vez de eu reescrever
+o mesmo teste no console. Assim o que se confere é o artefato que fica —
+e todos os números que ele afirma (6, 2, 0 / 2, 2 / 9 / 14 / 6 vs 30)
+bateram.
+
+### Duas coisas menores que saíram no caminho
+
+- **O dublê de `fetch` estava copiado em cinco scripts**, e a cópia
+  deixou de ser inofensiva quando a logo de documento entrou como PNG
+  solto: os dublês só sabiam `text()`, e `.png` precisa de
+  `arrayBuffer()`. Virou `scripts/fetchDePublic.mts`.
+- **O caminho novo do PNG foi verificado no navegador de verdade**, não só
+  com dublê: `carregarImagemDaMarca` devolveu um data URI que o navegador
+  decodificou como 502 × 80, com o cache servindo a segunda chamada.
+
+### O que fica pendente disto
+
+- **O envio nunca rodou contra o Google de verdade** — nem este, nem o do
+  acerto depois da correção do item 32. É clique de usuário.
+- O aviso `INEFFECTIVE_DYNAMIC_IMPORT` do build agora cita
+  `Romaneio.tsx` além de `Relatorios.tsx`: as duas telas importam
+  `googleDrive.ts` estaticamente (pra `driveConfigurado`) e
+  dinamicamente (no clique). É cosmético — o módulo é pequeno e não puxa
+  dependência pesada —, mas se for arrumar, arrume nas duas.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -2683,47 +2916,20 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: envio do romaneio ao Drive — comece por aqui
+### PRÓXIMA SESSÃO: romaneio de retorno — comece por aqui
 
-Combinado com o usuário em 2026-08-19: a próxima frente é **subir o PDF
-do romaneio ao Google Drive**. O PDF ficou pronto (item 55); falta só o
-envio.
+~~Envio do romaneio ao Drive~~ — **feito em 2026-08-19** (item 57).
+Terminou em `Romaneios › <Filial> › AAAA-MM › AAAA-MM-DD › <Via>`, as duas vias,
+com dois botões: um por romaneio (na página dele) e a **sangria do fim do
+dia** na aba Fechamento, que é a que de fato monta o arquivo.
 
-**Duas decisões que eu levantei e ele ainda não respondeu.** Pergunte
-antes de construir, porque mudam o desenho:
+**O que falta desta frente, e é clique de usuário:** o envio nunca rodou
+contra o Google de verdade — nem o do romaneio, nem o do acerto depois da
+correção do item 32. Vale começar pelo acerto, que é um clique num
+terreno conhecido; se ele estiver quebrado, é melhor descobrir ali do que
+no meio de uma frente nova.
 
-1. **Em que pasta os romaneios ficam?** O acerto usa
-   `Drogaria Cidade Entregas - Acertos › Acertos dd-mm-aaaa a dd-mm-aaaa`.
-   Romaneio é outro tipo de documento e sai um por corrida, não um por
-   quinzena — algo como `Romaneios › 2026-08` parece caber melhor, mas é
-   escolha dele.
-2. **Sobe as duas vias ou só a da agência?** A da farmácia já fica no
-   banco; a da agência é a que existe pra ser compartilhada.
-
-**O que reaproveitar, e as armadilhas já pagas** (tudo em
-`src/lib/googleDrive.ts` e na seção "Google Drive" do CLAUDE.md):
-
-- **Pedir o token é a PRIMEIRA coisa depois do clique**, antes de gerar
-  o PDF. Gerar leva centenas de ms e o pop-up deixa de contar como
-  resposta ao gesto do usuário — o navegador bloqueia. Isso já quebrou
-  uma vez (item 32).
-- O script do Google é pré-carregado quando a tela monta (`prepararDrive`).
-- Escopo `drive.file`, token só na memória, sem refresh token.
-- Reenviar o mesmo período cai na mesma subpasta em vez de duplicar — o
-  romaneio precisa de regra equivalente, provavelmente por número
-  (`R-000010`).
-
-**Duas coisas novas a considerar:**
-
-- **O PDF agora pesa ~130 kB** por causa da logo (item 56). Subir as duas
-  vias de toda corrida é volume real; vale pensar se sobe sempre ou sob
-  demanda.
-- **Nada disso foi testado no ar**, porque não há deploy. O envio ao
-  Drive em produção exige `VITE_GOOGLE_CLIENT_ID` nas variáveis do
-  Cloudflare **e** a URL do Pages nas origens autorizadas do cliente
-  OAuth — e o deploy inteiro ainda não existe (ver pendências).
-
-Depois do Drive, o usuário pediu o **romaneio de retorno**. Ele precisa de
+A próxima frente combinada é o **romaneio de retorno**. Ele precisa de
 conversa de desenho ANTES de código, e tem um bloqueio concreto já
 descoberto: `create unique index assinaturas_corrida_signatario on
 public.assinaturas (corrida_id, tipo_signatario)` — cada corrida aceita
@@ -2731,6 +2937,21 @@ UMA assinatura de caixa e UMA de motoboy, e o retorno precisa de um
 segundo par. A migration tem que incluir `romaneio_id` na unicidade, com
 índice parcial, porque as assinaturas antigas têm `romaneio_id` nulo e no
 Postgres nulo não colide com nulo.
+
+**Armadilhas do Drive que continuam valendo** (tudo em
+`src/lib/googleDrive.ts` e na seção "Google Drive" do CLAUDE.md), porque o
+romaneio de retorno provavelmente vai subir também:
+
+- **Pedir o token é a PRIMEIRA coisa depois do clique**, antes de gerar
+  o PDF. Gerar leva centenas de ms e o pop-up deixa de contar como
+  resposta ao gesto do usuário — o navegador bloqueia. Isso já quebrou
+  uma vez (item 32).
+- O script do Google é pré-carregado quando a tela monta (`prepararDrive`).
+- Escopo `drive.file`, token só na memória, sem refresh token.
+- **Nada disso foi testado no ar**, porque não há deploy. O envio ao
+  Drive em produção exige `VITE_GOOGLE_CLIENT_ID` nas variáveis do
+  Cloudflare **e** a URL do Pages nas origens autorizadas do cliente
+  OAuth — e o deploy inteiro ainda não existe (ver pendências).
 
 ### Estado em 2026-08-19
 
@@ -2759,9 +2980,12 @@ item de maior risco em aberto — `montarCanonico` (TypeScript) e
 suposição. Leia a ressalva de cobertura logo abaixo antes de considerar
 o assunto encerrado.
 
-O trabalho vive na branch **`cadeia-de-custodia`**, já no GitHub. A
-`main` continua em `313a3e2` — o merge é decisão do usuário e ainda não
-foi feito.
+**O merge foi feito.** Esta seção dizia até 19/08 que "o trabalho vive na
+branch `cadeia-de-custodia`" e que "a `main` continua em `313a3e2`" — não
+é mais verdade. A `main` contém toda a `cadeia-de-custodia` (que ficou
+parada em `1541c21`) mais o que veio depois: geolocalização, PDF do
+romaneio, logo nova, e o envio ao Drive. `origin/main` está igual, ou
+seja, tudo empurrado. **Trabalhe na `main`.**
 
 **Tudo que precisava de passo manual no Supabase já foi aplicado:** as
 nove migrations, o segredo `credencial_hmac` no Vault, a Edge Function
@@ -2893,7 +3117,11 @@ secret `ROMANEIO_KEYS`.
       há nada conectado. Consequência a lembrar: nada do que foi testado
       aqui foi testado NO AR, e a diferença entre os dois ambientes é
       justamente o que essas variáveis governam.
-- [ ] **Testar o envio ao Drive depois da correção do item 32.**
+- [ ] **Testar o envio ao Drive contra o Google de verdade** — o do
+      acerto, depois da correção do item 32, e agora também o do romaneio
+      (item 57). Nenhum dos dois passou por consentimento OAuth real; o
+      que foi provado com dublê é tudo, menos a chamada que sai da
+      máquina. É clique de usuário, não dá pra fazer daqui.
 
 Ideia pequena anotada e não feita: **atalho de quinzena** no relatório
 (1ª/2ª quinzena ao lado de Hoje/Este mês), já que o pagamento das teles

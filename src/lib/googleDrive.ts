@@ -1,4 +1,4 @@
-// Envio do acerto para o Google Drive do usuário.
+// Envio de documentos para o Google Drive do usuário.
 //
 // Esta é a única integração externa do projeto, e o desenho foi escolhido
 // pra ser o menos invasivo possível:
@@ -14,9 +14,15 @@
 //     VITE_GOOGLE_CLIENT_ID). O "client secret" NÃO é usado neste fluxo e
 //     não deve existir em lugar nenhum deste projeto.
 
+// QUE pastas é decidido em `caminhosNoDrive.ts`, que não importa nada e
+// por isso roda num teste sem rede. Aqui fica só o transporte: token,
+// busca, criação e upload. As funções de nomeação são reexportadas pra
+// quem envia continuar precisando de um import só.
+import { PASTA_ACERTOS, PASTA_ROMANEIOS } from '@/lib/caminhosNoDrive'
+export { nomeDaSubpasta, caminhoDoAcerto, caminhoDoRomaneio } from '@/lib/caminhosNoDrive'
+
 const CLIENT_ID = import.meta.env.VITE_GOOGLE_CLIENT_ID as string | undefined
 const ESCOPO = 'https://www.googleapis.com/auth/drive.file'
-const PASTA = 'Drogaria Cidade Entregas - Acertos'
 
 const MIME_PASTA = 'application/vnd.google-apps.folder'
 
@@ -181,8 +187,73 @@ async function garantirPasta(nome: string, token: string, paiId?: string): Promi
   return criada.id as string
 }
 
+/**
+ * Ids de pasta já resolvidos, compartilhados por um envio.
+ *
+ * O cache é do CHAMADOR e não do módulo, de propósito: id de pasta
+ * memorizado indefinidamente vira id de pasta que o usuário apagou, e aí
+ * o envio pousaria dentro da lixeira sem reclamar. Vivendo só durante uma
+ * sangria (segundos), essa janela não existe na prática.
+ *
+ * Sem ele a sangria seria cara: cada romaneio tem dois destinos que só
+ * diferem no último nível, e um dia com 20 saídas refaria a busca de
+ * raiz/filial/mês/dia 40 vezes. Medido com o Drive falso: 6 buscas de
+ * pasta contra 30, pros mesmos 3 romaneios em duas vias.
+ *
+ * **Envios que compartilham um cache têm que ser SEQUENCIAIS.** Duas
+ * chamadas simultâneas errariam o cache juntas — as duas veriam a pasta
+ * ausente e as duas a criariam. Por isso quem envia usa `for … await` e
+ * não `Promise.all`.
+ */
+export type CachePastas = Map<string, string>
+export const novoCachePastas = (): CachePastas => new Map()
+
+// Percorre um caminho de pastas a partir da raiz do Drive, criando o que
+// faltar.
+async function garantirCaminho(
+  caminho: string[],
+  token: string,
+  cache: CachePastas
+): Promise<string> {
+  let paiId: string | undefined
+  let percorrido = ''
+  for (const nome of caminho) {
+    percorrido += '/' + nome
+    const guardado = cache.get(percorrido)
+    if (guardado) {
+      paiId = guardado
+      continue
+    }
+    paiId = await garantirPasta(nome, token, paiId)
+    cache.set(percorrido, paiId)
+  }
+  // `caminho` nunca é vazio: quem chama sempre passa ao menos a raiz.
+  return paiId as string
+}
+
+// Procura um arquivo pelo nome exato dentro da pasta. É o que faz reenviar
+// SUBSTITUIR em vez de acumular cópias — o Drive aceita alegremente cinco
+// arquivos com o mesmo nome na mesma pasta, e num documento de custódia
+// isso é pior que inútil: quem abrisse a pasta teria que adivinhar qual
+// dos cinco vale.
+async function acharArquivo(
+  nome: string,
+  pastaId: string,
+  token: string
+): Promise<string | null> {
+  const nomeSeguro = nome.replace(/'/g, "\\'")
+  const busca = new URL('https://www.googleapis.com/drive/v3/files')
+  busca.searchParams.set(
+    'q',
+    `name = '${nomeSeguro}' and '${pastaId}' in parents and trashed = false`
+  )
+  busca.searchParams.set('fields', 'files(id)')
+  const resultado = await chamarDrive(busca.toString(), { method: 'GET' }, token)
+  return (resultado.files as Array<{ id: string }> | undefined)?.[0]?.id ?? null
+}
+
 export type ArquivoParaEnviar = { nome: string; blob: Blob }
-export type ArquivoEnviado = { nome: string; link: string }
+export type ArquivoEnviado = { nome: string; link: string; atualizado: boolean }
 
 // Uma subpasta por período, dentro da pasta raiz do app:
 //
@@ -193,26 +264,49 @@ export type ArquivoEnviado = { nome: string; link: string }
 //
 // Reenviar o mesmo período cai na mesma subpasta (a busca acha a que já
 // existe), então o histórico fica organizado por quinzena em vez de virar
-// um monte de arquivo solto na raiz.
-export function nomeDaSubpasta(dataInicio: string, dataFim: string): string {
-  const br = (iso: string) => iso.split('-').reverse().join('-')
-  return `Acertos ${br(dataInicio)} a ${br(dataFim)}`
-}
-
+// um monte de arquivo solto na raiz — e, desde que o envio passou a
+// procurar o arquivo antes de criar, também sem duas versões do mesmo
+// acerto lado a lado.
+/**
+ * Sobe os arquivos para um caminho de pasta, criando o que faltar.
+ *
+ * Um destino por chamada. Chegou a aceitar vários, enquanto o romaneio ia
+ * também pra uma pasta "Geral" com todas as filiais juntas; o usuário
+ * desfez isso em 2026-08-19 ("ninguém vai preferir procurar agulha no
+ * palheiro"). Quando a pasta por via voltou a criar dois destinos, a
+ * resposta foi o `cache` compartilhado e não a lista de destinos: as duas
+ * vias levam arquivos DIFERENTES, então uma lista de caminhos com uma
+ * lista de arquivos não descreveria mais o que acontece.
+ */
 export async function enviarAoDrive(
   arquivos: ArquivoParaEnviar[],
-  periodo: { dataInicio: string; dataFim: string }
+  caminho: string[],
+  cache: CachePastas = novoCachePastas()
 ): Promise<ArquivoEnviado[]> {
   const token = await obterToken()
-  const raizId = await garantirPasta(PASTA, token)
-  const pastaId = await garantirPasta(
-    nomeDaSubpasta(periodo.dataInicio, periodo.dataFim),
-    token,
-    raizId
-  )
+  const pastaId = await garantirCaminho(caminho, token, cache)
 
   const enviados: ArquivoEnviado[] = []
   for (const arquivo of arquivos) {
+    const existente = await acharArquivo(arquivo.nome, pastaId, token)
+
+    // Já existe: substitui só o CONTEÚDO (`uploadType=media` num PATCH),
+    // preservando id, nome e link. Quem tiver o link de antes continua
+    // chegando no arquivo certo.
+    if (existente) {
+      const resposta = await chamarDrive(
+        `https://www.googleapis.com/upload/drive/v3/files/${existente}?uploadType=media&fields=id,name,webViewLink`,
+        { method: 'PATCH', body: arquivo.blob },
+        token
+      )
+      enviados.push({
+        nome: resposta.name as string,
+        link: resposta.webViewLink as string,
+        atualizado: true,
+      })
+      continue
+    }
+
     const metadados = { name: arquivo.nome, parents: [pastaId] }
     const form = new FormData()
     form.append(
@@ -226,9 +320,14 @@ export async function enviarAoDrive(
       { method: 'POST', body: form },
       token
     )
-    enviados.push({ nome: resposta.name as string, link: resposta.webViewLink as string })
+    enviados.push({
+      nome: resposta.name as string,
+      link: resposta.webViewLink as string,
+      atualizado: false,
+    })
   }
   return enviados
 }
 
-export const NOME_DA_PASTA = PASTA
+export const NOME_DA_PASTA = PASTA_ACERTOS
+export const NOME_DA_PASTA_ROMANEIOS = PASTA_ROMANEIOS

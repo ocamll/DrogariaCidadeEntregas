@@ -1,7 +1,9 @@
-import { useState } from 'react'
-import { useRomaneio } from '@/data/romaneios'
+import { useEffect, useState } from 'react'
+import { useRomaneio, quandoAconteceu } from '@/data/romaneios'
+import type { RomaneioCompleto } from '@/data/romaneios'
 import { BlocoAssinatura } from '@/components/Custodia'
 import { baixarArquivo } from '@/lib/credencialDownload'
+import { driveConfigurado, prepararDrive } from '@/lib/googleDrive'
 import type { ViaDoRomaneio } from '@/lib/romaneioPdf'
 import { formatBRL } from '@/lib/money'
 import { Badge } from '@/components/ui/badge'
@@ -37,30 +39,95 @@ export function Romaneio({
   onVoltar: () => void
 }) {
   const { data, isLoading, isError, error } = useRomaneio(romaneioId)
-  const [ocupado, setOcupado] = useState<ViaDoRomaneio | null>(null)
+  const [ocupado, setOcupado] = useState<ViaDoRomaneio | 'drive' | null>(null)
   const [erroPdf, setErroPdf] = useState<string | null>(null)
+  const [enviadoAoDrive, setEnviadoAoDrive] = useState<string | null>(null)
 
-  // O `data` só existe depois dos early returns, então a função é
-  // declarada aqui e lê o valor no momento do clique.
+  // Pré-carrega o script do Google ao montar, pra o clique não gastar o
+  // gesto do usuário esperando rede — o pop-up de autorização aberto tarde
+  // demais é bloqueado pelo navegador. Mesma armadilha já paga no acerto.
+  useEffect(() => {
+    prepararDrive()
+  }, [])
+
+  // O `data` só existe depois dos early returns, então as funções são
+  // declaradas aqui e RECEBEM o romaneio de quem já o estreitou. Nada de
+  // ler `data?.numero` aqui dentro: este nome é a chave de dedupe no
+  // Drive, e um "romaneio-undefined-farmacia.pdf" pousando numa pasta é
+  // pior que um erro — ele parece um arquivo.
+  //
+  // TODO: quando a correção cadastral por evento existir (categoria 1 da
+  // regra 7), as correções entram aqui — a seção do PDF já está pronta pra
+  // recebê-las.
+  const nomeDoArquivo = (romaneio: RomaneioCompleto, via: ViaDoRomaneio) =>
+    `romaneio-${romaneio.numero}-${via}.pdf`
+
+  async function gerarPdf(romaneio: RomaneioCompleto, via: ViaDoRomaneio) {
+    // Import dinâmico: é ele que puxa o jspdf, e ninguém deve baixar
+    // 400 kB só por abrir a página do romaneio.
+    const { montarRomaneioPdf } = await import('@/lib/romaneioPdf')
+    const bytes = await montarRomaneioPdf(romaneio, via, [])
+    return new Blob([bytes], { type: 'application/pdf' })
+  }
+
   async function baixar(via: ViaDoRomaneio) {
     if (!data) return
     setErroPdf(null)
+    setEnviadoAoDrive(null)
     setOcupado(via)
     try {
-      // Import dinâmico: é ele que puxa o jspdf, e ninguém deve baixar
-      // 400 kB só por abrir a página do romaneio.
-      const { montarRomaneioPdf } = await import('@/lib/romaneioPdf')
-      // TODO: quando a correção cadastral por evento existir (categoria 1
-      // da regra 7), as correções entram aqui — a seção do PDF já está
-      // pronta pra recebê-las.
-      const bytes = await montarRomaneioPdf(data, via, [])
-      baixarArquivo(
-        new Blob([bytes], { type: 'application/pdf' }),
-        `romaneio-${data.numero}-${via}.pdf`,
-        'application/pdf'
-      )
+      baixarArquivo(await gerarPdf(data, via), nomeDoArquivo(data, via), 'application/pdf')
     } catch (e) {
       setErroPdf(e instanceof Error ? e.message : String(e))
+    } finally {
+      setOcupado(null)
+    }
+  }
+
+  async function enviarParaDrive() {
+    if (!data) return
+    setErroPdf(null)
+    setEnviadoAoDrive(null)
+    setOcupado('drive')
+    try {
+      // AUTORIZA PRIMEIRO, antes de gerar os PDFs. Gerar leva centenas de
+      // milissegundos e o pop-up aberto depois disso deixa de contar como
+      // resposta ao clique.
+      const {
+        autorizarDrive,
+        enviarAoDrive,
+        caminhoDoRomaneio,
+        novoCachePastas,
+        NOME_DA_PASTA_ROMANEIOS,
+      } = await import('@/lib/googleDrive')
+      await autorizarDrive()
+
+      // As DUAS vias, porque a da farmácia é o arquivo e a da agência é o
+      // que se compartilha — e as duas saem do mesmo snapshot selado.
+      // Cada uma vai pra sua subpasta, então são dois envios; o cache
+      // compartilhado evita repetir a busca de filial/mês/dia.
+      const aconteceu = quandoAconteceu(data)
+      const cache = novoCachePastas()
+      const enviados = []
+      for (const via of ['farmacia', 'agencia'] as const) {
+        enviados.push(
+          ...(await enviarAoDrive(
+            [{ nome: nomeDoArquivo(data, via), blob: await gerarPdf(data, via) }],
+            caminhoDoRomaneio(data.lojaNome, aconteceu, via),
+            cache
+          ))
+        )
+      }
+
+      const atualizados = enviados.filter((e) => e.atualizado).length
+      const observacao = atualizados > 0 ? ` (${atualizados} já existiam e foram substituídos)` : ''
+      const ateODia = caminhoDoRomaneio(data.lojaNome, aconteceu, 'farmacia').slice(1, -1)
+      setEnviadoAoDrive(
+        `${enviados.length} arquivos em ${NOME_DA_PASTA_ROMANEIOS} › ` +
+          `${ateODia.join(' › ')}, um em cada via${observacao}.`
+      )
+    } catch (e) {
+      setErroPdf(`Não consegui enviar ao Drive: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setOcupado(null)
     }
@@ -99,9 +166,18 @@ export function Romaneio({
           <Button variant="outline" disabled={!!ocupado} onClick={() => void baixar('agencia')}>
             {ocupado === 'agencia' ? 'Gerando…' : 'PDF — via da agência'}
           </Button>
+          {/* Sem VITE_GOOGLE_CLIENT_ID o botão não aparece: prometer envio
+              num ambiente que não tem como autorizar seria a tela
+              afirmando o que não sabe. */}
+          {driveConfigurado() && (
+            <Button variant="outline" disabled={!!ocupado} onClick={() => void enviarParaDrive()}>
+              {ocupado === 'drive' ? 'Enviando…' : 'Enviar ao Drive'}
+            </Button>
+          )}
         </div>
       </div>
       {erroPdf && <p className="mb-3 text-sm text-destructive">{erroPdf}</p>}
+      {enviadoAoDrive && <p className="mb-3 text-sm text-foreground/70">{enviadoAoDrive}</p>}
 
       <Card>
         <CardHeader>

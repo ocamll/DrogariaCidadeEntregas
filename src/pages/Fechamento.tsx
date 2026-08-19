@@ -7,7 +7,9 @@ import {
 } from '@/data/fechamento'
 import { useLojas } from '@/data/lojas'
 import { FORMA_PAGAMENTO_LABEL } from '@/data/pagamentos'
+import { SangriaRomaneios } from '@/components/SangriaRomaneios'
 import { formatBRL } from '@/lib/money'
+import { dataLocal } from '@/lib/datas'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -24,14 +26,12 @@ import {
 const SELECT_CLASSNAME =
   'h-9 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
 
-function localDateStr(d: Date): string {
-  const mes = String(d.getMonth() + 1).padStart(2, '0')
-  const dia = String(d.getDate()).padStart(2, '0')
-  return `${d.getFullYear()}-${mes}-${dia}`
-}
-
 export function Fechamento({ profile }: { profile: AuthProfile }) {
-  const hoje = localDateStr(new Date())
+  // `dataLocal` morava aqui como `localDateStr`. Foi pra `lib/datas.ts`
+  // quando o Drive passou a ter pasta por dia e precisou da mesma
+  // definição de "o dia" — duas cópias discordarem faria a sangria
+  // arquivar num dia e a tela mostrar outro.
+  const hoje = dataLocal(new Date())
   const [data, setData] = useState(hoje)
   const [lojaId, setLojaId] = useState(profile.papel === 'admin' ? '' : (profile.lojaId ?? ''))
   const [aviso, setAviso] = useState<string | null>(null)
@@ -246,6 +246,12 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
           </Card>
         </>
       )}
+
+      {/* Fora do `fechamento &&` de propósito: a sangria não depende dos
+          vales terem carregado. Se a consulta do fechamento falhar, ainda
+          dá pra arquivar os romaneios do dia — são coisas independentes
+          que só compartilham a data e a filial. */}
+      <SangriaRomaneios data={data} lojaId={lojaId} />
     </div>
   )
 }

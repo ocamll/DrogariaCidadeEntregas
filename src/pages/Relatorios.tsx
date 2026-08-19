@@ -158,7 +158,7 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
       // milissegundos, e um pop-up aberto depois disso já não conta como
       // resposta ao clique — o navegador bloqueia. Foi exatamente o que
       // aconteceu quando o token da sessão anterior venceu.
-      const { autorizarDrive, enviarAoDrive, NOME_DA_PASTA, nomeDaSubpasta } =
+      const { autorizarDrive, enviarAoDrive, NOME_DA_PASTA, nomeDaSubpasta, caminhoDoAcerto } =
         await import('@/lib/googleDrive')
       await autorizarDrive()
 
@@ -170,7 +170,7 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
         await gerarXlsx(data, filtro),
         await gerarPdf(data, filtro, contextoDoAcerto()),
       ]
-      const enviados = await enviarAoDrive(arquivos, filtro)
+      const enviados = await enviarAoDrive(arquivos, caminhoDoAcerto(filtro))
       const subpasta = nomeDaSubpasta(filtro.dataInicio, filtro.dataFim)
       setEnviadoAoDrive(
         `${enviados.length} arquivos enviados para ${NOME_DA_PASTA} › ${subpasta}.`

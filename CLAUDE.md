@@ -690,9 +690,105 @@ baixaria.
 
 ### Google Drive — a única integração externa
 
-O botão "Enviar ao Drive" sobe a planilha e o PDF para
-`Drogaria Cidade Entregas - Acertos › Acertos dd-mm-aaaa a dd-mm-aaaa`.
-Reenviar o mesmo período cai na mesma subpasta em vez de duplicar.
+Dois documentos sobem, cada um da sua tela:
+
+| de onde | o quê | para onde |
+|---|---|---|
+| Relatórios | planilha + PDF do acerto | `…- Acertos › Acertos dd-mm-aaaa a dd-mm-aaaa` |
+| página do romaneio | as duas vias de UM romaneio | `…- Romaneios › <Filial> › AAAA-MM › AAAA-MM-DD › <Via>` |
+| Fechamento ("sangria") | as duas vias de TODOS do dia | idem |
+
+**Uma pasta por via** dentro do dia ("Via da farmácia" / "Via da agência"),
+a pedido do usuário em 2026-08-19, depois do primeiro envio real. O nome
+do arquivo **continua trazendo a via** (`romaneio-R-000010-agencia.pdf`):
+PDF baixado e mandado por e-mail sai da pasta, e fora dela o nome é a
+única coisa que diz qual via é. "Agência" e não "Tele" porque o sistema
+inteiro chama de agência — o Drive não é lugar pra um segundo vocabulário.
+
+**A sangria é o que faz o arquivo existir.** O botão da página do romaneio
+é "compartilhar este romaneio agora": pra subir tudo por ele seria preciso,
+a cada saída, achar um vale daquela corrida, expandir o chevron, abrir o
+documento e clicar — várias vezes por dia, dependendo de alguém lembrar. Um
+arquivo que depende de ninguém esquecer não é um arquivo. A sangria mora na
+aba **Fechamento** porque ela já É a tela do fim do dia e já tem os dois
+controles necessários (data com atalho "Hoje", e filial pro admin); não
+precisou de tela nem de controle novo.
+
+**Varre por `recebido_em_servidor`, arquiva por `ocorrido_em_local`.** A
+assimetria é o ponto:
+
+- varrer pelo recebimento garante que **nada é perdido** — cada romaneio
+  chega ao servidor uma vez, num dia só, e a sangria daquele dia o alcança.
+  Varrer pelo `ocorrido_em_local` abriria buraco permanente: uma saída
+  offline de segunda que sincroniza terça não entraria na sangria de terça
+  (a data dela é segunda) e a de segunda já rodou — ninguém a pegaria mais.
+- arquivar pelo `ocorrido_em_local` põe o documento no dia em que a
+  retirada aconteceu no balcão, que é o dia que alguém procura.
+
+O efeito é que a sangria de hoje pode subir um romaneio pra pasta de
+ontem. Isso é o certo, e a tela **diz** quando acontece, senão pareceria
+erro.
+
+**Repetir é de graça, e é isso que torna a falha parcial inofensiva.** O
+envio é um romaneio por vez (não gera tudo antes): falhar no décimo não
+desperdiça os nove que já subiram, e clicar de novo atualiza o que está lá
+e cria o que faltou.
+
+**QUAIS pastas é decidido em `src/lib/caminhosNoDrive.ts`, que não importa
+nada** — nem o cliente do Drive, nem `import.meta.env`. Mesma disciplina
+de `canonico.ts` e `tokenCartao.ts`: regra que decide onde um documento é
+arquivado tem que caber num teste sem rede e sem consentimento OAuth
+(`npx tsx scripts/caminhosNoDrive.spec.mts`, 25 casos). `googleDrive.ts`
+ficou só com o transporte e reexporta a nomeação, então quem envia
+continua com um import só.
+
+**Um destino por documento.** O romaneio chegou a ir também pra uma pasta
+`Geral` com todas as filiais juntas; o usuário desfez isso no mesmo dia, e
+a razão dele é a que vale guardar: **pasta que acumula tudo não ajuda a
+achar nada** — só troca um problema de busca por outro. Quem procura um
+romaneio sabe de que filial ele é. Com a Geral saiu também a capacidade de
+`enviarAoDrive` aceitar vários destinos, em vez de ficar esperando um
+segundo chamador que não existe.
+
+- **A data da pasta é a do FUSO LOCAL, e é aqui que estava a armadilha.**
+  Fatiar a string ISO daria o dia em UTC, e uma saída às 21h em São
+  Gabriel (UTC-3) é o dia seguinte lá — toda saída do fim da tarde seria
+  arquivada no dia errado, e a sangria daquela noite não a acharia na
+  pasta que acabou de criar. Com pasta por MÊS isso errava uma vez por
+  mês; com pasta por DIA, erraria toda noite. Quem resolve é
+  `src/lib/datas.ts`, que também é a definição de "o dia" usada pela aba
+  Fechamento — as duas discordarem faria a sangria arquivar num dia e a
+  tela mostrar outro.
+- **`AAAA-MM` e `AAAA-MM-DD`, nunca `08/2026` e `18/08`.** Dois motivos,
+  os dois de fora do navegador: o Google Drive para Desktop **renomeia
+  pasta com `/`** ao sincronizar pro disco, e `01/2027` cairia entre
+  `01/2026` e `02/2026` na ordenação por nome. A pasta do dia repete ano e
+  mês de propósito — ela é linkada e citada solta.
+- **Filial nula ou em branco cai em "Sem filial"** — pasta com nome vazio
+  seria pior que uma pasta feia.
+- **Reenviar SUBSTITUI, não acumula.** O envio procura o arquivo pelo nome
+  exato dentro da pasta e, achando, faz `PATCH` com `uploadType=media`:
+  troca só o conteúdo, preservando id, nome e link, então quem tiver o
+  link de antes continua chegando no arquivo certo. Sem isso o Drive
+  aceita alegremente cinco arquivos homônimos na mesma pasta, e num
+  documento de custódia isso é pior que inútil — quem abrisse teria que
+  adivinhar qual dos cinco vale. Vale para o acerto também, que antes só
+  reaproveitava a PASTA.
+- **Envios que compartilham o cache de pastas têm que ser SEQUENCIAIS.**
+  As duas vias de um romaneio dividem os quatro níveis de cima; duas
+  chamadas simultâneas errariam o cache juntas e criariam a mesma pasta
+  duas vezes. Por isso quem envia usa `for … await`, nunca `Promise.all`.
+  O cache é do CHAMADOR (`novoCachePastas()`), não do módulo: id de pasta
+  memorizado indefinidamente vira id de pasta que o usuário apagou, e o
+  envio pousaria na lixeira sem reclamar. Medido: 6 buscas de pasta contra
+  30 pros mesmos 3 romaneios em duas vias.
+- **O envio de verdade não tem teste automatizado, e não vai ter**: ele
+  depende de consentimento OAuth. `scripts/conferir-envio-drive-no-console.js`
+  cobre tudo menos a chamada que sai da máquina, com um Drive falso em
+  memória — rodar sempre que alguém mexer em `enviarAoDrive`,
+  `garantirCaminho` ou `acharArquivo`. **O envio real foi exercitado uma
+  vez, em 2026-08-19**, e funcionou; o que ele NÃO cobriu foi a pasta por
+  via, que entrou logo depois.
 
 O desenho é deliberadamente mínimo, e cada peça tem motivo:
 
@@ -1010,6 +1106,26 @@ entrava por `import` do bundle em dois componentes.
   quatro vezes a resolução. Foi essa coincidência que permitiu trocar sem
   mexer em layout nenhum: `LOGO_PROPORCAO` substituiu o `<img>` que o PDF
   do acerto criava só pra medir dimensão a cada exportação.
+- **Duas resoluções, e a escolha é por DESTINO** (2026-08-19). A de tela
+  (2008 × 320, dentro do `.svg`) serve cabeçalho, login e credencial. Os
+  PDFs usam `LOGO_DOCUMENTO_URL` — a MESMA ARTE em 502 × 80, PNG solto em
+  `public/marca/`. Nos 56mm do romaneio a de tela dava ~900 dpi, quatro
+  vezes o que qualquer impressora aproveita, e o arquivo pagava 130 kB por
+  isso; a de documento dá ~226 dpi e o PDF cai pra **16 kB**. Não é
+  reversão de marca: as duas são a mesma arte, e a proporção idêntica é o
+  que permitiu trocar sem tocar em layout. Importa porque o PDF do
+  romaneio sobe pro Drive nas duas vias a cada saída, e uma saída acontece
+  várias vezes por dia.
+- **O letreiro da arte é BRANCO, e isso é armadilha.** Medido nos pixels:
+  zero pixels escuros na região de "Drogaria Cidade", nas duas
+  resoluções. Documento que desenha a logo sem uma faixa de `COR_MARCA`
+  atrás perde o nome da farmácia e fica só com a cruz — foi exatamente o
+  que aconteceu com o PDF do romaneio entre 16 e 19/08, e ninguém notou
+  porque a cruz aparecia. O acerto sempre teve a faixa e por isso nunca
+  mostrou o problema. `COR_MARCA` mora em `marca.ts` junto das logos por
+  esse motivo: ela é parte de saber desenhar a marca, não decoração do
+  acerto. Coberto por teste em `scripts/romaneio-pdf.spec.mts` (a faixa
+  tem que começar em x=0 e atravessar a página).
 - **Os arquivos do designer ficam intactos**, em `public/marca/`. Eles
   carregam o PNG DUAS vezes (`href` e `xlink:href`, byte a byte
   idênticos — o segundo é fallback de renderizador antigo). Dava pra
@@ -1023,9 +1139,10 @@ entrava por `import` do bundle em dois componentes.
 - **Documento sem logo ainda é um documento.** Falha ao carregar não
   derruba a emissão — vale pro acerto e vale ainda mais pro romaneio, que
   é comprovante de custódia.
-- **O custo é peso.** O cabeçalho passou de 8,5 kB (PNG) para um SVG de
-  273 kB, e o PDF do romaneio de 5 kB para 130 kB. É uma busca por sessão,
-  cacheada pelo navegador, num PC que abre o app uma vez por turno.
+- **O custo é peso, e ele ficou só na tela.** O cabeçalho passou de
+  8,5 kB (PNG) para um SVG de 273 kB — uma busca por sessão, cacheada pelo
+  navegador, num PC que abre o app uma vez por turno. O PDF do romaneio
+  chegou a 130 kB e **voltou pra 16 kB** com a logo de documento.
 
 **O `favicon.svg` NÃO é a logo da farmácia** — é um ícone roxo genérico
 que veio do template do Vite e nunca foi trocado. Não entrou nesta troca
@@ -1035,7 +1152,9 @@ não tem nada a ver com a Drogaria Cidade.
 ### O PDF do romaneio
 
 Construído em 2026-08-18. `src/lib/romaneioPdf.ts`, botões na página do
-romaneio, chunk próprio (o jspdf só desce ao clicar).
+romaneio, chunk próprio (o jspdf só desce ao clicar). Em 2026-08-19 a
+página ganhou o terceiro botão, "Enviar ao Drive" — ver a seção do Drive
+pros destinos e pela regra do reenvio.
 
 **A regra que governa o arquivo inteiro: ele sai do SNAPSHOT, nunca do
 dado vigente.** Os vales vêm de `romaneios.payload`, congelado no
@@ -1051,6 +1170,9 @@ endereço que ele nunca recebeu.
 - **Duas vias.** `farmacia` leva tudo; `agencia` **omite o valor da
   compra**, que é dado comercial da farmácia e não entra no acerto — ela
   precisa do valor da entrega, não do que o cliente comprou.
+- **O cabeçalho tem faixa, e ela não é decoração** — o letreiro da logo é
+  branco e sem faixa o documento saía sem o nome da farmácia. Ver "A marca
+  num lugar só".
 - **Os quatro relógios finalmente têm tela.** Retirada, retorno e duração
   saem de `corridas.saida_em`/`retorno_em`, existentes e sem uso desde
   2026-08-10. A duração usa o relógio do SERVIDOR nos dois lados: misturar
@@ -1304,8 +1426,9 @@ agora só roda nos specs, como padrão-ouro contra o qual
   emitido por nós — não presença (isso é o PIN), não revogação
   (impossível offline), e o servidor revalida tudo no sync.
 - ~~**PDF do romaneio.**~~ **Construído em 2026-08-18**
-  (`src/lib/romaneioPdf.ts`) — ver a seção própria abaixo. O **envio ao
-  Drive** continua fora, e é o próximo passo dessa frente.
+  (`src/lib/romaneioPdf.ts`) — ver a seção própria abaixo.
+- ~~**Envio do romaneio ao Drive.**~~ **Construído em 2026-08-19** — botão
+  na página do romaneio, duas vias. Ver "Google Drive".
 - **Portal da agência.** `profiles.papel` já aceita `'agencia'` desde o
   schema inicial; falta a policy.
 - **Romaneio de retorno.** Nada impede — o de saída não assume ser único.
