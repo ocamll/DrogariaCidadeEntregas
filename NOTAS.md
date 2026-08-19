@@ -2292,6 +2292,11 @@ foram pra `scripts/tokenCartao.spec.mts` antes de qualquer `git rm`.
 Migration `20260818120000` + `src/lib/tokenCartao.ts`. Os gêmeos mudaram
 juntos, como sempre têm que mudar.
 
+**Aplicada e conferida em 18/08**, com a checagem de segurança rodando
+antes e voltando zero linhas. Os quatro casos do parser bateram no banco
+(v3 → `777777`; v2, v1 e token curto → nulo) e uma credencial nova foi
+emitida em seguida, com o token funcionando.
+
 O cabeçalho da migration traz a query que precisa rodar ANTES:
 
     select c.public_id, m.nome, length(c.public_id) as digitos
@@ -2507,10 +2512,16 @@ Sessão de 2026-08-16 — cadeia de custódia (itens 33 a 38):
     banco**: os 7 casos do parser passaram no SQL Editor (v1, v2 e v3
     válidos reconhecidos; token curto, longo, de versão desconhecida e
     com letra no meio recusados), e `pg_proc` confirmou que a nova
-    `emitir_credencial` é a que está instalada. São os mesmos casos que
-    `scripts/cartao-pdf.spec.mts` roda do lado do TypeScript — é assim
-    que se prova que os dois gêmeos concordam, e não pela leitura dos
-    dois arquivos.
+    `emitir_credencial` é a que está instalada. (Aqueles casos rodavam em
+    `scripts/cartao-pdf.spec.mts`; com o cartão antigo apagado, moraram
+    pra `scripts/tokenCartao.spec.mts` — ver item 53.)
+35. `20260818120000_token_so_v3.sql` — remove v1 e v2 do parser (item
+    53). Aplicada em 2026-08-18 e **conferida nos quatro casos**: o v3
+    devolveu `777777`, e v2, v1 e token curto voltaram nulos. A checagem
+    de segurança do cabeçalho rodou ANTES e voltou zero linhas — nenhuma
+    credencial ativa fora do formato v3, que é o que tornava seguro
+    descontinuar os antigos. Credencial nova emitida depois e o token
+    funcionou.
 
 **Fora de migration, e obrigatórios:**
 
@@ -2523,7 +2534,7 @@ Sessão de 2026-08-16 — cadeia de custódia (itens 33 a 38):
   nas variáveis do Cloudflare Pages, com rebuild depois.
 
 Todas confirmadas rodando pelo usuário. Nenhuma migration pendente ao fim
-desta sessão.
+desta sessão — a 35 foi a última, aplicada e conferida em 2026-08-18.
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
