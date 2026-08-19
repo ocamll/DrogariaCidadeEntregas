@@ -18,7 +18,7 @@
 // do `dcrr1-vetores.mts`: colar o texto no SQL Editor e conferir o
 // digest lá. Caminho totalmente fora do Node.
 import { createHash } from 'node:crypto'
-import { VETORES } from './dcrr1-vetores.mts'
+import { VETORES, VETORES_INVALIDOS, type MotivoRejeicao } from './dcrr1-vetores.mts'
 
 let falhas = 0
 function checa(nome: string, condicao: boolean, extra = '') {
@@ -129,6 +129,88 @@ for (const vetor of VETORES) {
   checa(
     'todo pagamento aponta pra um vale presente',
     prs.every((c) => vs.some((v) => v[1] === c[1]))
+  )
+}
+
+// ---- os vetores de rejeição --------------------------------------------
+// Aqui não há canônico pra conferir: o que se checa é que os FIXTURES
+// estão bem formados, e principalmente que cada um viola de fato o que
+// diz violar. Um vetor inválido que na verdade é válido faria as duas
+// implementações serem escritas pra recusar algo legítimo.
+console.log('\n--- os vetores de rejeição ---')
+type ValeSolto = Record<string, unknown>
+type EntradaSolta = { vales?: ValeSolto[]; saidaDocumentHash?: unknown }
+
+const violaDeFato: Record<MotivoRejeicao, (e: EntradaSolta) => boolean> = {
+  sem_vales: (e) => (e.vales ?? []).length === 0,
+  saida_hash_invalido: (e) => !HEX64.test(String(e.saidaDocumentHash)),
+  desfecho_invalido: (e) => (e.vales ?? []).some((v) => !DESFECHOS.includes(String(v.desfecho))),
+  motivo_invalido: (e) =>
+    (e.vales ?? []).some((v) => v.motivo !== null && !MOTIVOS.includes(String(v.motivo))),
+  insucesso_sem_motivo: (e) =>
+    (e.vales ?? []).some((v) => v.desfecho === 'insucesso' && v.motivo == null),
+  motivo_sem_detalhe: (e) =>
+    (e.vales ?? []).some((v) => v.motivo === 'outro' && String(v.detalhe ?? '').trim() === ''),
+  entrega_duplicada: (e) => {
+    const ids = (e.vales ?? []).map((v) => String(v.entregaId))
+    return new Set(ids).size !== ids.length
+  },
+  pagamento_duplicado: (e) => {
+    const ids = (e.vales ?? []).flatMap((v) =>
+      ((v.pagamentosRealizados as ValeSolto[]) ?? []).map((p) => String(p.pagamentoId))
+    )
+    return new Set(ids).size !== ids.length
+  },
+  pagamento_em_insucesso: (e) =>
+    (e.vales ?? []).some(
+      (v) =>
+        v.desfecho === 'insucesso' && ((v.pagamentosRealizados as unknown[]) ?? []).length > 0
+    ),
+  forma_invalida: (e) =>
+    (e.vales ?? []).some((v) =>
+      ((v.pagamentosRealizados as ValeSolto[]) ?? []).some((p) => !FORMAS.includes(String(p.forma)))
+    ),
+  valor_negativo: (e) =>
+    (e.vales ?? []).some((v) =>
+      ((v.pagamentosRealizados as ValeSolto[]) ?? []).some(
+        (p) => Number(p.valorCents) < 0 || Number(p.trocoCents) < 0
+      )
+    ),
+  valor_nao_inteiro: (e) =>
+    (e.vales ?? []).some((v) =>
+      ((v.pagamentosRealizados as ValeSolto[]) ?? []).some(
+        (p) => !Number.isInteger(p.valorCents) || !Number.isInteger(p.trocoCents)
+      )
+    ),
+}
+
+for (const vetor of VETORES_INVALIDOS) {
+  checa(
+    `${vetor.nome.split(' —')[0]} viola de fato "${vetor.motivo}"`,
+    violaDeFato[vetor.motivo](vetor.entrada as EntradaSolta),
+    vetor.nome.split('— ')[1]
+  )
+}
+checa(
+  'todo motivo de rejeição tem ao menos um vetor',
+  Object.keys(violaDeFato).every((m) => VETORES_INVALIDOS.some((v) => v.motivo === m)),
+  `${VETORES_INVALIDOS.length} vetores para ${Object.keys(violaDeFato).length} motivos`
+)
+checa(
+  'nenhum motivo repetido — um vetor por classe de erro',
+  new Set(VETORES_INVALIDOS.map((v) => v.motivo)).size === VETORES_INVALIDOS.length
+)
+// A recíproca: nenhum vetor VÁLIDO pode disparar um motivo de rejeição.
+// Sem isto, uma regra escrita larga demais tornaria os oito válidos
+// inválidos, e ninguém notaria até a implementação recusar tudo.
+for (const vetor of VETORES) {
+  const disparados = (Object.keys(violaDeFato) as MotivoRejeicao[]).filter((m) =>
+    violaDeFato[m](vetor.entrada as unknown as EntradaSolta)
+  )
+  checa(
+    `${vetor.nome.split(' —')[0]} não dispara nenhuma regra de rejeição`,
+    disparados.length === 0,
+    disparados.join(', ') || 'limpo'
   )
 }
 

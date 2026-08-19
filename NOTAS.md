@@ -2723,6 +2723,80 @@ bateram.
   dinamicamente (no clique). É cosmético — o módulo é pequeno e não puxa
   dependência pesada —, mas se for arrumar, arrume nas duas.
 
+## 59. Etapa 2A: verificar antes de mudar, e contratar antes de implementar
+
+Sessão de 2026-08-19, depois do desenho do retorno. Duas peças, e as duas
+existem pelo mesmo motivo: **provar em vez de afirmar**.
+
+### O verificador, e o que ele achou
+
+O projeto **gerava** evidência criptográfica sem conseguir **verificá-la**
+— `signature_hash` e `final_hash` eram gravados e exibidos truncados,
+nunca recomputados. Conferindo o schema, dava pra fechar isso hoje:
+`v_agora` é persistido como `romaneios.selado_em`, e todos os outros
+insumos da fórmula estão gravados.
+
+Baseline: **9 verificados, 9 válidos, 0 divergências**, 4 camadas cada.
+
+**A armadilha que quase invalidou tudo** foi o fuso. A fórmula concatena
+`v_agora::text`, e `timestamptz::text` depende do `TimeZone` da sessão —
+o mesmo instante vira `12:00:00+00` em UTC e `09:00:00-03` aqui.
+`selar_romaneio_interno` não fixa fuso, e o fuso da selagem não está
+gravado em lugar nenhum. UTC era a reconstrução certa (tudo veio por
+PostgREST), mas era reconstrução: se estivesse errada, as camadas
+`assinatura:*` divergiriam todas e a `documento` passaria, porque ela não
+tem timestamp. Esse padrão não apareceu.
+
+Ficou a regra pra fórmula do retorno: **nada de cast de timestamptz em
+hash.** `to_char` com máscara ou epoch.
+
+**E ele achou uma coisa que não é sobre hash:** o `R-000001` está gravado
+como `offline_sincronizada`, enquanto o NOTAS o citava em quatro lugares
+como a prova do caminho online. A conclusão sobreviveu (seis outros são
+`online`), a citação não. Corrigido no item 42. O método vale mais que o
+achado — isso não apareceu em revisão, em teste nem relendo as notas;
+apareceu porque alguém consultou o banco com uma pergunta específica.
+
+### Os golden vectors, e por que ANTES
+
+A ideia é do usuário e a razão é sutil: comparar o gêmeo TS com o SQL
+prova que **concordam**, não que estão **certos**. TS implementa um
+defeito, SQL copia o mesmo entendimento, os dois concordam, o teste
+passa. Com vetores revisados à mão passam a existir três referências.
+
+Oito válidos e doze inválidos, 209 asserções, e **nenhuma linha de
+canônico existe ainda**.
+
+Os inválidos foram pedido dele e fecham uma classe que os válidos não
+alcançam: **TS aceita, SQL rejeita**. Os dois lados podem produzir bytes
+idênticos pra toda entrada válida e ainda discordar sobre o que é válido
+— com o mesmo sintoma de sempre, meses depois.
+
+**A lista de rejeição dele achou um defeito no que eu tinha entregue.**
+O V007 (string vazia contra nulo) usava `motivo: 'outro'` com detalhe
+vazio — e a regra congelada exige detalhe não-vazio pra `outro`. Um vetor
+VÁLIDO codificando uma entrada que os INVÁLIDOS rejeitam. Trocado pra
+`ausente`, onde detalhe é opcional. Foi o único hash que mudou.
+
+**Um caso da lista dele que não virou vetor, e a ausência é a resposta:**
+"pagamento apontando pra entrega_id que não existe no bloco `v`". No
+TypeScript ele é indescritível, porque `pagamentosRealizados` é aninhado
+no vale e o `entrega_id` da linha `pr` vem do pai. Tornar um erro
+impossível de representar vale mais que rejeitá-lo — **e por isso o lado
+SQL tem que espelhar o aninhamento**: um `select` plano de `pagamentos`
+reabriria o caso que o TS fechou por construção.
+
+O spec confere os vetores contra a **especificação**, não contra
+implementação, e checa a recíproca também: nenhum dos oito válidos pode
+disparar uma regra de rejeição. Sem isso, uma regra escrita larga demais
+tornaria os válidos inválidos e ninguém notaria até a implementação
+recusar tudo.
+
+A contagem de bytes do V001 foi somada campo a campo na mão: 359, igual
+ao que o Node reporta. E `bytes` virou critério separado do hash, a
+pedido do usuário — quando algo diverge, contagem de bytes dá
+diagnóstico muito melhor que "o hash deu outro".
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)

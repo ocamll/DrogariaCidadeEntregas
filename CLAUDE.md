@@ -1435,8 +1435,11 @@ código enfileira `fechamento_corrida`.**
       (`20260819130000_verificador_de_hash.sql`)
    2. ~~rodar contra os reais e registrar o baseline~~ — **feito**:
       `9 verificados · 9 válidos · 0 divergências`
-   3. **golden vectors do DCRR1, revisados à mão** — antes de qualquer
-      implementação, senão dois gêmeos que concordam não provam nada
+   3. ~~golden vectors do DCRR1, revisados à mão~~ — **feito**: 8 válidos
+      e 12 inválidos, 209 asserções (`scripts/dcrr1-vetores.mts`). Os
+      inválidos congelam **o que é PERMITIDO serializar**, fechando a
+      divergência "TS aceita, SQL rejeita" — que bytes idênticos para
+      entradas válidas nunca pegariam
    4. canônico do retorno em TypeScript, conferido contra os vetores
    5. canônico do retorno em SQL, conferido contra os MESMOS vetores
    6. `canonico-retorno.spec.mts` e

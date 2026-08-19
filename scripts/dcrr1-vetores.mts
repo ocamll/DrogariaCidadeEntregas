@@ -85,7 +85,12 @@ export type Vetor = {
   entrada: EntradaRetorno
   /** Escrito à mão a partir da especificação. É ISTO que está sob revisão. */
   canonico: string
-  /** Derivado do texto acima por biblioteca padrão. */
+  /** Bytes UTF-8 do texto. Critério separado de propósito: quando algo
+   *  diverge, contagem de bytes dá diagnóstico muito melhor que um hash
+   *  diferente — e o V003, fora do BMP, é o que revela confusão entre
+   *  `length` do JavaScript (UTF-16) e bytes reais do documento. */
+  bytes: number
+  /** SHA-256 dos bytes UTF-8 do texto acima, por biblioteca padrão. */
   sha256: string
 }
 
@@ -138,6 +143,7 @@ export const VETORES: Vetor[] = [
       `v\t${E1}\tentregue\t-\t-`,
       `pr\t${E1}\t${P1}\tpix\t12345\t0`,
     ].join('\n'),
+    bytes: 359,
     sha256: 'c6d4a10382ca1b388e0549fc90b09f78594f216c58265fd427168b22ff323089',
   },
 
@@ -162,6 +168,7 @@ export const VETORES: Vetor[] = [
       ],
     },
     canonico: [...CABECALHO, `v\t${E1}\tinsucesso\tausente\t-`].join('\n'),
+    bytes: 277,
     sha256: '6dc64502e82b02623ae7534ac1f4ec344fa30775c39e3b996ce4317b1df7978d',
   },
 
@@ -190,6 +197,7 @@ export const VETORES: Vetor[] = [
       ...CABECALHO,
       `v\t${E1}\tinsucesso\toutro\tEndereço da Conceição não existe — José confirmou 🛵`,
     ].join('\n'),
+    bytes: 335,
     sha256: '3abeba9dc7449da112d166b5db0aca891ef5d6d766c56d7e5efd3ab2bf90ed79',
   },
 
@@ -225,6 +233,7 @@ export const VETORES: Vetor[] = [
       `v\t${E1}\tentregue\t-\t-`,
       `pr\t${E1}\t${P1}\tdinheiro\t5000\t0`,
     ].join('\n'),
+    bytes: 363,
     sha256: 'ed851c65b151514e9b4714becfc8239bd9eb26cf001a610905d588b639c66c18',
   },
 
@@ -256,6 +265,7 @@ export const VETORES: Vetor[] = [
       // \r\n vira DOIS espaços (cada um é substituído), \t vira um, \n vira um
       `v\t${E1}\tinsucesso\toutro\tCliente disse:  "volto amanhã" não insisti`,
     ].join('\n'),
+    bytes: 318,
     sha256: '3de68637d98c1dba6a20ed43aacc48ce57bfba10a303d476d01387e7dbbaef0c',
   },
 
@@ -310,6 +320,7 @@ export const VETORES: Vetor[] = [
       `pr\t${E3}\t${P1}\tcredito\t200\t0`,
       `pr\t${E3}\t${P2}\tdebito\t300\t0`,
     ].join('\n'),
+    bytes: 649,
     sha256: '2b53ae38d3aa9f0ab436b4a34845fe509febef03ac9fee447f1c5a9a29ac94fe',
   },
 
@@ -317,25 +328,33 @@ export const VETORES: Vetor[] = [
     nome: 'V007 — string vazia NÃO é nulo',
     porque:
       '`coalesce(texto, \'-\')` só troca NULO. String vazia continua vazia, ' +
-      'e no canônico isso aparece como dois TABs seguidos. Os dois lados ' +
-      'precisam concordar nisso, senão um manda `-` e o outro manda nada.',
+      'e no canônico isso aparece como a linha terminando em TAB. Os dois ' +
+      'lados precisam concordar, senão um manda `-` e o outro manda nada. ' +
+      'No TypeScript isto pega o clássico `valor || \'-\'`, que engole a ' +
+      'string vazia junto com o nulo — o correto testa `=== null` e ' +
+      '`=== undefined`.',
     entrada: {
       saidaRomaneioId: SAIDA,
       saidaDocumentHash: SAIDA_HASH,
       motoboyId: MOTOBOY,
       responsavelId: RESPONSAVEL,
+      // Motivo `ausente`, não `outro`: a regra congelada exige detalhe
+      // não-vazio quando o motivo é `outro`, então usar `outro` aqui faria
+      // este vetor VÁLIDO codificar uma entrada que os vetores INVÁLIDOS
+      // rejeitam. Detalhe é opcional nos demais motivos, que é onde a
+      // distinção entre '' e nulo pode legitimamente aparecer.
       vales: [
         {
           entregaId: E1,
           desfecho: 'insucesso',
-          motivo: 'outro',
+          motivo: 'ausente',
           detalhe: '',
           pagamentosRealizados: [],
         },
         {
           entregaId: E2,
           desfecho: 'insucesso',
-          motivo: 'outro',
+          motivo: 'ausente',
           detalhe: null,
           pagamentosRealizados: [],
         },
@@ -344,11 +363,12 @@ export const VETORES: Vetor[] = [
     canonico: [
       ...CABECALHO,
       // detalhe vazio: a linha termina em TAB, sem nada depois
-      `v\t${E1}\tinsucesso\toutro\t`,
+      `v\t${E1}\tinsucesso\tausente\t`,
       // detalhe nulo: vira '-'
-      `v\t${E2}\tinsucesso\toutro\t-`,
+      `v\t${E2}\tinsucesso\tausente\t-`,
     ].join('\n'),
-    sha256: '78368b69ba0526e0950ba27f9fd268a6f6404d202cef1b5b52a9f442532086aa',
+    bytes: 335,
+    sha256: '7ace78057f9e0b17b797f4653b413e0aec6580b352ecb5185fef6c3b96061c4f',
   },
 
   {
@@ -382,6 +402,284 @@ export const VETORES: Vetor[] = [
       `pr\t${E1}\t${P1}\tpix\t5000\t0`,
       `pr\t${E1}\t${P2}\tdinheiro\t7000\t1500`,
     ].join('\n'),
+    bytes: 454,
     sha256: 'b6621d141b61a874e34aa47e7ca347661d1211982552bb71e2f53ea6edd28727',
+  },
+]
+
+// =====================================================================
+// VETORES INVÁLIDOS — o que NÃO pode ser serializado
+//
+// Os oito acima congelam COMO serializar. Estes congelam O QUE É
+// PERMITIDO serializar, e fecham uma classe de divergência que os
+// válidos não alcançam:
+//
+//     TS aceita  ·  SQL rejeita
+//
+// Os dois lados podem produzir bytes idênticos para toda entrada válida
+// e ainda assim discordar sobre o que é válido — e o sintoma seria o de
+// sempre: "o retorno offline não sincroniza", meses depois.
+//
+// Eles NÃO têm canônico nem hash. O resultado esperado é a recusa, e o
+// `motivo` faz parte do contrato: os dois lados precisam recusar pelo
+// MESMO motivo, senão a tela mostra uma coisa e o servidor outra.
+//
+// REJEIÇÃO NÃO É NORMALIZAÇÃO, e a diferença decide o desenho. O V004
+// (entregue com motivo sujo) é NORMALIZADO: o construtor força `-`, e
+// pode, porque `entregue` não tem motivo por definição. Já `insucesso`
+// sem motivo é RECUSADO — não há valor que o construtor pudesse
+// inventar sem afirmar o que não sabe.
+//
+// UM CASO DA LISTA QUE NÃO APARECE AQUI, e a ausência é a resposta:
+// "pagamento apontando para entrega_id que não existe no bloco v". No
+// TypeScript ele é INDESCRITÍVEL, porque `pagamentosRealizados` é
+// aninhado dentro do vale e o `entrega_id` da linha `pr` vem do pai.
+// Tornar um erro impossível de representar vale mais que rejeitá-lo.
+//
+// CONSEQUÊNCIA PARA O LADO SQL (etapa 2A item 5): ele tem que ESPELHAR o
+// aninhamento — laço sobre vales e, dentro dele, laço sobre os pagamentos
+// daquele vale. Um `select` plano de `pagamentos` reabriria exatamente o
+// caso que o TypeScript fechou por construção.
+// =====================================================================
+
+export type MotivoRejeicao =
+  | 'sem_vales'
+  | 'saida_hash_invalido'
+  | 'desfecho_invalido'
+  | 'motivo_invalido'
+  | 'insucesso_sem_motivo'
+  | 'motivo_sem_detalhe'
+  | 'entrega_duplicada'
+  | 'pagamento_duplicado'
+  | 'pagamento_em_insucesso'
+  | 'forma_invalida'
+  | 'valor_negativo'
+  | 'valor_nao_inteiro'
+
+export type VetorInvalido = {
+  nome: string
+  porque: string
+  motivo: MotivoRejeicao
+  /** Solto de propósito: estas entradas violam o tipo, que é o ponto. */
+  entrada: unknown
+}
+
+const VALE_OK = {
+  entregaId: E1,
+  desfecho: 'entregue',
+  motivo: null,
+  detalhe: null,
+  pagamentosRealizados: [{ pagamentoId: P1, forma: 'pix', valorCents: 100, trocoCents: 0 }],
+}
+const BASE = {
+  saidaRomaneioId: SAIDA,
+  saidaDocumentHash: SAIDA_HASH,
+  motoboyId: MOTOBOY,
+  responsavelId: RESPONSAVEL,
+}
+
+export const VETORES_INVALIDOS: VetorInvalido[] = [
+  {
+    nome: 'I001 — retorno sem vale nenhum',
+    porque:
+      'Um retorno fecha uma saída, e saída sem vale não existe — ' +
+      'selar_romaneio_interno já recusa "Romaneio sem vale nenhum". ' +
+      'Documento vazio seria assinatura em papel em branco.',
+    motivo: 'sem_vales',
+    entrada: { ...BASE, vales: [] },
+  },
+  {
+    nome: 'I002 — saida_hash que não é sha256',
+    porque:
+      'O saida_hash é o que amarra o retorno ao conteúdo da saída. ' +
+      'Deformado, o documento afirma fechar algo que nenhuma saída pode ' +
+      'ser, e o erro só apareceria na selagem.',
+    motivo: 'saida_hash_invalido',
+    entrada: { ...BASE, saidaDocumentHash: 'nao-e-um-hash', vales: [VALE_OK] },
+  },
+  {
+    nome: 'I003 — desfecho fora do domínio',
+    porque:
+      'Só existem entregue e insucesso. Um terceiro valor viraria uma ' +
+      'linha v sintaticamente válida que nenhum leitor sabe interpretar.',
+    motivo: 'desfecho_invalido',
+    entrada: { ...BASE, vales: [{ ...VALE_OK, desfecho: 'parcial' }] },
+  },
+  {
+    nome: 'I004 — motivo fora do domínio',
+    porque:
+      'O domínio é o CHECK de entregas.insucesso_motivo, e o canônico não ' +
+      'pode carregar valor que o banco recusaria depois — dentro da ' +
+      'transação do selo, com as assinaturas já colhidas.',
+    motivo: 'motivo_invalido',
+    entrada: {
+      ...BASE,
+      vales: [
+        {
+          entregaId: E1,
+          desfecho: 'insucesso',
+          motivo: 'sumiu',
+          detalhe: null,
+          pagamentosRealizados: [],
+        },
+      ],
+    },
+  },
+  {
+    nome: 'I005 — insucesso sem motivo',
+    porque:
+      'AQUI ESTÁ A FRONTEIRA ENTRE RECUSAR E NORMALIZAR. No V004 o ' +
+      'construtor força "-" porque entregue não tem motivo por definição. ' +
+      'Aqui não há valor que ele pudesse inventar: insucesso sem motivo é ' +
+      'um documento que não explica o que aconteceu.',
+    motivo: 'insucesso_sem_motivo',
+    entrada: {
+      ...BASE,
+      vales: [
+        {
+          entregaId: E1,
+          desfecho: 'insucesso',
+          motivo: null,
+          detalhe: null,
+          pagamentosRealizados: [],
+        },
+      ],
+    },
+  },
+  {
+    nome: 'I006 — motivo "outro" com detalhe só de espaços',
+    porque:
+      'Com outro, o detalhe É o motivo — assinar "outro" sozinho é assinar ' +
+      'nada. Só espaços conta como vazio, senão a regra se contorna com a ' +
+      'barra de espaço. É por isto que o V007 usa ausente para exercitar ' +
+      'string vazia: com outro ele codificaria uma entrada inválida.',
+    motivo: 'motivo_sem_detalhe',
+    entrada: {
+      ...BASE,
+      vales: [
+        {
+          entregaId: E1,
+          desfecho: 'insucesso',
+          motivo: 'outro',
+          detalhe: '   ',
+          pagamentosRealizados: [],
+        },
+      ],
+    },
+  },
+  {
+    nome: 'I007 — o mesmo vale duas vezes',
+    porque:
+      'Duas linhas v com o mesmo entrega_id fariam o documento afirmar ' +
+      'dois desfechos para o mesmo vale. E como entrega_id é a chave de ' +
+      'ordenação, a ordem entre as duas dependeria do algoritmo de sort — ' +
+      'que não é estável em geral, então os dois gêmeos poderiam ordenar ' +
+      'diferente e produzir bytes diferentes para a MESMA entrada.',
+    motivo: 'entrega_duplicada',
+    entrada: { ...BASE, vales: [VALE_OK, { ...VALE_OK, pagamentosRealizados: [] }] },
+  },
+  {
+    nome: 'I008 — o mesmo pagamento_id em vales diferentes',
+    porque:
+      'O pagamento_id é uuidv7 do cliente (regra 5) e identifica a linha ' +
+      'de pagamentos. Repetido, o upsert da fila offline gravaria um só e ' +
+      'o dinheiro do outro sumiria — em silêncio, que é como este projeto ' +
+      'perde dado.',
+    motivo: 'pagamento_duplicado',
+    entrada: {
+      ...BASE,
+      vales: [
+        VALE_OK,
+        {
+          entregaId: E2,
+          desfecho: 'entregue',
+          motivo: null,
+          detalhe: null,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'dinheiro', valorCents: 200, trocoCents: 0 },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    nome: 'I009 — pagamento em vale com insucesso',
+    porque:
+      'Vale que não foi entregue não gera dinheiro. Poderia ser ' +
+      'NORMALIZADO — descartar o pagamento — e é justamente o que não se ' +
+      'deve fazer: sumir em silêncio com dinheiro que alguém digitou é ' +
+      'perda sem aviso. Recusa, para a tela poder perguntar.',
+    motivo: 'pagamento_em_insucesso',
+    entrada: {
+      ...BASE,
+      vales: [
+        {
+          entregaId: E1,
+          desfecho: 'insucesso',
+          motivo: 'ausente',
+          detalhe: null,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'pix', valorCents: 100, trocoCents: 0 },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    nome: 'I010 — forma de pagamento fora do domínio',
+    porque:
+      'O domínio é o CHECK de pagamentos.forma. Valor fora dele passaria ' +
+      'pelo canônico e morreria no INSERT, dentro da transação do selo — ' +
+      'depois de colhidas as duas assinaturas.',
+    motivo: 'forma_invalida',
+    entrada: {
+      ...BASE,
+      vales: [
+        {
+          ...VALE_OK,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'boleto', valorCents: 100, trocoCents: 0 },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    nome: 'I011 — valor negativo',
+    porque:
+      'valor_cents e troco_cents têm CHECK >= 0. Estorno não é pagamento ' +
+      'negativo: é outro fato, e não existe neste fluxo.',
+    motivo: 'valor_negativo',
+    entrada: {
+      ...BASE,
+      vales: [
+        {
+          ...VALE_OK,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'pix', valorCents: -100, trocoCents: 0 },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    nome: 'I012 — valor com casa decimal',
+    porque:
+      'REGRA 1, e o canônico é onde ela morde de um jeito novo: ' +
+      'String(12.5) produz "12.5", e o documento assinado passa a carregar ' +
+      'um separador decimal que o lado SQL, com integer, nunca produziria. ' +
+      'Divergência de gêmeos nascida de dinheiro em float.',
+    motivo: 'valor_nao_inteiro',
+    entrada: {
+      ...BASE,
+      vales: [
+        {
+          ...VALE_OK,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'pix', valorCents: 12.5, trocoCents: 0 },
+          ],
+        },
+      ],
+    },
   },
 ]
