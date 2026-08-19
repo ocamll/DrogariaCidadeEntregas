@@ -55,7 +55,11 @@ Lista fechada. Não instalar dependência nova sem perguntar.
 - Supabase: Postgres + Auth + Storage + Realtime + RLS + **duas** Edge
   Functions (`criar-usuario` e `sync-romaneio`) e um conjunto de RPCs
   `SECURITY DEFINER` — ver "Onde roda código no servidor" abaixo
-- Deploy: Cloudflare Pages
+- Deploy: Cloudflare Pages — **planejado, nunca feito**. Confirmado em
+  2026-08-18: não existe conta, projeto nem site no ar. O sistema só
+  rodou em localhost até hoje. Isso muda o significado de "produção" em
+  todo o resto deste arquivo: onde se lê "em produção", entenda "quando
+  houver produção".
 - Repositório: `github.com/ocamll/DrogariaCidadeEntregas` — **privado**, branch
   `main`. Até 2026-08-10 o projeto só existia nesta máquina (dentro do
   OneDrive), sem remote nenhum.
@@ -709,10 +713,11 @@ O desenho é deliberadamente mínimo, e cada peça tem motivo:
 - **O Client ID é público** e mora em `VITE_GOOGLE_CLIENT_ID` (vai no
   bundle de qualquer jeito). **O "client secret" não é usado neste fluxo e
   não deve existir neste projeto** — vale a mesma regra da `service_role`.
-- **Em produção são dois passos**, e faltar qualquer um faz funcionar no
-  localhost e falhar no ar: a variável nas env vars do Cloudflare Pages
-  **com rebuild depois** (o Vite embute no build), e a URL do Pages nas
-  origens JavaScript autorizadas do cliente OAuth.
+- **Quando houver produção serão dois passos**, e faltar qualquer um faz
+  funcionar no localhost e falhar no ar: a variável nas env vars do
+  Cloudflare Pages **com rebuild depois** (o Vite embute no build), e a
+  URL do Pages nas origens JavaScript autorizadas do cliente OAuth.
+  Hoje **não há deploy nenhum** — ver a nota na Stack.
 - **"O app não concluiu o processo de verificação" quase nunca é sobre
   verificação.** Com o app em modo de teste, o Google recusa qualquer
   conta fora de *Usuários de teste*. `drive.file` é escopo não sensível e

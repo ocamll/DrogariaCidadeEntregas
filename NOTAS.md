@@ -2530,8 +2530,10 @@ Sessão de 2026-08-16 — cadeia de custódia (itens 33 a 38):
 - A Edge Function `sync-romaneio`, publicada pelo dashboard.
 - O secret `ROMANEIO_KEYS` da Edge Function, gerado por
   `node scripts/gerar-chaves-offline.mjs`.
-- `VITE_ROMANEIO_KEY_ID` e `VITE_ROMANEIO_PUBKEY` no `.env` local **e**
-  nas variáveis do Cloudflare Pages, com rebuild depois.
+- `VITE_ROMANEIO_KEY_ID` e `VITE_ROMANEIO_PUBKEY` no `.env` local — feito,
+  é o que faz a saída funcionar aqui. As mesmas variáveis no Cloudflare
+  Pages ficam pra quando houver deploy, que **ainda não existe** (ver as
+  pendências).
 
 Todas confirmadas rodando pelo usuário. Nenhuma migration pendente ao fim
 desta sessão — a 35 foi a última, aplicada e conferida em 2026-08-18.
@@ -2694,11 +2696,24 @@ secret `ROMANEIO_KEYS`.
       Continua sendo exposição real; o que mudou é que virou prazo
       escolhido, não pendência esquecida — não precisa ser levantado a
       cada sessão, precisa acontecer antes de virar a chave.
-- [ ] **Passos de produção do Drive e do romaneio no Cloudflare Pages**:
+- [ ] **O deploy INTEIRO, que nunca foi feito.** Descoberto em
+      2026-08-18, checando se o merge na `main` dispararia build: **não
+      existe conta na Cloudflare, nem projeto, nem site no ar.** O
+      sistema só rodou em localhost até aqui.
+
+      Isso reordena o que parecia pendência de configuração. Não é "pôr
+      três variáveis": é criar conta, criar o projeto do Pages, conectar
+      ao repositório e escolher a branch de produção. Só depois vêm as
+      cinco variáveis — `VITE_SUPABASE_URL`, `VITE_SUPABASE_ANON_KEY`,
       `VITE_GOOGLE_CLIENT_ID`, `VITE_ROMANEIO_KEY_ID` e
-      `VITE_ROMANEIO_PUBKEY` nas variáveis, **com rebuild depois** (o
-      Vite embute no build), e a URL do Pages nas origens autorizadas do
-      Google. Faltando qualquer um, funciona no localhost e falha no ar.
+      `VITE_ROMANEIO_PUBKEY` — **com rebuild depois** (o Vite embute no
+      build, então adicionar sem rebuildar não muda o site), mais a URL
+      do Pages nas origens autorizadas do cliente OAuth do Google.
+
+      Consequência boa: **merge na `main` não dispara nada**, porque não
+      há nada conectado. Consequência a lembrar: nada do que foi testado
+      aqui foi testado NO AR, e a diferença entre os dois ambientes é
+      justamente o que essas variáveis governam.
 - [ ] **Testar o envio ao Drive depois da correção do item 32.**
 
 Ideia pequena anotada e não feita: **atalho de quinzena** no relatório
