@@ -1068,12 +1068,23 @@ em claro na tabela e é a chave de busca), e o que autentica é o
 uma farmácia com dezenas de motoboys, e não colidem com os de 10 dígitos
 já emitidos — comprimentos diferentes, strings diferentes.
 
-**Cartão v1 e v2 já impressos continuam valendo.** `public_id_do_token`
-(SQL, migration `20260817130000`) e `publicIdDoToken`
-(`src/lib/tokenCartao.ts`) reconhecem os três formatos, e são os únicos
-pontos do sistema que sabem que existe mais de um. **Mudam sempre
-juntos** — divergirem não dá erro claro, dá "o cartão novo não é
-reconhecido offline", onde só o cliente responde.
+**Só o v3 é reconhecido** (migration `20260818120000`). v1 e v2 foram
+versões de teste, nenhum cartão delas circulou na farmácia, e manter três
+caminhos vivos onde a operação tem um só criava superfície. As
+credenciais antigas continuam no banco como histórico — o Registro de
+Auditoria referencia os eventos delas; o que deixa de existir é um token
+daquele formato ser aceito.
+
+`public_id_do_token` (SQL) e `publicIdDoToken` (`src/lib/tokenCartao.ts`)
+são os únicos pontos do sistema que sabem o formato, e **mudam sempre
+juntos** — divergirem não dá erro claro, dá "o cartão não é reconhecido
+offline", onde só o cliente responde. Cobertos por
+`npx tsx scripts/tokenCartao.spec.mts`.
+
+**Antes de descontinuar um formato, confira se alguma credencial ATIVA
+usa o antigo** — o cabeçalho daquela migration traz a query. Cartão ativo
+de formato removido vira um motoboy chegando no balcão com um cartão que
+o sistema não conhece mais.
 
 **A altura da barra sai em módulos inteiros, e o alvo tem que ser
 explícito e arredondado pra baixo.** O bwip-js não produz fração de
@@ -1111,9 +1122,9 @@ o token e ele não mudou).
   uniforme de 37 módulos para um token de 22 dígitos (37 × 75/176). Por
   isso o gerador **exige** o formato v3: com outro comprimento a escala
   do símbolo deixa de ser uniforme.
-- **v1 e v2 são versões de teste descontinuadas** (decidido em
-  2026-08-18). Os parsers ainda as reconhecem, o que não custa nada e
-  mantém válido o que já foi impresso.
+- **v1 e v2 foram removidos** (2026-08-18, migration
+  `20260818120000`). Eram versões de teste; hoje o parser recusa. Ver
+  acima.
 - **O nome longo é abreviado, não espremido.** `fitSansFontSize` para de
   encolher no piso de 2,9, então acima de ~46 caracteres o nome
   transbordava a borda — foi o teste de aceitação que pegou. Quem resolve
@@ -1146,78 +1157,24 @@ importa. O spec dele continua passando; se for removido, o spec vai
 junto. Com ele saiu também o `bwip-js` do bundle de produção (ele agora
 só roda nos testes), o que aliviou ~930 kB.
 
-### O arquivo do cartão antigo — substituído em 2026-08-18, mantido como história
+### O cartão antigo, apagado em 2026-08-18
 
-A tela de emissão entrega um **SVG no tamanho físico** — 75 × 20,2mm,
-barras de 16mm, zona de silêncio de 10X (2,62mm) de cada lado, dentro da
-largura. Imprimir pelo navegador não dá controle de escala pra um CR80; o
-caminho é baixar e levar pro software de impressão de cartão.
+Antes da credencial CR80 havia um cartão de 75 × 20,2mm com só o código
+de barras e o token — sem nome, sem filial, pensado pra que um cartão
+perdido não dissesse de quem era. Ele foi impresso, bipado no leitor da
+farmácia e chegou a rodar; a credencial nova o substituiu por completo.
 
-- **SVG e não canvas.** Canvas escalado por CSS reamostra; em vetor a
-  escala é exata.
-- **Duas passadas no bwip-js.** Ele decide a proporção a partir da altura
-  em milímetros, e o que se precisa é o inverso: dada a largura final de
-  75mm, qual altura natural faz as barras saírem com 16mm depois de um
-  escalonamento **uniforme**. Sem isso seria preciso esticar na vertical.
-- **`scale: 1`**, senão a unidade do viewBox é pixel e a conta da largura
-  do módulo sai pela metade — e é ela que decide se o leitor lê.
-- **O token vive DENTRO do SVG**, não numa linha de HTML ao lado: o que
-  está na tela é byte a byte o que o arquivo contém.
-- **Só código de barras e token.** Sem nome de motoboy e sem filial —
-  cartão perdido não deve dizer de quem é nem de onde veio.
+`src/lib/cartaoPdf.ts` e os scripts dele foram removidos junto: ficaram
+órfãos com a troca, e código morto com teste passando continua sendo
+código morto. **O que sobreviveu e não podia sair junto** é
+`src/lib/tokenCartao.ts` — os testes do parser moravam no spec do cartão
+antigo e foram pra `scripts/tokenCartao.spec.mts`. Perder cobertura de um
+gêmeo de função SQL no meio de uma limpeza seria a pior forma de perder
+um teste: por acidente, sem ninguém notar.
 
-**O arquivo É o cartão**: quem tiver ele imprime uma cópia que funciona.
-O desenho todo parte de o token existir só no papel, e um arquivo no disco
-(`.svg` ou `.pdf`, tanto faz) estende isso indefinidamente. A tela avisa
-pra apagar os dois depois de imprimir.
-
-#### O PDF, que é o formato pra mandar pra gráfica
-
-O `.svg` continua sendo o desenho de origem, mas quem sai daqui pra uma
-gráfica é o **PDF** (`src/lib/cartaoPdf.ts`, botão "Baixar PDF"). Ele não
-é um formato alternativo por gosto: fecha dois furos que só aparecem
-depois de impresso, quando já é tarde.
-
-- **A fonte.** No `.svg` o token é `<text font-family="Courier New">`,
-  texto vivo. Máquina sem essa fonte substitui por outra, a largura muda,
-  e um texto que mede 60,4mm dentro de 75mm pode escapar do cartão — a
-  gráfica imprimiria assim sem ter como desconfiar. No PDF a fonte é a
-  **Courier base-14**, cujas métricas fazem parte do formato e não da
-  máquina de quem abre. Mesmo avanço de 600/1000 em, então o texto sai
-  com a mesma largura de propósito, não por coincidência.
-- **O preto.** `rgb(0,0,0)` convertido pra CMYK por um RIP vira preto
-  **composto** das quatro cores, e aí erro de registro — décimos de
-  milímetro, a mesma escala do módulo — borra a borda das barras. O PDF
-  grava **CMYK 0/0/0/100** no arquivo, que é o que se pediria à gráfica
-  por escrito. Conferido no content stream: `0. 0. 0. 1. k`.
-- **A página É o cartão**: 75 × 20,19mm exatos, `orientation: 'landscape'`
-  (com `'portrait'` o jsPDF ordena o `format` pelo menor lado e a página
-  sai em pé). Não há o que redimensionar, e "tamanho real" no diálogo de
-  impressão deixa de ser ambíguo.
-- **O fundo é CMYK zerado** — branco por ausência de tinta, não tinta
-  branca. Como knockout ele ainda protege a zona de silêncio se a gráfica
-  assentar o cartão sobre arte colorida.
-
-**As barras não são recodificadas.** `barrasDoSvg` lê os `<path>` do
-MESMO SVG que está na tela: o bwip-js emite uma linha vertical no centro
-de cada barra com `stroke-width` = a largura em módulos, então a barra vai
-de `cx - w/2` a `cx + w/2`. Chamar o bwip-js uma segunda vez criaria duas
-codificações capazes de divergir sem ninguém notar — é o problema das duas
-implementações do canônico, e aqui dá pra **evitá-lo** em vez de
-administrá-lo. Se o PDF e o `.svg` discordarem, é bug de leitura daquele
-arquivo, nunca dois códigos diferentes.
-
-`npx tsx scripts/cartao-pdf.spec.mts` cobre 25 casos, e o que vale mais
-que os outros 24: as barras lidas do SVG são comparadas uma a uma com o
-`raw()` do bwip-js — outra saída do codificador, não o mesmo SVG contra si
-mesmo. Sem isso, um erro consistente de leitura passaria em tudo.
-
-**Nenhum dos dois arquivos identifica o motoboy**, nem no desenho nem nos
-metadados do PDF.
-
-**O admin nunca escolhe o PIN, logo nunca sabe.** "Redefinir" só apaga o
-hash; quem cria o novo é o motoboy, com o cartão na mão. É isso que torna
-"Mostrar PIN" impossível de existir, em vez de apenas ausente da tela.
+Com o cartão antigo saiu também o `bwip-js` do bundle de produção — ele
+agora só roda nos specs, como padrão-ouro contra o qual
+`src/lib/code128.ts` é conferido. São ~930 kB que o app não baixa mais.
 
 ### O que ficou de fora, de propósito
 
@@ -1402,8 +1359,8 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   trocar todos de uma vez, não um de cada vez.
 - Migrations em `supabase/migrations/`. **Nunca alterar schema pelo dashboard.**
 - **Biblioteca pesada entra por `await import()` e por `optimizeDeps.include`
-  no `vite.config.ts`, sempre as duas coisas.** São quatro hoje —
-  `exceljs`, `jspdf`, `jspdf-autotable` e `bwip-js/browser` — e todas só
+  no `vite.config.ts`, sempre as duas coisas.** São três hoje —
+  `exceljs`, `jspdf` e `jspdf-autotable` — e todas só
   descem quando alguém abre a tela que precisa delas. O import dinâmico
   faz o code splitting no build; o `optimizeDeps` resolve um problema só
   de desenvolvimento: sem ele o Vite descobre a dependência no instante em

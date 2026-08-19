@@ -2262,6 +2262,81 @@ bundle de produção** — ele agora só roda nos testes. São ~930 kB a menos.
 O `cartaoPdf.ts` e o spec dele continuam no repositório; removê-los é
 decisão de limpeza, não urgência.
 
+## 53. Limpeza: cartão antigo apagado e token reduzido ao v3
+
+Depois de confirmar que a credencial CR80 sai idêntica ao desenho
+original (comparada byte a byte com a frente gerada pelo GPT, só com os
+dados do motoboy trocados), o usuário mandou apagar o que ficou pra trás
+e descontinuar os formatos de token anteriores.
+
+### O que foi apagado
+
+`src/lib/cartaoPdf.ts`, `scripts/cartao-pdf.spec.mts` e
+`scripts/cartao-de-teste.mts`. Ficaram órfãos com a substituição do
+cartão de 75 × 20,2mm — código morto com teste passando continua sendo
+código morto.
+
+**Uma coisa quase saiu junto por acidente, e não podia.** Os testes de
+`publicIdDoToken` moravam dentro do `cartao-pdf.spec.mts`. O parser NÃO
+morreu com o cartão: `src/data/credenciais.ts` continua usando, e é ele
+que identifica o cartão bipado — inclusive OFFLINE, onde só o cliente
+responde. E ele é gêmeo de uma função SQL.
+
+Perder cobertura de um gêmeo no meio de uma limpeza é a pior forma de
+perder um teste: por acidente, sem ninguém notar, e o sintoma aparece
+meses depois como "o cartão não é reconhecido sem internet". Os casos
+foram pra `scripts/tokenCartao.spec.mts` antes de qualquer `git rm`.
+
+### Só o v3, nos dois lados
+
+Migration `20260818120000` + `src/lib/tokenCartao.ts`. Os gêmeos mudaram
+juntos, como sempre têm que mudar.
+
+O cabeçalho da migration traz a query que precisa rodar ANTES:
+
+    select c.public_id, m.nome, length(c.public_id) as digitos
+      from public.motoboy_credenciais c
+      join public.mototaxistas m on m.id = c.motoboy_id
+     where c.ativo and c.public_id !~ '^[0-9]{6}$';
+
+Zero linhas = seguro. Alguma linha = aquele motoboy chega no balcão com
+um cartão que o sistema não conhece mais. Conferido em 18/08: as duas
+credenciais ativas já eram v3, e as antigas de 10 dígitos estão todas
+revogadas (emitir cartão novo revoga o anterior).
+
+**As linhas antigas não são apagadas.** Elas são histórico — dizem quando
+um cartão foi emitido, por quem e quando foi revogado, e o Registro de
+Auditoria referencia esses eventos. O que muda é só o parser deixar de
+casar um token daquele formato.
+
+O spec ganhou dois casos que parecem redundantes e não são: `v2 não é
+mais lido` e `v1 não é mais lido`. Sem eles, "tirei o suporte" e "esqueci
+de tirar" seriam indistinguíveis.
+
+### Efeito colateral: o bwip-js saiu do bundle
+
+Com o `cartaoPdf.ts` fora, nada no app importa o bwip-js — quem desenha
+as barras agora é `src/lib/code128.ts`. Ele saiu também do
+`optimizeDeps.include` do `vite.config.ts` (a entrada existe pra
+dependência de import dinâmico, e não há mais nenhum). São ~930 kB que o
+app não baixa mais.
+
+Ele continua instalado e continua importante: é o **padrão-ouro** contra
+o qual o `code128.ts` é conferido barra a barra nos specs. Só deixou de
+ser código de produção.
+
+### Duas decisões de calendário do usuário
+
+Registradas pra não voltarem como alarme a cada sessão:
+
+- **As senhas de teste ficam** (`adminteste@`/`caixateste@`, senha
+  `2026`) até o sistema estar finalizado. Continua sendo exposição real
+  num Supabase de produção, com o histórico do repo registrando; a
+  diferença é que agora é prazo escolhido, não pendência esquecida.
+- **A limpeza dos dados de teste é o último passo antes de apresentar.**
+  Faz sentido: limpar antes significaria recriar massa de teste a cada
+  frente nova.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -2598,10 +2673,16 @@ secret `ROMANEIO_KEYS`.
 - [ ] **Agência real.** O dado de teste é "Ágil Motos"; em São Gabriel a
       agência é a Gabrielense.
 - [ ] **Limpeza dos dados de teste** (lista no fim deste arquivo).
-- [ ] **Trocar as senhas de teste no Supabase** — pendente desde
-      2026-08-10 e o único item com risco real esperando. `adminteste@` e
-      `caixateste@` com senha `2026`, num Supabase de produção, e o
-      histórico do repositório registra isso.
+      **Decidido em 2026-08-18 que é o ÚLTIMO passo antes de apresentar** —
+      limpar antes significaria recriar massa de teste a cada frente nova.
+      Não é esquecimento; é ordem escolhida.
+- [ ] **Trocar as senhas de teste no Supabase** — `adminteste@` e
+      `caixateste@` com senha `2026`, num Supabase de produção, com o
+      histórico do repositório registrando. **Adiado por decisão do
+      usuário em 2026-08-18: ficam até o sistema estar finalizado.**
+      Continua sendo exposição real; o que mudou é que virou prazo
+      escolhido, não pendência esquecida — não precisa ser levantado a
+      cada sessão, precisa acontecer antes de virar a chave.
 - [ ] **Passos de produção do Drive e do romaneio no Cloudflare Pages**:
       `VITE_GOOGLE_CLIENT_ID`, `VITE_ROMANEIO_KEY_ID` e
       `VITE_ROMANEIO_PUBKEY` nas variáveis, **com rebuild depois** (o

@@ -31,6 +31,8 @@ export default defineConfig({
   // Custo: `npm run dev` demora um pouco mais pra subir. Não afeta o
   // build de produção, onde o code splitting continua igual.
   optimizeDeps: {
-    include: ['bwip-js/browser', 'exceljs', 'jspdf', 'jspdf-autotable'],
+    // O bwip-js saiu daqui com a credencial CR80: o app não o importa mais
+    // (src/lib/code128.ts desenha as barras), ele só roda nos specs.
+    include: ['exceljs', 'jspdf', 'jspdf-autotable'],
   },
 })

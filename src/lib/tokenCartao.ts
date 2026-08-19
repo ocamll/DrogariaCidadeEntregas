@@ -12,28 +12,25 @@
 // O token vem do leitor como se tivesse sido digitado. Só o public_id é
 // usado aqui — o segredo não serve pra nada localmente e não é guardado.
 //
-// Espelha `public.public_id_do_token` (migration 20260817130000) e conhece
-// os TRÊS formatos. Nenhum cartão é reemitido quando o formato muda, e
-// estes dois parsers são os únicos pontos do sistema — banco e cliente —
-// que sabem que existe mais de um. Mudam sempre juntos.
+// Espelha `public.public_id_do_token` (migration 20260818120000). Os dois
+// são os únicos pontos do sistema que sabem o formato do token, e **mudam
+// sempre juntos**: divergirem não dá erro claro, dá "o cartão não é
+// reconhecido quando falta internet" — e offline é justamente onde só
+// este lado responde.
 //
-// Todos os numéricos são sem separador: ponto no meio quebraria o modo
-// numérico do Code 128 (Set C, dois dígitos por símbolo) e o código
-// ficaria quase 40% mais largo.
+// SÓ O v3. Em 2026-08-18 o usuário descontinuou os formatos anteriores
+// (v1 `DCM1.<10>.<20>` em base32 e v2 `2<10><31>` numérico): foram
+// versões de teste, nenhum cartão delas chegou a circular na farmácia, e
+// manter três caminhos vivos onde a operação tem um só criava superfície.
+// As credenciais antigas continuam no banco como histórico; o que deixa
+// de existir é o token daquele formato ser reconhecido.
 export function publicIdDoToken(token: string): string | null {
   const limpo = token.trim()
 
-  // v3: 1 (versão) + 6 (public_id) + 15 (segredo) = 22 dígitos. Mais
-  // curto que o v2 pra dobrar a margem de impressão — 0,426mm por módulo
-  // contra 0,262mm. Ver o cabeçalho da migration 20260817130000.
+  // 1 (versão) + 6 (public_id) + 15 (segredo) = 22 dígitos, sem
+  // separador: um ponto no meio quebraria o modo numérico do Code 128
+  // (Set C, dois dígitos por símbolo) e o código não caberia no cartão.
   if (/^3[0-9]{21}$/.test(limpo)) return limpo.slice(1, 7)
-
-  // v2: 1 + 10 (public_id) + 31 (segredo) = 42 dígitos.
-  if (/^2[0-9]{41}$/.test(limpo)) return limpo.slice(1, 11)
-
-  // v1: DCM1.<10>.<20>, alfabeto Crockford
-  const partes = limpo.split('.')
-  if (partes.length === 3 && partes[0] === 'DCM1' && partes[1].length === 10) return partes[1]
 
   return null
 }
