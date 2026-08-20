@@ -72,131 +72,187 @@ if (erroLig) throw erroLig
 if (!ligacoes?.length) throw new Error('Romaneio sem vales.')
 
 // ---------------------------------------------------------------------
-// 2. UM RETORNO PLAUSÍVEL, e de propósito NÃO o caso mais simples
+// 2. UM CENÁRIO POR FORMA, e não um documento com N vales
 //
-// Os vales reais recebem desfechos diferentes em rodízio, pra o teste
-// exercitar de uma vez: entregue com pagamento, insucesso com motivo,
-// motivo `outro` com detalhe de verdade, várias formas no mesmo vale,
-// string vazia, acento e caractere fora do BMP.
+// A primeira versão distribuía os casos entre os vales do romaneio, em
+// rodízio — e num romaneio de UM vale só o primeiro caso atravessava o
+// fio. Justamente os dois que motivaram o teste (acento fora do BMP e
+// string vazia) ficavam sem cobertura.
 //
-// Com um vale só, sai o primeiro caso e o script avisa que a cobertura
-// ficou parcial — dizer isso é melhor que deixar alguém achar que
-// exercitou tudo.
+// O erro estava em amarrar a cobertura ao tamanho do documento. O
+// TRANSPORTE não precisa de três vales num documento: precisa de três
+// FORMAS cruzando o fio. Então cada forma vira um cenário próprio, com
+// os mesmos vales reais, e cada cenário faz sua ida e volta.
+//
+// Assim a cobertura é a mesma com 1 vale ou com 10.
 // ---------------------------------------------------------------------
 const DETALHE_ACENTUADO = 'Endereço da Conceição não confere — José confirmou 🛵'
 
-const vales = ligacoes.map((lig, i) => {
-  const caso = i % 3
-  if (caso === 0) {
-    return {
-      entregaId: lig.entrega_id,
-      desfecho: 'entregue',
-      motivo: null,
-      detalhe: null,
-      pagamentosRealizados: [
-        { pagamentoId: uuidv7(), forma: 'pix', valorCents: 12345, trocoCents: 0 },
-        // segunda forma no MESMO vale: metade pix, metade dinheiro, com
-        // troco — o caso 1:N que a tabela `pagamentos` existe pra
-        // suportar, e que o aninhamento tem que atravessar intacto
-        { pagamentoId: uuidv7(), forma: 'dinheiro', valorCents: 7000, trocoCents: 1500 },
-      ],
-    }
-  }
-  if (caso === 1) {
-    return {
-      entregaId: lig.entrega_id,
-      desfecho: 'insucesso',
-      motivo: 'outro',
-      detalhe: DETALHE_ACENTUADO,
-      pagamentosRealizados: [],
-    }
-  }
-  return {
-    entregaId: lig.entrega_id,
-    desfecho: 'insucesso',
-    motivo: 'ausente',
-    // string VAZIA, não nula: o V007 separa os dois, e aqui a distinção
-    // atravessa JSON.stringify → PostgREST → jsonb → `->>`
-    detalhe: '',
-    pagamentosRealizados: [],
-  }
-})
-
-const { data: perfilMoto } = await supabase
+const { data: corrida } = await supabase
   .from('corridas')
   .select('mototaxista_id')
   .eq('id', saida.corrida_id)
   .maybeSingle()
 
-const entrada = {
+const cabecalho = {
   saidaRomaneioId: saida.id,
   saidaDocumentHash: saida.document_hash,
-  motoboyId: perfilMoto?.mototaxista_id ?? uuidv7(),
+  motoboyId: corrida?.mototaxista_id ?? uuidv7(),
   responsavelId: user.id,
-  vales,
+}
+const ids = ligacoes.map((l) => l.entrega_id)
+
+const cenarios = [
+  {
+    nome: 'entregue · duas formas no mesmo vale, com troco',
+    // O caso 1:N que a tabela `pagamentos` existe pra suportar (metade
+    // pix, metade dinheiro), e que o aninhamento tem que atravessar.
+    vales: ids.map((id) => ({
+      entregaId: id,
+      desfecho: 'entregue',
+      motivo: null,
+      detalhe: null,
+      pagamentosRealizados: [
+        { pagamentoId: uuidv7(), forma: 'pix', valorCents: 12345, trocoCents: 0 },
+        { pagamentoId: uuidv7(), forma: 'dinheiro', valorCents: 7000, trocoCents: 1500 },
+      ],
+    })),
+  },
+  {
+    nome: 'insucesso · motivo outro, detalhe com acento e fora do BMP',
+    // O caso que mais justifica testar transporte: quatro camadas
+    // (navegador → JSON → PostgREST → PostgreSQL) e um par substituto
+    // UTF-16 no meio.
+    vales: ids.map((id) => ({
+      entregaId: id,
+      desfecho: 'insucesso',
+      motivo: 'outro',
+      detalhe: DETALHE_ACENTUADO,
+      pagamentosRealizados: [],
+    })),
+  },
+  {
+    nome: 'insucesso · detalhe STRING VAZIA (não nulo)',
+    // A distinção do V007 atravessando o fio: `''` tem que continuar
+    // vazio e virar linha terminada em TAB, não `-`.
+    vales: ids.map((id) => ({
+      entregaId: id,
+      desfecho: 'insucesso',
+      motivo: 'ausente',
+      detalhe: '',
+      pagamentosRealizados: [],
+    })),
+  },
+  {
+    nome: 'insucesso · detalhe NULO (o par do anterior)',
+    // Só faz sentido ao lado do de cima: os dois juntos provam que o
+    // transporte não confunde vazio com ausente. `null` sobrevive ao
+    // JSON; `undefined` sumiria, e os dois lados tratam ausente como
+    // nulo — por isso o par testa a fronteira, não cada um sozinho.
+    vales: ids.map((id) => ({
+      entregaId: id,
+      desfecho: 'insucesso',
+      motivo: 'ausente',
+      detalhe: null,
+      pagamentosRealizados: [],
+    })),
+  },
+]
+
+// Com mais de um vale dá pra exercitar também o documento MISTO, que é
+// como um retorno de verdade se parece.
+if (ids.length > 1) {
+  cenarios.push({
+    nome: 'misto · entregue e insucesso no mesmo documento',
+    vales: ids.map((id, i) =>
+      i % 2 === 0
+        ? {
+            entregaId: id,
+            desfecho: 'entregue',
+            motivo: null,
+            detalhe: null,
+            pagamentosRealizados: [
+              { pagamentoId: uuidv7(), forma: 'pix', valorCents: 900, trocoCents: 0 },
+            ],
+          }
+        : {
+            entregaId: id,
+            desfecho: 'insucesso',
+            motivo: 'recusou',
+            detalhe: DETALHE_ACENTUADO,
+            pagamentosRealizados: [],
+          }
+    ),
+  })
 }
 
 // ---------------------------------------------------------------------
-// 3. OS DOIS LADOS, DO MESMO OBJETO
+// 3. CADA CENÁRIO: os dois lados, do MESMO objeto
 // ---------------------------------------------------------------------
-const canonicoLocal = montarCanonicoRetorno(entrada)
-const bytesLocal = new TextEncoder().encode(canonicoLocal).length
-const hashLocal = [
-  ...new Uint8Array(
-    await crypto.subtle.digest('SHA-256', new TextEncoder().encode(canonicoLocal))
-  ),
-]
-  .map((b) => b.toString(16).padStart(2, '0'))
-  .join('')
+const sha256Local = async (texto) =>
+  [...new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(texto)))]
+    .map((b) => b.toString(16).padStart(2, '0'))
+    .join('')
 
-const { data: doServidor, error: erroRpc } = await supabase
-  .rpc('conferir_canonico_retorno', {
-    p_saida_id: entrada.saidaRomaneioId,
-    p_saida_document_hash: entrada.saidaDocumentHash,
-    p_motoboy_id: entrada.motoboyId,
-    p_responsavel_id: entrada.responsavelId,
-    // A MESMA entrada, pela MESMA função que a tela vai usar
-    p_retorno: paraJsonbRetorno(entrada),
-  })
-  .maybeSingle()
-if (erroRpc) throw erroRpc
-
-// ---------------------------------------------------------------------
-// 4. COMPARAR OS TRÊS, SEPARADOS
-//
-// Cada lado calculou os seus. Se só o texto divergir, o transporte de
-// VOLTA mexeu; se os bytes divergirem, é codificação e não conteúdo; se
-// os três divergirem, o input chegou diferente.
-// ---------------------------------------------------------------------
 const primeiraDiferenca = (a, b) => {
   const n = Math.min(a.length, b.length)
   for (let i = 0; i < n; i++) {
     if (a[i] !== b[i]) {
-      return `pos ${i}: local ${JSON.stringify(a.slice(i - 20 < 0 ? 0 : i - 20, i + 20))} servidor ${JSON.stringify(b.slice(i - 20 < 0 ? 0 : i - 20, i + 20))}`
+      const janela = (s) => JSON.stringify(s.slice(Math.max(0, i - 20), i + 20))
+      return `pos ${i}: local ${janela(a)} servidor ${janela(b)}`
     }
   }
   return a.length === b.length ? null : `comprimento: ${a.length} vs ${b.length}`
 }
 
-const resultado = {
-  romaneio: saida.numero,
-  vales: vales.length,
-  cobertura:
-    vales.length >= 3
-      ? 'completa (entregue+2 formas, insucesso/outro com acento, insucesso com detalhe vazio)'
-      : `PARCIAL — só ${vales.length} vale(s); rode num romaneio com 3 ou mais`,
-  texto: canonicoLocal === doServidor.canonico,
-  bytes: bytesLocal === doServidor.bytes,
-  hash: hashLocal === doServidor.sha256,
-  local: { bytes: bytesLocal, sha256: hashLocal },
-  servidor: { bytes: doServidor.bytes, sha256: doServidor.sha256 },
-  diferenca: canonicoLocal === doServidor.canonico ? null : primeiraDiferenca(canonicoLocal, doServidor.canonico),
+const linhas = []
+let ultimoCanonico = null
+
+for (const cenario of cenarios) {
+  const entrada = { ...cabecalho, vales: cenario.vales }
+
+  const local = montarCanonicoRetorno(entrada)
+  const bytesLocal = new TextEncoder().encode(local).length
+  const hashLocal = await sha256Local(local)
+
+  const { data: servidor, error } = await supabase
+    .rpc('conferir_canonico_retorno', {
+      p_saida_id: entrada.saidaRomaneioId,
+      p_saida_document_hash: entrada.saidaDocumentHash,
+      p_motoboy_id: entrada.motoboyId,
+      p_responsavel_id: entrada.responsavelId,
+      // A MESMA entrada, pela MESMA função que a tela vai usar
+      p_retorno: paraJsonbRetorno(entrada),
+    })
+    .maybeSingle()
+  if (error) throw error
+
+  linhas.push({
+    cenario: cenario.nome,
+    texto: local === servidor.canonico,
+    bytes: bytesLocal === servidor.bytes,
+    hash: hashLocal === servidor.sha256,
+    bytesLocal,
+    bytesServidor: servidor.bytes,
+    diferenca: local === servidor.canonico ? null : primeiraDiferenca(local, servidor.canonico),
+  })
+  ultimoCanonico = local
 }
 
-console.log(resultado)
+// ---------------------------------------------------------------------
+// 4. O VEREDITO
+//
+// Se só o texto divergir, o transporte de VOLTA mexeu; se os bytes
+// divergirem, é codificação e não conteúdo; se os três divergirem, o
+// input chegou diferente ao servidor.
+// ---------------------------------------------------------------------
+console.log(`romaneio ${saida.numero}, ${ids.length} vale(s), ${cenarios.length} cenários`)
+console.table(linhas)
+
+const todosOk = linhas.every((l) => l.texto && l.bytes && l.hash)
 console.log(
-  resultado.texto && resultado.bytes && resultado.hash
-    ? '\nTRANSPORTE PRESERVA — os três critérios batem\n'
-    : '\nDIVERGIU — ver `diferenca` e o padrão dos três acima\n'
+  todosOk
+    ? `\nTRANSPORTE PRESERVA — ${linhas.length} cenários, três critérios cada\n`
+    : '\nDIVERGIU — ver a coluna `diferenca` e o padrão dos três\n'
 )
-console.log(canonicoLocal)
+console.log('último canônico, pra conferir a olho:\n' + ultimoCanonico)
