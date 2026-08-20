@@ -119,16 +119,37 @@ function Linha({ rotulo, valor }: { rotulo: string; valor: string | null }) {
   )
 }
 
+// O cargo, quando ele foi registrado. Nas assinaturas anteriores a
+// 2026-08-19 não existe, e aí a tela simplesmente não diz nada — inventar
+// a partir de `profiles.papel` seria mostrar o cargo de HOJE para um ato
+// de meses atrás.
+const PAPEL_LABEL: Record<string, string> = {
+  caixa: 'Caixa',
+  gerente: 'Gerente',
+  admin: 'Administrador',
+}
+
 export function BlocoAssinatura({ assinatura }: { assinatura: AssinaturaDoRomaneio }) {
-  const ehCaixa = assinatura.tipoSignatario === 'caixa'
+  const ehMotoboy = assinatura.tipoSignatario === 'motoboy'
   return (
     <div className="flex flex-col gap-2">
+      {/* "DA FARMÁCIA", não "do caixa". `tipo_signatario = 'caixa'` é o
+          nome do SLOT e está dentro do hash — não é uma afirmação sobre o
+          cargo de quem assinou, e a tela dizia que era. Um admin selando
+          uma saída aparecia como "caixa", que é a tela afirmando o que não
+          sabe. O cargo real vem de `papelNoMomento`, logo abaixo. */}
       <p className="text-xs font-semibold tracking-wider uppercase text-foreground/70">
-        Assinatura do {ehCaixa ? 'caixa' : 'motoboy'}
+        Assinatura {ehMotoboy ? 'do motoboy' : 'da farmácia'}
       </p>
       <AssinaturaDesenhada strokes={assinatura.strokes} />
       <div className="flex flex-col gap-0.5">
         <p className="text-sm font-medium">{assinatura.nome}</p>
+        {assinatura.papelNoMomento && (
+          <p className="text-xs text-foreground/70">
+            {PAPEL_LABEL[assinatura.papelNoMomento] ?? assinatura.papelNoMomento}
+            <span className="text-foreground/50"> · no momento da assinatura</span>
+          </p>
+        )}
         {assinatura.agenciaNome && (
           <p className="text-xs text-foreground/70">{assinatura.agenciaNome}</p>
         )}

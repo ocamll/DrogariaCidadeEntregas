@@ -28,3 +28,28 @@ export function dataLocal(d: Date): string {
 export function mesLocal(d: Date): string {
   return dataLocal(d).slice(0, 7)
 }
+
+/**
+ * Quanto tempo a corrida levou, do selo da saída ao fechamento.
+ *
+ * **Os dois instantes têm que ser do relógio do SERVIDOR**
+ * (`corridas.saida_em` e `retorno_em`, carimbados por trigger). Misturar
+ * servidor com dispositivo daria um intervalo que não aconteceu — o PC
+ * do balcão pode estar 40 minutos errado, que é a razão da regra 8.
+ *
+ * Morava em `romaneioPdf.ts`, e mudou de casa quando a PÁGINA do romaneio
+ * passou a mostrar os relógios também: importar aquele módulo só por esta
+ * função puxaria o gerador de PDF pro bundle principal.
+ *
+ * Devolve `null` quando a corrida ainda está aberta. Quem exibe tem que
+ * DIZER isso, não omitir o campo: ausência e "ainda em rota" não podem se
+ * parecer.
+ */
+export function duracaoDaCorrida(saidaEm: string | null, retornoEm: string | null): string | null {
+  if (!saidaEm || !retornoEm) return null
+  const ms = new Date(retornoEm).getTime() - new Date(saidaEm).getTime()
+  if (!Number.isFinite(ms) || ms < 0) return null
+  const min = Math.round(ms / 60_000)
+  if (min < 60) return `${min} min`
+  return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}`
+}

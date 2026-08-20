@@ -84,6 +84,20 @@ export function RetornoCorrida({ profile, onVoltar }: { profile: AuthProfile; on
                     : '—'}{' '}
                   · {corrida.entregas.length} vale(s)
                 </span>
+                {/* OS VALES, e eles já vinham na consulta — só não eram
+                    desenhados. Sem isto, duas corridas do mesmo motoboy
+                    só se distinguem pelo horário, e quem está no balcão
+                    com o papel na mão procura pelo NÚMERO DO VALE.
+                    Mostrar o cliente junto porque é o que a pessoa
+                    lembra quando o número não ajuda. */}
+                <span className="flex flex-col gap-0.5 text-xs text-foreground/70">
+                  {corrida.entregas.map((entrega) => (
+                    <span key={entrega.id}>
+                      <span className="font-medium">{entrega.numeroVale}</span>
+                      {entrega.clienteNome ? ` · ${entrega.clienteNome}` : ''}
+                    </span>
+                  ))}
+                </span>
               </button>
             ))}
           </div>

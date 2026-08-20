@@ -33,6 +33,7 @@ import type { RomaneioCompleto } from '@/data/romaneios'
 import { formatBRL } from '@/lib/money'
 import { textoGeo } from '@/lib/geolocalizacao'
 import { carregarImagemDaMarca, LOGO_DOCUMENTO_URL, LOGO_PROPORCAO, COR_MARCA } from '@/lib/marca'
+import { duracaoDaCorrida } from '@/lib/datas'
 
 export type ViaDoRomaneio = 'farmacia' | 'agencia'
 
@@ -67,14 +68,14 @@ const dataHora = (iso: string | null | undefined) =>
 // Diferença entre retirada e retorno, que é o insumo do relatório de
 // tempo médio. Sai do relógio do SERVIDOR nos dois lados: misturar
 // servidor com dispositivo daria uma duração que não aconteceu.
-export function duracaoDaCorrida(saidaEm: string | null, retornoEm: string | null): string | null {
-  if (!saidaEm || !retornoEm) return null
-  const ms = new Date(retornoEm).getTime() - new Date(saidaEm).getTime()
-  if (!Number.isFinite(ms) || ms < 0) return null
-  const min = Math.round(ms / 60_000)
-  if (min < 60) return `${min} min`
-  return `${Math.floor(min / 60)}h${String(min % 60).padStart(2, '0')}`
-}
+// `duracaoDaCorrida` mudou de casa para `lib/datas.ts` quando a PÁGINA do
+// romaneio passou a mostrar os relógios: importar ESTE módulo só pela
+// duração puxaria o gerador de PDF pro bundle principal.
+//
+// Reexportada daqui pra nenhum call site nem o spec precisarem mudar — e
+// importada logo acima, porque o PDF também a usa e reexportar não traz o
+// nome pro escopo local.
+export { duracaoDaCorrida }
 
 export async function montarRomaneioPdf(
   romaneio: RomaneioCompleto,

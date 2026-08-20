@@ -224,7 +224,15 @@ async function buscarCorridasAbertas(): Promise<CorridaAberta[]> {
       'id, saida_em, mototaxistas(nome), agencias(nome), entregas(id, numero_vale, cliente_nome, cliente_endereco, status_entrega)'
     )
     .eq('status', 'aberta')
-    .order('saida_em', { ascending: true })
+    // A ÚLTIMA que saiu vem PRIMEIRO, a pedido do usuário em 2026-08-20.
+    // Mesma razão da lista de vales para saída: quem está no balcão
+    // procura o que acabou de acontecer, e o resto da fila desce.
+    //
+    // Trocar a direção aqui é seguro porque `LIMITE_OPERACIONAL` é 500 e
+    // corridas abertas simultâneas são poucas — não há truncamento
+    // silencioso a considerar, que é o que tornaria a ordem uma decisão
+    // sobre o que se PERDE em vez de sobre o que se vê primeiro.
+    .order('saida_em', { ascending: false })
     .limit(LIMITE_OPERACIONAL)
 
   if (error) throw error

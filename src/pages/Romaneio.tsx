@@ -4,6 +4,7 @@ import type { RomaneioCompleto } from '@/data/romaneios'
 import { BlocoAssinatura } from '@/components/Custodia'
 import { baixarArquivo } from '@/lib/credencialDownload'
 import { driveConfigurado, prepararDrive } from '@/lib/googleDrive'
+import { duracaoDaCorrida } from '@/lib/datas'
 import type { ViaDoRomaneio } from '@/lib/romaneioPdf'
 import { formatBRL } from '@/lib/money'
 import { Badge } from '@/components/ui/badge'
@@ -218,6 +219,31 @@ export function Romaneio({
                 valor={new Date(data.recebidoEmServidor).toLocaleString('pt-BR')}
               />
             )}
+            {/* O RETORNO, que o PDF já mostrava e a página não. Corrida
+                ainda aberta é DITA, nunca omitida: campo ausente e
+                "o motoboy não voltou" não podem se parecer, e a diferença
+                é o que alguém procura ao abrir este documento.
+                A duração usa o relógio do SERVIDOR nos dois lados —
+                misturar com o do dispositivo daria um intervalo que não
+                aconteceu. */}
+            <Campo
+              rotulo="Retorno (servidor)"
+              valor={
+                data.corrida?.retornoEm
+                  ? new Date(data.corrida.retornoEm).toLocaleString('pt-BR')
+                  : 'corrida ainda aberta'
+              }
+            />
+            {data.corrida?.retornoEmLocal && (
+              <Campo
+                rotulo="Retorno (balcão)"
+                valor={new Date(data.corrida.retornoEmLocal).toLocaleString('pt-BR')}
+              />
+            )}
+            <Campo
+              rotulo="Duração"
+              valor={duracaoDaCorrida(data.corrida?.saidaEm ?? null, data.corrida?.retornoEm ?? null)}
+            />
             <Campo rotulo="IP" valor={data.ip} />
           </section>
 

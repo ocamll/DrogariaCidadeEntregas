@@ -462,6 +462,16 @@ export type AssinaturaDoRomaneio = {
   ip: string | null
   geolocalizacao: unknown
   signatureHash: string | null
+  /**
+   * O cargo de quem assinou NO INSTANTE da assinatura — nulo nas
+   * assinaturas anteriores a 2026-08-19, que nunca tiveram o dado.
+   *
+   * Não confundir com `tipoSignatario`, que é o SLOT ("o lado da
+   * farmácia") e está dentro do hash. Um romaneio pode legitimamente ter
+   * `tipoSignatario: 'caixa'` com `papelNoMomento: 'admin'` — foi o que
+   * aconteceu no `R-000013`.
+   */
+  papelNoMomento: 'caixa' | 'gerente' | 'admin' | null
 }
 
 export type CustodiaDoVale = {
@@ -489,6 +499,7 @@ type LinhaAssinatura = {
   profiles: { nome: string } | null
   mototaxistas: { nome: string; agencias: { nome: string } | null } | null
   motoboy_credenciais: { public_id: string } | null
+  papel_no_momento: 'caixa' | 'gerente' | 'admin' | null
 }
 
 // Cada tabela alvo tem exatamente UMA FK vinda de `assinaturas`, então o
@@ -498,7 +509,7 @@ type LinhaAssinatura = {
 // precisar de hint.
 const SELECT_ASSINATURAS =
   'romaneio_id, tipo_signatario, strokes, auth_method, signature_hash, ' +
-  'assinado_em_local, capturado_em, ip, geolocalizacao, ' +
+  'assinado_em_local, capturado_em, ip, geolocalizacao, papel_no_momento, ' +
   'profiles(nome), mototaxistas(nome, agencias(nome)), motoboy_credenciais(public_id)'
 
 function mapAssinatura(linha: LinhaAssinatura): AssinaturaDoRomaneio {
@@ -517,6 +528,7 @@ function mapAssinatura(linha: LinhaAssinatura): AssinaturaDoRomaneio {
     ip: linha.ip,
     geolocalizacao: linha.geolocalizacao,
     signatureHash: linha.signature_hash,
+    papelNoMomento: linha.papel_no_momento,
   }
 }
 
