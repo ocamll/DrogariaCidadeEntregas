@@ -2874,6 +2874,45 @@ script duas vezes na mesma aba dava "Identifier ... has already been
 declared" e nada rodava. Repetir um teste é o uso normal. Tudo passou a
 viver dentro de um bloco.
 
+### O item 7, e o baseline provando que nada moveu
+
+`papel_no_momento` entrou no INSERT da assinatura da saída. Mudança
+estreita de propósito: `tipo_signatario` continua `caixa`, o canônico não
+muda, as fórmulas de `signature_hash` e `final_hash` não mudam um byte,
+nada é reescrito nem preenchido retroativamente.
+
+**Depois de aplicar: `9 · 9 · 0`, idêntico ao baseline.** 36 camadas de
+hash recomputadas em 9 documentos, todas ainda verificando. É a diferença
+entre "li o código e a fórmula não mudou" e medição no mesmo instrumento
+— e é exatamente por isso que o verificador veio ANTES desta mudança.
+
+**Conferido por diff antes, não só por leitura.** A função inteira
+precisa ser reescrita pra ganhar uma coluna, e é a mais crítica do
+projeto. O diff mostrou uma linha de declare, o `select` do perfil
+ganhando `p.papel`, o bloco da checagem e a coluna no INSERT — e as três
+linhas de `encode(digest(...))` NÃO apareceram nele. O hash do trecho das
+fórmulas é o mesmo nos dois arquivos.
+
+**Uma armadilha que quase peguei:** existem DUAS definições de
+`selar_romaneio_interno` no repositório. A original de `20260816140000` e
+a de `20260816180000`, que corrigiu a ordem da FK da autorização — o bug
+do item 40, o que fazia NENHUM selo funcionar. Parti da segunda. Copiar
+da primeira teria reintroduzido aquilo em silêncio, e só apareceria na
+próxima saída real.
+
+**Onde a checagem do papel ficou, e por quê.** O usuário pediu pra falhar
+a selagem em vez de gravar NULL. Mas checar cedo — logo depois de buscar
+o perfil — derrubaria também o caminho do CONFLITO, que existe justamente
+pra preservar os traços das duas assinaturas quando a saída é recusada.
+Trocar essa prova por uma exceção contraria o princípio mais forte do
+desenho. A checagem ficou imediatamente antes do INSERT da assinatura, o
+único ponto onde a coluna existe; o conflito grava em
+`romaneios.conflito` e segue intocado.
+
+Na prática o único papel que dispara isso é `agencia`, que
+`profiles.papel` aceita desde o schema inicial e que não deveria estar
+selando saída nenhuma.
+
 ### Dois defeitos meus no gerador do SQL, e o método que os deixou passar
 
 O gerador emitia **20 statements separados**, e o SQL Editor mostra só o

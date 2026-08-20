@@ -1457,13 +1457,18 @@ código enfileira `fechamento_corrida`.**
       `supabase-js → PostgREST → jsonb` preserva o input que o navegador
       assinou? Precisa da migration
       `20260819150000_conferir_canonico_retorno.sql`
-   7. `papel_no_momento` no INSERT da saída — **escrito**
-      (`20260819160000_papel_no_momento_na_saida.sql`), falta APLICAR. A
-      fórmula do hash não muda um byte, conferido por diff
-   8. rodar o verificador **de novo**
-   9. provar que nenhum hash existente mudou nem deixou de verificar
+   7. ~~`papel_no_momento` no INSERT da saída~~ — **feito e aplicado**
+      (`20260819160000_papel_no_momento_na_saida.sql`). A fórmula do hash
+      não mudou um byte, conferido por diff antes e por recomputação
+      depois
+   8. ~~rodar o verificador **de novo**~~ — **feito**
+   9. ~~provar que nenhum hash existente mudou nem deixou de verificar~~ —
+      **PROVADO: `9 · 9 · 0`, idêntico ao baseline.** 36 camadas
+      recomputadas depois da mudança, todas ainda verificando. Não é "li
+      o código e não mudou": é medição no mesmo instrumento
    10. fluxo E2E da saída: cartão → PIN → assinaturas → canônico →
-       hashes → selo
+       hashes → selo. **Depende do usuário** (cartão e PIN de verdade), e
+       é o único item da 2A que sobra
 3. **2B** — `selar_romaneio_retorno` transacional
 4. **2C** — fila offline: `romaneio_retorno`, envelope, `sync-romaneio`
 5. **2D** — tela: Retorno de Corrida vira o fluxo do documento
