@@ -20,6 +20,7 @@ import {
   normalizarRetorno,
   serializarRetorno,
   validarRetorno,
+  paraJsonbRetorno,
   RetornoInvalido,
   type EntradaRetorno,
 } from '../src/lib/canonicoRetorno.ts'
@@ -173,6 +174,50 @@ for (const vetor of VETORES) {
     })),
   }
   checa('uuid em maiúscula é normalizado pra minúscula', montarCanonicoRetorno(maiuscula) === v001.canonico)
+}
+
+// =====================================================================
+// O PAYLOAD LEVA TUDO QUE O CANÔNICO ASSINA
+//
+// Esta seção existe por causa de um defeito real, em 2026-08-20:
+// `paraJsonbRetorno` ficou sem o campo `documentos` depois de o bloco
+// `d` entrar no canônico. O TypeScript compilava, os 102 casos deste
+// spec passavam, e mesmo assim a tela teria ASSINADO UMA COISA E
+// MANDADO OUTRA — o servidor reconstrói o DCRR1 do que recebe, chega
+// noutro hash e recusa `documento_alterado` depois das duas assinaturas.
+//
+// Quem pegou foi a conferência contra o banco. Isto aqui é pra o
+// próximo campo novo não precisar do banco pra ser pego.
+//
+// A checagem é de CONTAGEM e não de forma: cada linha assinada tem que
+// ter um item correspondente no payload enviado. Comparar objeto com
+// objeto exigiria uma segunda tradução — e duas traduções da mesma
+// coisa é o defeito que este projeto persegue desde o canônico.
+// =====================================================================
+console.log('\n--- paraJsonbRetorno leva tudo que o canônico assina ---')
+for (const vetor of VETORES) {
+  const enviado = paraJsonbRetorno(vetor.entrada) as Array<Record<string, unknown>>
+  const linhas = vetor.canonico.split('\n')
+  const conta = (prefixo: string) => linhas.filter((l) => l.startsWith(prefixo + '\t')).length
+  const somar = (campo: string) =>
+    enviado.reduce((n, v) => n + ((v[campo] as unknown[]) ?? []).length, 0)
+
+  const nome = vetor.nome.split(' —')[0]
+  checa(`${nome}: um vale enviado por linha v`, enviado.length === conta('v'))
+  checa(`${nome}: um pagamento enviado por linha pr`, somar('pagamentos_realizados') === conta('pr'))
+  checa(`${nome}: um documento enviado por linha d`, somar('documentos') === conta('d'))
+}
+// E a recíproca, que é o que teria pego o defeito na hora: nenhum vale
+// do payload pode sair sem uma chave que o canônico lê. Contagem sozinha
+// passaria se AMBOS os lados estivessem vazios.
+{
+  const comTudo = VETORES.find((v) =>
+    v.entrada.vales.some((x) => x.documentos.length > 0 && x.pagamentosRealizados.length > 0)
+  )
+  const vale = (paraJsonbRetorno(comTudo!.entrada) as Array<Record<string, unknown>>)[0]
+  for (const chave of ['entrega_id', 'desfecho', 'motivo', 'detalhe', 'pagamentos_realizados', 'documentos']) {
+    checa(`payload tem a chave "${chave}"`, chave in vale)
+  }
 }
 
 console.log(`\n${falhas === 0 ? 'canônico do retorno ok' : falhas + ' FALHA(S)'}\n`)

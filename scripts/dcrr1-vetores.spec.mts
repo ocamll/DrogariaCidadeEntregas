@@ -78,16 +78,28 @@ for (const vetor of VETORES) {
   // ---- estrutura --------------------------------------------------------
   const corpo = linhas.slice(5)
   checa(
-    'só linhas v e pr depois do cabeçalho',
-    corpo.every((l) => l.startsWith('v\t') || l.startsWith('pr\t')),
+    'só linhas v, pr e d depois do cabeçalho',
+    corpo.every((l) => l.startsWith('v\t') || l.startsWith('pr\t') || l.startsWith('d\t')),
     `${corpo.length} linhas`
   )
   const iPrimeiroPr = corpo.findIndex((l) => l.startsWith('pr\t'))
   const iUltimoV = corpo.map((l) => l.startsWith('v\t')).lastIndexOf(true)
+  const iPrimeiroD = corpo.findIndex((l) => l.startsWith('d\t'))
+  const iUltimoPr = corpo.map((l) => l.startsWith('pr\t')).lastIndexOf(true)
   checa(
     'TODOS os pagamentos depois de TODOS os vales',
     iPrimeiroPr === -1 || iPrimeiroPr > iUltimoV,
     iPrimeiroPr === -1 ? 'sem pagamento' : `último v em ${iUltimoV}, primeiro pr em ${iPrimeiroPr}`
+  )
+  // Os TRÊS blocos em ordem fixa. O `d` vem depois dos dois anteriores, e
+  // as duas comparações são necessárias: um documento sem pagamento
+  // nenhum (V014, insucesso) passaria pela primeira sozinha.
+  checa(
+    'TODOS os documentos depois de TODOS os vales e pagamentos',
+    iPrimeiroD === -1 || (iPrimeiroD > iUltimoV && iPrimeiroD > iUltimoPr),
+    iPrimeiroD === -1
+      ? 'sem documento'
+      : `último v em ${iUltimoV}, último pr em ${iUltimoPr}, primeiro d em ${iPrimeiroD}`
   )
   checa('não termina em quebra de linha', !vetor.canonico.endsWith('\n'))
   checa(
@@ -144,6 +156,37 @@ for (const vetor of VETORES) {
     'todo pagamento aponta pra um vale presente',
     prs.every((c) => vs.some((v) => v[1] === c[1]))
   )
+
+  // ---- as linhas de documento -------------------------------------------
+  // Domínios escritos AQUI de novo, à mão, e não importados de
+  // `canonicoRetorno.ts`: este spec confere os vetores contra a
+  // ESPECIFICAÇÃO, e importar da implementação faria a checagem
+  // concordar consigo mesma. Mesma razão do `FORMAS` lá em cima.
+  const TIPOS_DOC = ['convenio', 'crediario']
+  const SITUACOES_DOC = ['recebido', 'faltante']
+  const ds = corpo.filter((l) => l.startsWith('d\t')).map((l) => l.split('\t'))
+  // Diferente do `pr`, o `d` NÃO é filtrado por desfecho: o papel saiu
+  // sob custódia do motoboy, então o destino dele tem que ser declarado
+  // mesmo quando a entrega falhou. É a regra que o V014 congela.
+  const docsEsperados = vetor.entrada.vales.flatMap((v) => v.documentos)
+  checa('uma linha d por documento da entrada', ds.length === docsEsperados.length)
+  checa('toda linha d tem 4 campos', ds.every((c) => c.length === 4))
+  checa('tipo_documento é do domínio', ds.every((c) => TIPOS_DOC.includes(c[2])))
+  checa('situação é do domínio', ds.every((c) => SITUACOES_DOC.includes(c[3])))
+  // `convcard` é forma de pagamento VÁLIDA e tipo de documento INVÁLIDO.
+  // A asserção existe explicitamente porque é a confusão mais provável.
+  checa('nenhum documento é convcard', !ds.some((c) => c[2] === 'convcard'))
+  const chavesD = ds.map((c) => c[1] + '|' + c[2])
+  checa(
+    'documentos ordenados por (entrega_id, tipo_documento)',
+    JSON.stringify(chavesD) === JSON.stringify([...chavesD].sort()),
+    chavesD.map((k) => k.slice(34, 36) + '/' + k.split('|')[1]).join(' ')
+  )
+  checa('nenhum par (entrega_id, tipo) repetido', new Set(chavesD).size === chavesD.length)
+  checa(
+    'todo documento aponta pra um vale presente',
+    ds.every((c) => vs.some((v) => v[1] === c[1]))
+  )
 }
 
 // ---- os vetores de rejeição --------------------------------------------
@@ -154,6 +197,11 @@ for (const vetor of VETORES) {
 console.log('\n--- os vetores de rejeição ---')
 type ValeSolto = Record<string, unknown>
 type EntradaSolta = { vales?: ValeSolto[]; saidaDocumentHash?: unknown }
+
+type DocSolto = { tipo?: unknown; situacao?: unknown }
+const TIPOS_DOC_ESP = ['convenio', 'crediario']
+const SITUACOES_DOC_ESP = ['recebido', 'faltante']
+const docsDe = (v: ValeSolto) => ((v.documentos as DocSolto[]) ?? [])
 
 const violaDeFato: Record<MotivoRejeicao, (e: EntradaSolta) => boolean> = {
   sem_vales: (e) => (e.vales ?? []).length === 0,
@@ -196,6 +244,23 @@ const violaDeFato: Record<MotivoRejeicao, (e: EntradaSolta) => boolean> = {
         (p) => !Number.isInteger(p.valorCents) || !Number.isInteger(p.trocoCents)
       )
     ),
+  // Bloco `d`. Repare que NENHUM destes precisa saber o que a saída
+  // esperava — é o que mantém o canônico puro. "Esperava crediário e não
+  // veio linha d" não tem predicado aqui de propósito: aquela recusa
+  // pertence a `selar_romaneio_retorno` e é provada no placar da 2B.
+  tipo_documento_invalido: (e) =>
+    (e.vales ?? []).some((v) => docsDe(v).some((d) => !TIPOS_DOC_ESP.includes(String(d.tipo)))),
+  situacao_documento_invalida: (e) =>
+    (e.vales ?? []).some((v) =>
+      docsDe(v).some((d) => !SITUACOES_DOC_ESP.includes(String(d.situacao)))
+    ),
+  // POR VALE, não global: dois vales podem legitimamente ter cada um o
+  // seu crediário. Só repetir o par (entrega_id, tipo) é duplicata.
+  documento_duplicado: (e) =>
+    (e.vales ?? []).some((v) => {
+      const tipos = docsDe(v).map((d) => String(d.tipo))
+      return new Set(tipos).size !== tipos.length
+    }),
 }
 
 for (const vetor of VETORES_INVALIDOS) {
@@ -210,16 +275,26 @@ checa(
   Object.keys(violaDeFato).every((m) => VETORES_INVALIDOS.some((v) => v.motivo === m)),
   `${VETORES_INVALIDOS.length} vetores para ${Object.keys(violaDeFato).length} motivos`
 )
-// Um vetor por classe de erro, com UMA exceção declarada: `forma_invalida`
-// tem dois, e eles provam coisas diferentes. I010 é uma forma que NUNCA
-// existiu (`boleto`) — o domínio recusa o desconhecido. I013 é uma forma
-// que EXISTIU e saiu (`vale`, removida do banco em 2026-08-07) — sem ele,
-// "tirei do domínio" e "esqueci de tirar" ficariam indistinguíveis, que é
-// a mesma razão dos casos `v2 não é mais lido` do parser do cartão.
+// Um vetor por classe de erro, com DUAS exceções declaradas. Cada par
+// prova coisas diferentes, e por isso são nomeadas em vez de a regra ser
+// afrouxada: assim um terceiro motivo duplicado, esse sim por descuido,
+// continua caindo aqui.
 //
-// A exceção é nomeada em vez de a regra ser afrouxada: assim um segundo
-// motivo duplicado, esse sim por descuido, continua caindo aqui.
-const DUPLICATA_DELIBERADA: MotivoRejeicao[] = ['forma_invalida']
+//   forma_invalida
+//     I010  `boleto` — forma que NUNCA existiu; o domínio recusa o
+//           desconhecido
+//     I013  `vale` — forma que EXISTIU e saiu (removida do banco em
+//           2026-08-07). Sem ele, "tirei do domínio" e "esqueci de
+//           tirar" ficam indistinguíveis, que é a razão dos casos
+//           `v2 não é mais lido` do parser do cartão
+//
+//   tipo_documento_invalido
+//     I014  `receita` — tipo que não é documento de custódia desta
+//           família (a receita volta dias depois, é outro ciclo)
+//     I015  `convcard` — e este é o que mais importa: ele é forma de
+//           pagamento VÁLIDA e tipo de documento INVÁLIDO. Sem um vetor
+//           próprio, a assimetria dependeria de alguém lembrar dela
+const DUPLICATA_DELIBERADA: MotivoRejeicao[] = ['forma_invalida', 'tipo_documento_invalido']
 const motivosSemExcecao = VETORES_INVALIDOS.map((v) => v.motivo).filter(
   (m) => !DUPLICATA_DELIBERADA.includes(m)
 )
@@ -228,9 +303,14 @@ checa(
   new Set(motivosSemExcecao).size === motivosSemExcecao.length
 )
 checa(
-  'a duplicata deliberada é exatamente a esperada',
+  'duplicata deliberada de forma_invalida',
   VETORES_INVALIDOS.filter((v) => v.motivo === 'forma_invalida').length === 2,
   'I010 (nunca existiu) e I013 (existiu e saiu)'
+)
+checa(
+  'duplicata deliberada de tipo_documento_invalido',
+  VETORES_INVALIDOS.filter((v) => v.motivo === 'tipo_documento_invalido').length === 2,
+  'I014 (não é desta família) e I015 (convcard: forma válida, documento inválido)'
 )
 // A recíproca: nenhum vetor VÁLIDO pode disparar um motivo de rejeição.
 // Sem isto, uma regra escrita larga demais tornaria os oito válidos

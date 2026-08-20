@@ -89,12 +89,59 @@ export type PagamentoRealizadoCanonico = {
   trocoCents: number
 }
 
+// CUSTÓDIA FÍSICA DE DOCUMENTO, e SÓ isso.
+//
+// Acrescentado em 2026-08-20, com o processo real da farmácia. Dois tipos
+// de venda geram um papel que sai com o motoboy e tem que voltar pra
+// filial: o CONVÊNIO e o CREDIÁRIO. O do crediário é a nota que o cliente
+// assina formalizando o aceite da dívida.
+//
+// `convcard` NÃO ENTRA AQUI, e a distinção é o ponto: nele o cliente
+// manda os dados do cartão e a farmácia processa a compra — não há papel
+// saindo com ninguém. Três conceitos distintos, e confundir convênio com
+// convcard seria inventar custódia onde não existe.
+//
+// O DOMÍNIO DA SITUAÇÃO É DELIBERADAMENTE POBRE. No instante do retorno,
+// caixa e motoboy só conseguem afirmar duas coisas:
+//
+//     recebido   o papel voltou pra custódia da filial
+//     faltante   o papel que deveria voltar não veio
+//
+// `recebido` é PRESENÇA FÍSICA, nada além. Nada de `retornado_assinado`,
+// `assinatura_valida`, `irregular` ou `conferido`: tudo isso depende da
+// conferência do gestor, que acontece DEPOIS e é outro fluxo. Um
+// documento que voltou sem assinatura é `recebido` — porque fisicamente
+// foi —, e a irregularidade vira evento posterior. Pôr o julgamento aqui
+// faria o documento assinado afirmar o que quem assinou não tinha como
+// saber.
+//
+// Por isso este par é válido e não é contraditório:
+//
+//     v   E1  insucesso  ausente  -
+//     d   E1  crediario  recebido
+//
+// A entrega falhou e o papel voltou em branco. O retorno físico
+// aconteceu.
+export type DocumentoFisicoCanonico = {
+  tipo: 'convenio' | 'crediario'
+  situacao: 'recebido' | 'faltante'
+}
+
 export type ValeRetornoCanonico = {
   entregaId: string
   desfecho: 'entregue' | 'insucesso'
   motivo: 'ausente' | 'endereco_errado' | 'recusou' | 'outro' | null
   detalhe: string | null
   pagamentosRealizados: PagamentoRealizadoCanonico[]
+  // ANINHADO no vale, como os pagamentos, e pelo mesmo motivo: com o
+  // `entrega_id` vindo do pai, "documento apontando pra vale que não está
+  // no documento" fica INDESCRITÍVEL por construção. Tornar um erro
+  // impossível de representar vale mais que rejeitá-lo — e obriga o lado
+  // SQL a espelhar o aninhamento.
+  //
+  // A identidade da linha é (entrega_id, tipo), não só entrega_id: um
+  // vale pode ter convênio e crediário ao mesmo tempo.
+  documentos: DocumentoFisicoCanonico[]
 }
 
 export type EntradaRetorno = {
@@ -162,6 +209,7 @@ export const VETORES: Vetor[] = [
           pagamentosRealizados: [
             { pagamentoId: P1, forma: 'pix', valorCents: 12345, trocoCents: 0 },
           ],
+          documentos: [],
         },
       ],
     },
@@ -191,6 +239,7 @@ export const VETORES: Vetor[] = [
           motivo: 'ausente',
           detalhe: null,
           pagamentosRealizados: [],
+          documentos: [],
         },
       ],
     },
@@ -217,6 +266,7 @@ export const VETORES: Vetor[] = [
           motivo: 'outro',
           detalhe: 'Endereço da Conceição não existe — José confirmou 🛵',
           pagamentosRealizados: [],
+          documentos: [],
         },
       ],
     },
@@ -252,6 +302,7 @@ export const VETORES: Vetor[] = [
           pagamentosRealizados: [
             { pagamentoId: P1, forma: 'dinheiro', valorCents: 5000, trocoCents: 0 },
           ],
+          documentos: [],
         },
       ],
     },
@@ -284,6 +335,7 @@ export const VETORES: Vetor[] = [
           motivo: 'outro',
           detalhe: 'Cliente disse:\r\n"volto\tamanhã"\nnão insisti',
           pagamentosRealizados: [],
+          documentos: [],
         },
       ],
     },
@@ -319,6 +371,7 @@ export const VETORES: Vetor[] = [
             { pagamentoId: P2, forma: 'debito', valorCents: 300, trocoCents: 0 },
             { pagamentoId: P1, forma: 'credito', valorCents: 200, trocoCents: 0 },
           ],
+          documentos: [],
         },
         {
           entregaId: E1,
@@ -326,6 +379,7 @@ export const VETORES: Vetor[] = [
           motivo: 'recusou',
           detalhe: null,
           pagamentosRealizados: [],
+          documentos: [],
         },
         {
           entregaId: E2,
@@ -335,6 +389,7 @@ export const VETORES: Vetor[] = [
           pagamentosRealizados: [
             { pagamentoId: P3, forma: 'pix', valorCents: 100, trocoCents: 0 },
           ],
+          documentos: [],
         },
       ],
     },
@@ -377,6 +432,7 @@ export const VETORES: Vetor[] = [
           motivo: 'ausente',
           detalhe: '',
           pagamentosRealizados: [],
+          documentos: [],
         },
         {
           entregaId: E2,
@@ -384,6 +440,7 @@ export const VETORES: Vetor[] = [
           motivo: 'ausente',
           detalhe: null,
           pagamentosRealizados: [],
+          documentos: [],
         },
       ],
     },
@@ -420,6 +477,7 @@ export const VETORES: Vetor[] = [
             { pagamentoId: P1, forma: 'pix', valorCents: 5000, trocoCents: 0 },
             { pagamentoId: P2, forma: 'dinheiro', valorCents: 7000, trocoCents: 1500 },
           ],
+          documentos: [],
         },
       ],
     },
@@ -456,6 +514,7 @@ export const VETORES: Vetor[] = [
           pagamentosRealizados: [
             { pagamentoId: P1, forma: 'convcard', valorCents: 8500, trocoCents: 0 },
           ],
+          documentos: [],
         },
       ],
     },
@@ -493,6 +552,7 @@ export const VETORES: Vetor[] = [
           pagamentosRealizados: [
             { pagamentoId: P1, forma: 'crediario', valorCents: 12000, trocoCents: 0 },
           ],
+          documentos: [],
         },
       ],
     },
@@ -503,6 +563,253 @@ export const VETORES: Vetor[] = [
     ].join('\n'),
     bytes: 365,
     sha256: 'c88e6feea9bb23812523bdfc8a04705c9f3dcfc0bf9fd4195925117c0c0a25b7',
+  },
+
+  // ===================================================================
+  // O BLOCO `d` — custódia física, acrescentado em 2026-08-20
+  //
+  // Os dez acima seguem valendo byte a byte: bloco `d` vazio não produz
+  // linha nenhuma, então acrescentar o campo não moveu um hash. Foi a
+  // primeira coisa medida.
+  // ===================================================================
+
+  {
+    nome: 'V011 — crediário: o pagamento E o papel, um em cada bloco',
+    porque:
+      'O caso base da custódia, e o que separa as duas naturezas do ' +
+      'crediário: a linha `pr` diz o que aconteceu com o DINHEIRO, a ' +
+      'linha `d` diz o que aconteceu com o PAPEL. Uma não substitui a ' +
+      'outra, e um documento que confundisse as duas afirmaria que "o ' +
+      'valor foi combinado" quando quisesse dizer "a nota voltou".',
+    entrada: {
+      saidaRomaneioId: SAIDA,
+      saidaDocumentHash: SAIDA_HASH,
+      motoboyId: MOTOBOY,
+      responsavelId: RESPONSAVEL,
+      vales: [
+        {
+          entregaId: E1,
+          desfecho: 'entregue',
+          motivo: null,
+          detalhe: null,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'crediario', valorCents: 12000, trocoCents: 0 },
+          ],
+          documentos: [{ tipo: 'crediario', situacao: 'recebido' }],
+        },
+      ],
+    },
+    canonico: [
+      ...CABECALHO,
+      `v\t${E1}\tentregue\t-\t-`,
+      `pr\t${E1}\t${P1}\tcrediario\t12000\t0`,
+      `d\t${E1}\tcrediario\trecebido`,
+    ].join('\n'),
+    bytes: 423,
+    sha256: '13f83e93a3b4eedf290315cda7cec87a32015992cbbb4c895964e8d00dbd88b7',
+  },
+
+  {
+    nome: 'V012 — crediário com o papel FALTANTE',
+    porque:
+      '`faltante` descreve o estado físico NO INSTANTE em que o retorno ' +
+      'foi selado, e não um desfecho: o processo da farmácia é que o ' +
+      'papel PRECISA vir, então isto é pendência aberta. A chegada ' +
+      'posterior do documento não corrige nem reescreve este DCRR1 — ela ' +
+      'é evento novo sobre o vale. Alguém vai querer "consertar" este ' +
+      'faltante pra recebido daqui a seis meses; é a regra 7 dizendo que ' +
+      'não.',
+    entrada: {
+      saidaRomaneioId: SAIDA,
+      saidaDocumentHash: SAIDA_HASH,
+      motoboyId: MOTOBOY,
+      responsavelId: RESPONSAVEL,
+      vales: [
+        {
+          entregaId: E1,
+          desfecho: 'entregue',
+          motivo: null,
+          detalhe: null,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'crediario', valorCents: 12000, trocoCents: 0 },
+          ],
+          documentos: [{ tipo: 'crediario', situacao: 'faltante' }],
+        },
+      ],
+    },
+    canonico: [
+      ...CABECALHO,
+      `v\t${E1}\tentregue\t-\t-`,
+      `pr\t${E1}\t${P1}\tcrediario\t12000\t0`,
+      `d\t${E1}\tcrediario\tfaltante`,
+    ].join('\n'),
+    bytes: 423,
+    sha256: 'bb7fcb8668e3887322b7fd045652b18db60892bb5543aa65bc719371cdf492c5',
+  },
+
+  {
+    nome: 'V013 — convênio, o outro tipo com papel',
+    porque:
+      'O convênio segue a mesma lógica de custódia do crediário: gera um ' +
+      'documento físico que vai pro cliente assinar e tem que voltar. ' +
+      'Este vetor existe pra travar que são DOIS tipos no domínio, e não ' +
+      'um — e pra deixar registrado que `convcard` NÃO é este caso: nele ' +
+      'o cliente manda os dados do cartão e a farmácia processa, sem ' +
+      'papel saindo com ninguém.',
+    entrada: {
+      saidaRomaneioId: SAIDA,
+      saidaDocumentHash: SAIDA_HASH,
+      motoboyId: MOTOBOY,
+      responsavelId: RESPONSAVEL,
+      vales: [
+        {
+          entregaId: E1,
+          desfecho: 'entregue',
+          motivo: null,
+          detalhe: null,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'convenio', valorCents: 9000, trocoCents: 0 },
+          ],
+          documentos: [{ tipo: 'convenio', situacao: 'recebido' }],
+        },
+      ],
+    },
+    canonico: [
+      ...CABECALHO,
+      `v\t${E1}\tentregue\t-\t-`,
+      `pr\t${E1}\t${P1}\tconvenio\t9000\t0`,
+      `d\t${E1}\tconvenio\trecebido`,
+    ].join('\n'),
+    bytes: 420,
+    sha256: 'f0d512e8e63a4f57ce049d44ea4228ecfd10ff2fc23ce484c893527f61a26d9d',
+  },
+
+  {
+    nome: 'V014 — INSUCESSO com o papel recebido: válido, e não contraditório',
+    porque:
+      'Parece contradição e não é. O papel foi emitido na venda e saiu ' +
+      'sob custódia do motoboy; a entrega falhou e ele voltou EM BRANCO. ' +
+      '`recebido` significa PRESENÇA FÍSICA, nada mais — não afirma ' +
+      'assinatura, validade nem preenchimento. É por isso que o domínio ' +
+      'da situação tem só dois valores: qualquer coisa além disso ' +
+      'dependeria da conferência do gestor, que é outro fluxo e acontece ' +
+      'depois. Repare que não há linha `pr`: insucesso não gera pagamento ' +
+      'realizado, mas gera obrigação de dizer onde o papel foi parar.',
+    entrada: {
+      saidaRomaneioId: SAIDA,
+      saidaDocumentHash: SAIDA_HASH,
+      motoboyId: MOTOBOY,
+      responsavelId: RESPONSAVEL,
+      vales: [
+        {
+          entregaId: E1,
+          desfecho: 'insucesso',
+          motivo: 'ausente',
+          detalhe: null,
+          pagamentosRealizados: [],
+          documentos: [{ tipo: 'crediario', situacao: 'recebido' }],
+        },
+      ],
+    },
+    canonico: [
+      ...CABECALHO,
+      `v\t${E1}\tinsucesso\tausente\t-`,
+      `d\t${E1}\tcrediario\trecebido`,
+    ].join('\n'),
+    bytes: 335,
+    sha256: '633093cc57a9cb8c82a1a53f3ea9652343d182d5d987c3dd7bc298c6abe72fe5',
+  },
+
+  {
+    nome: 'V015 — o mesmo vale com os DOIS tipos de documento',
+    porque:
+      'É o que torna a identidade da linha `d` o par (entrega_id, tipo) e ' +
+      'não só entrega_id. Trava também a ordenação DENTRO do vale: ' +
+      '"convenio" < "crediario" por code unit (o `o` de conv vem antes do ' +
+      '`r` de cred), e é essa a ordem que sai, independente da ordem de ' +
+      'entrada. E mostra que os dois documentos convivem com um único ' +
+      '`pr`: quantos papéis saem não tem relação com quantos pagamentos ' +
+      'houve.',
+    entrada: {
+      saidaRomaneioId: SAIDA,
+      saidaDocumentHash: SAIDA_HASH,
+      motoboyId: MOTOBOY,
+      responsavelId: RESPONSAVEL,
+      vales: [
+        {
+          entregaId: E1,
+          desfecho: 'entregue',
+          motivo: null,
+          detalhe: null,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'crediario', valorCents: 12000, trocoCents: 0 },
+          ],
+          // Na entrada, crediário primeiro. Na saída, convênio primeiro.
+          documentos: [
+            { tipo: 'crediario', situacao: 'recebido' },
+            { tipo: 'convenio', situacao: 'recebido' },
+          ],
+        },
+      ],
+    },
+    canonico: [
+      ...CABECALHO,
+      `v\t${E1}\tentregue\t-\t-`,
+      `pr\t${E1}\t${P1}\tcrediario\t12000\t0`,
+      `d\t${E1}\tconvenio\trecebido`,
+      `d\t${E1}\tcrediario\trecebido`,
+    ].join('\n'),
+    bytes: 480,
+    sha256: 'bfdcbf9486e1cc7bf9d3445ae79a0302d41c4e8c54dd39502a02199d49bf908a',
+  },
+
+  {
+    nome: 'V016 — ORDENAÇÃO do bloco `d` nos dois eixos, com a entrada embaralhada',
+    porque:
+      'O irmão do V006, pro bloco novo. A entrada traz os vales em ordem ' +
+      'inversa e os documentos de E2 fora da ordem de tipo; a saída sai ' +
+      'ordenada por (entrega_id, tipo_documento). Sem ele, um gêmeo ' +
+      'poderia ordenar só pelo primeiro eixo e concordar com o outro em ' +
+      'todos os casos de um documento por vale — e divergir no primeiro ' +
+      'vale real com dois. Também prova que o bloco `d` vem DEPOIS de ' +
+      'todos os `v`, e não intercalado.',
+    entrada: {
+      saidaRomaneioId: SAIDA,
+      saidaDocumentHash: SAIDA_HASH,
+      motoboyId: MOTOBOY,
+      responsavelId: RESPONSAVEL,
+      vales: [
+        {
+          entregaId: E2,
+          desfecho: 'entregue',
+          motivo: null,
+          detalhe: null,
+          pagamentosRealizados: [],
+          documentos: [
+            { tipo: 'crediario', situacao: 'recebido' },
+            { tipo: 'convenio', situacao: 'faltante' },
+          ],
+        },
+        {
+          entregaId: E1,
+          desfecho: 'entregue',
+          motivo: null,
+          detalhe: null,
+          pagamentosRealizados: [],
+          documentos: [{ tipo: 'crediario', situacao: 'faltante' }],
+        },
+      ],
+    },
+    canonico: [
+      ...CABECALHO,
+      `v\t${E1}\tentregue\t-\t-`,
+      `v\t${E2}\tentregue\t-\t-`,
+      `d\t${E1}\tcrediario\tfaltante`,
+      `d\t${E2}\tconvenio\tfaltante`,
+      `d\t${E2}\tcrediario\trecebido`,
+    ].join('\n'),
+    bytes: 495,
+    sha256: '3767a590eae4cf270e1c0b6dc0a3cdef88787d0da15b787430cfaf8bf5e2df7f',
   },
 ]
 
@@ -541,6 +848,31 @@ export const VETORES: Vetor[] = [
 // caso que o TypeScript fechou por construção.
 // =====================================================================
 
+// A FRONTEIRA, congelada em 2026-08-20 — e ela decide o que PODE ser um
+// vetor inválido aqui.
+//
+//   O CANÔNICO É PURO. Sabe se o payload é estruturalmente válido, se os
+//   domínios são válidos, se há duplicata, como normalizar, ordenar e
+//   serializar. NÃO sabe o que saiu naquela corrida, quais documentos
+//   eram esperados, nem se faltou ou sobrou em relação à saída.
+//
+//   `selar_romaneio_retorno` sabe qual é a saída selada, quais vales
+//   pertencem a ela e quais formas aquela saída declarou — portanto é
+//   ele, e só ele, que pode exigir
+//   `documentos_esperados = documentos_declarados`.
+//
+// Por isso "esperava crediário e não veio linha `d`" NÃO é vetor
+// inválido: seria pedir a uma função pura que provasse algo que ela não
+// tem como saber, e o preço seria a pureza — que é justamente o que
+// permitiu, na 2A, montar um documento multi-vale quando nenhum romaneio
+// selado tinha mais de um.
+//
+// Isso não perde cobertura, move a regra pra camada que tem a
+// informação. As recusas contextuais são provadas no placar da 2B
+// (`scripts/conferir-2b-no-sql-editor.sql`), contra dado real, e são
+// contadas como conjunto PRÓPRIO — chamá-las de "invalid vectors"
+// misturaria duas camadas e, daqui a seis meses, ninguém saberia qual
+// delas um número está medindo.
 export type MotivoRejeicao =
   | 'sem_vales'
   | 'saida_hash_invalido'
@@ -554,6 +886,9 @@ export type MotivoRejeicao =
   | 'forma_invalida'
   | 'valor_negativo'
   | 'valor_nao_inteiro'
+  | 'tipo_documento_invalido'
+  | 'situacao_documento_invalida'
+  | 'documento_duplicado'
 
 export type VetorInvalido = {
   nome: string
@@ -569,6 +904,7 @@ const VALE_OK = {
   motivo: null,
   detalhe: null,
   pagamentosRealizados: [{ pagamentoId: P1, forma: 'pix', valorCents: 100, trocoCents: 0 }],
+  documentos: [],
 }
 const BASE = {
   saidaRomaneioId: SAIDA,
@@ -620,6 +956,7 @@ export const VETORES_INVALIDOS: VetorInvalido[] = [
           motivo: 'sumiu',
           detalhe: null,
           pagamentosRealizados: [],
+          documentos: [],
         },
       ],
     },
@@ -641,6 +978,7 @@ export const VETORES_INVALIDOS: VetorInvalido[] = [
           motivo: null,
           detalhe: null,
           pagamentosRealizados: [],
+          documentos: [],
         },
       ],
     },
@@ -662,6 +1000,7 @@ export const VETORES_INVALIDOS: VetorInvalido[] = [
           motivo: 'outro',
           detalhe: '   ',
           pagamentosRealizados: [],
+          documentos: [],
         },
       ],
     },
@@ -675,7 +1014,8 @@ export const VETORES_INVALIDOS: VetorInvalido[] = [
       'que não é estável em geral, então os dois gêmeos poderiam ordenar ' +
       'diferente e produzir bytes diferentes para a MESMA entrada.',
     motivo: 'entrega_duplicada',
-    entrada: { ...BASE, vales: [VALE_OK, { ...VALE_OK, pagamentosRealizados: [] }] },
+    entrada: { ...BASE, vales: [VALE_OK, { ...VALE_OK, pagamentosRealizados: [],
+    documentos: [], }] },
   },
   {
     nome: 'I008 — o mesmo pagamento_id em vales diferentes',
@@ -697,6 +1037,7 @@ export const VETORES_INVALIDOS: VetorInvalido[] = [
           pagamentosRealizados: [
             { pagamentoId: P1, forma: 'dinheiro', valorCents: 200, trocoCents: 0 },
           ],
+          documentos: [],
         },
       ],
     },
@@ -720,6 +1061,7 @@ export const VETORES_INVALIDOS: VetorInvalido[] = [
           pagamentosRealizados: [
             { pagamentoId: P1, forma: 'pix', valorCents: 100, trocoCents: 0 },
           ],
+          documentos: [],
         },
       ],
     },
@@ -739,6 +1081,7 @@ export const VETORES_INVALIDOS: VetorInvalido[] = [
           pagamentosRealizados: [
             { pagamentoId: P1, forma: 'boleto', valorCents: 100, trocoCents: 0 },
           ],
+          documentos: [],
         },
       ],
     },
@@ -757,6 +1100,7 @@ export const VETORES_INVALIDOS: VetorInvalido[] = [
           pagamentosRealizados: [
             { pagamentoId: P1, forma: 'pix', valorCents: -100, trocoCents: 0 },
           ],
+          documentos: [],
         },
       ],
     },
@@ -777,6 +1121,7 @@ export const VETORES_INVALIDOS: VetorInvalido[] = [
           pagamentosRealizados: [
             { pagamentoId: P1, forma: 'pix', valorCents: 12.5, trocoCents: 0 },
           ],
+          documentos: [],
         },
       ],
     },
@@ -799,6 +1144,79 @@ export const VETORES_INVALIDOS: VetorInvalido[] = [
           ...VALE_OK,
           pagamentosRealizados: [
             { pagamentoId: P1, forma: 'vale', valorCents: 100, trocoCents: 0 },
+          ],
+          documentos: [],
+        },
+      ],
+    },
+  },
+
+  // ---- o bloco `d`, e o que ele NÃO aceita ---------------------------
+  {
+    nome: 'I014 — tipo_documento fora do domínio',
+    porque:
+      'Só convênio e crediário geram papel que sai e volta. Um tipo ' +
+      'desconhecido no documento assinado seria a farmácia afirmando ' +
+      'custódia de uma coisa que ninguém sabe o que é — e, na transação, ' +
+      'nada teria como derivar da saída se ele era esperado.',
+    motivo: 'tipo_documento_invalido',
+    entrada: {
+      ...BASE,
+      vales: [{ ...VALE_OK, documentos: [{ tipo: 'receita', situacao: 'recebido' }] }],
+    },
+  },
+  {
+    nome: 'I015 — CONVCARD tentando entrar como documento físico',
+    porque:
+      'O caso que o usuário mandou travar explicitamente, e o mais fácil ' +
+      'de errar: convcard PARECE convênio e não é. Nele o cliente manda ' +
+      'os dados do cartão e a farmácia processa a compra — não há papel ' +
+      'saindo com o motoboy, logo não há custódia física. Aceitá-lo aqui ' +
+      'faria o documento assinado afirmar que existe um papel que nunca ' +
+      'existiu, e a transação exigiria de volta algo que ninguém emitiu. ' +
+      'É forma de pagamento VÁLIDA no bloco `pr` e tipo de documento ' +
+      'INVÁLIDO no bloco `d`, e essa assimetria é o ponto.',
+    motivo: 'tipo_documento_invalido',
+    entrada: {
+      ...BASE,
+      vales: [{ ...VALE_OK, documentos: [{ tipo: 'convcard', situacao: 'recebido' }] }],
+    },
+  },
+  {
+    nome: 'I016 — situação fora do domínio',
+    porque:
+      'O domínio tem DOIS valores de propósito — `recebido` e ' +
+      '`faltante` —, que é tudo que caixa e motoboy conseguem afirmar no ' +
+      'balcão. `retornado_assinado`, `irregular` e `conferido` dependem ' +
+      'da conferência do gestor, que acontece depois e é outro fluxo. ' +
+      'Deixá-los entrar faria o documento assinado afirmar o que quem ' +
+      'assinou não tinha como saber.',
+    motivo: 'situacao_documento_invalida',
+    entrada: {
+      ...BASE,
+      vales: [
+        { ...VALE_OK, documentos: [{ tipo: 'crediario', situacao: 'retornado_assinado' }] },
+      ],
+    },
+  },
+  {
+    nome: 'I017 — o mesmo (entrega_id, tipo_documento) duas vezes',
+    porque:
+      'A identidade da linha `d` é o PAR, então repeti-lo faria o ' +
+      'documento afirmar duas situações para o mesmo papel. E como o par ' +
+      'é a chave de ordenação, a ordem entre as duas dependeria do ' +
+      'algoritmo de sort — que não é estável em geral, então os dois ' +
+      'gêmeos poderiam produzir bytes diferentes para a MESMA entrada. ' +
+      'Mesmo raciocínio do I007 e do I008.',
+    motivo: 'documento_duplicado',
+    entrada: {
+      ...BASE,
+      vales: [
+        {
+          ...VALE_OK,
+          documentos: [
+            { tipo: 'crediario', situacao: 'recebido' },
+            { tipo: 'crediario', situacao: 'faltante' },
           ],
         },
       ],

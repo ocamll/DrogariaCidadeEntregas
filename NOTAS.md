@@ -34,12 +34,23 @@ que nunca era apagado e dizia a mesma coisa tendo a operação subido ou
 falhado; o **63** estende as reticências animadas aos outros 41 rótulos
 de processo do app.
 
+Ainda em 20/08 a frente do retorno andou bastante, e é o grosso do que
+está aberto: **item 64 — a etapa 2B** (`selar_romaneio_retorno`
+transacional, com o defeito do domínio de `forma` que ela achou no
+contrato congelado), **a 2B.4** (o verificador passando a despachar por
+protocolo, com fórmulas internas separadas) e **item 65 — a 2B.5** (o
+bloco `d` da custódia física de papel, e as três cópias do conversor
+domínio → jsonb que ele expôs). Cinco migrations, todas aplicadas e
+conferidas no banco.
+
 **O que NÃO existe ainda, e é fácil supor errado:** não há deploy — nem
 conta na Cloudflare, nem site no ar. Tudo rodou em localhost, numa
 máquina só. A premissa de dois dispositivos (PC do caixa + tablet do
-motoboy) nunca foi exercitada de verdade. E o **Romaneio de Retorno não
-existe como funcionalidade** — o que existe é o contrato dele, provado
-dos dois lados.
+motoboy) nunca foi exercitada de verdade. E o **Romaneio de Retorno
+continua sem tela** — o retorno que o caixa usa ainda é o `fecharCorrida`
+de sempre. O que existe é o contrato, a transação e o verificador, os
+três provados; falta a 2C (fila offline) e a 2D (tela), e é na 2D que o
+caminho feliz roda pela primeira vez.
 
 **Se você está retomando, comece por "PRÓXIMA SESSÃO", perto do fim deste
 arquivo.** É lá que está o trabalho combinado. Logo abaixo dela, "Estado
@@ -3677,8 +3688,8 @@ termina em UM resultado, e ela mesma tem que desfazer o que escreveu.**
 2B.3  baseline das saídas                    ✓  10 · 10 · 0
 
 2B.4  verificador de hashes do retorno       ✓  11 · 11 · 0
-2B.5  decidir e congelar o bloco `d`         ← agora
-2B.6  repetir vetores, gêmeos e verificador
+2B.5  bloco `d` do crediário                 ✓  65/65 e 8/8
+2B.6  repetir vetores, gêmeos e verificador   ← agora (já verdes)
 
 2C    fila offline + envelope + sync-romaneio
 2D    tela + caminho feliz real
@@ -3779,6 +3790,152 @@ como afirmar sem elas:
 - **O verificador do RETORNO nunca rodou contra um retorno**, porque não
   existe nenhum. As cinco camadas dele (incluindo `saida_referenciada`)
   são código não exercitado até a 2D.
+
+## 65. Etapa 2B.5 — o bloco `d`, e as TRÊS cópias do mesmo conversor
+
+Sessão de 2026-08-20, depois da 2B.4. O usuário trouxe o processo real da
+farmácia e mandou tratar como decisão de domínio.
+
+### O que o fluxo real respondeu
+
+Perguntei seis coisas antes de desenhar. As respostas decidiram o
+contrato inteiro:
+
+| pergunta | resposta | o que decidiu |
+|---|---|---|
+| quando o papel existe? | emitido na VENDA, sai com a entrega | a saída já sabe: obrigatoriedade sai do canônico assinado dela |
+| quantas vias voltam? | UMA (a nota fiscal fica com o cliente) | `d` sem quantidade e sem id |
+| volta na mesma corrida? | sim; excepcionalmente outro tele busca depois | ver `faltante` abaixo |
+| e se não voltar? | "o tele PRECISA voltar e trazer" | `faltante` é pendência aberta, não desfecho |
+| volta sem assinatura? | nunca aconteceu | o domínio não julga assinatura |
+| e no insucesso? | não soube | já estava respondido, ver abaixo |
+
+A sexta não precisava de estado novo, e vale registrar por quê: o papel
+sai com a entrega, e se a entrega falha ele volta EM BRANCO — o que é
+`recebido`, porque presença física é o que a palavra significa. O próprio
+usuário já tinha escrito esse exemplo na especificação.
+
+E a terceira abriu a consequência que mais vale guardar. Se o documento
+chegar noutra corrida, a corrida B **não pode** declará-lo: aquele vale
+não estava na saída dela. Então o DCRR1 da corrida A grava `faltante`,
+que era verdade naquele instante, e a chegada posterior é evento sobre o
+vale. Alguém vai querer "consertar" aquele `faltante` daqui a seis meses;
+é a regra 7 dizendo que não.
+
+### A fronteira, congelada pelo usuário
+
+```
+canônico PURO      domínio, duplicata, normalização, ordenação, bytes
+                   NÃO sabe o que a saída esperava
+
+selar_romaneio_    esperado = declarado, contra a saída selada
+retorno
+```
+
+Eu tinha proposto e ele confirmou com uma frase que ficou no código:
+**não é perder cobertura, é pôr a regra na camada que possui a
+informação para prová-la.** Por isso "esperava crediário e não veio linha
+`d`" não é golden vector — seria pedir a uma função pura que provasse o
+que ela não tem como saber, e o preço seria a pureza que permitiu, na 2A,
+montar um documento multi-vale quando nenhum romaneio selado tinha mais
+de um.
+
+E a igualdade é de CONJUNTO, não continência: "todo esperado apareceu"
+deixaria sobra passar, e sobra é o documento afirmando custódia de papel
+que aquela saída nunca gerou.
+
+### O que ele corrigiu no meu plano
+
+**O prazo do bloco `d` era antes da 2C, não antes do primeiro selo.** A
+fila persiste em IndexedDB o payload que produz o `document_hash`, e um
+item parado na fila do caixa já é documento assinado esperando subir.
+Mudar o formato depois disso não quebra código — quebra o que está
+guardado no navegador de quem já usou.
+
+**`status_documental` subiu junto, e por recomputação ABSOLUTA.** Se o
+DCRR1 diz `d E1 crediario faltante` e o banco diz `nao_aplica`, o
+documento assinado afirma que falta papel e o estado operacional afirma
+que não há questão documental. Absoluta e não incremental porque vale de
+crediário antigo pode estar `nao_aplica` — depender do valor anterior
+faria a correção não alcançar justamente os vales que ela existe pra
+consertar. É AGREGADO por vale, e isso está dito: quando a conferência do
+gestor exigir granularidade por `(entrega_id, tipo_documento)`, é tabela
+própria.
+
+**Precedência de erro:** documentos validam DEPOIS de pagamentos, dentro
+do vale, na ordem recebida. Preserva o comportamento histórico — um
+payload que respondia `pagamento_duplicado` continua respondendo isso
+mesmo trazendo documento inválido.
+
+### `convcard` não é convênio, e isso quase virou defeito
+
+Três conceitos distintos: `convcard` é o cliente mandando os dados do
+cartão pra farmácia processar — **não há papel saindo com ninguém**.
+`convenio` e `crediario` geram cada um um documento físico. O usuário
+mandou conferir os nomes reais no CHECK antes de mexer em enum, e foi o
+que fez a distinção ficar limpa: `convcard` é forma de pagamento VÁLIDA
+no bloco `pr` e tipo de documento INVÁLIDO no bloco `d`. O vetor I015
+existe só pra travar essa assimetria.
+
+Achado de passagem: **`convenios.exige_assinatura` não é lido por nada** —
+só aparece em Cadastros. O que decide a pendência é
+`convenioId ? 'pendente' : 'nao_aplica'`. Então "todo convênio gera
+documento" É o comportamento atual, e derivar de `forma` bate com ele.
+Fica a armadilha: se a flag um dia passar a valer, a obrigação do `d`
+muda junto, e o canônico da saída não a carrega.
+
+### O DEFEITO DA RODADA: três cópias do conversor
+
+A conferência dos vetores contra o banco voltou com uma assinatura limpa
+demais: **os 30 critérios dos dez vetores antigos e os treze inválidos
+antigos, todos verdes; tudo que envolvia `d`, vermelho.**
+
+Não era o SQL. Era `paraJsonbRetorno` — a função que converte o objeto de
+domínio no `p_retorno` enviado ao servidor. Ela ficou sem o campo
+`documentos` quando o bloco entrou no canônico. O banco recebeu vales sem
+documento, não emitiu linha `d`, e o validador não teve o que recusar.
+
+**Em produção seria o pior caso possível: a tela ASSINA UMA COISA E MANDA
+OUTRA.** O servidor reconstrói o DCRR1 do que recebeu, chega noutro hash,
+e recusa `documento_alterado` depois de colhidas as duas assinaturas, com
+o motoboy no balcão. É exatamente o defeito que a nota da 2A item 6
+descreveu com essas palavras — e ele aconteceu mesmo assim, porque
+naquela sessão a função estava certa e ninguém previu que ela envelheceria.
+
+E ao consertar apareceu a terceira: **o gerador do SQL tinha a própria
+tradução domínio → jsonb, escrita à mão**, com o mesmo buraco. Ou seja, o
+ferramental de teste teria concordado com o defeito de produção. Não
+acrescentei o campo na terceira cópia — apaguei a cópia e fiz o gerador
+usar `paraJsonbRetorno`. Uma tradução só, no lugar de três.
+
+**A guarda, e a prova de que ela morde.** Entrou no
+`canonico-retorno.spec.mts`: pra cada vetor, o payload enviado tem que ter
+um item por linha assinada — um vale por `v`, um pagamento por `pr`, um
+documento por `d` —, mais a checagem das chaves, porque contagem sozinha
+passaria com os dois lados vazios. E medi: reintroduzi o defeito no
+arquivo, os seis vetores acusaram; restaurei, voltou verde. Guarda que não
+se prova contra o defeito que a motivou é decoração.
+
+### Os números
+
+```
+vetores × especificação    552   ✓    (era 259)
+TypeScript × vetores       156   ✓    (era 70; +a guarda nova)
+SQL × vetores               65   ✓    (era 43)   ← no banco
+conferência da 2B.5          8   ✓                ← no banco
+16 válidos · 17 inválidos estruturais
+os 10 hashes anteriores INTACTOS
+```
+
+Bloco vazio não gera linha, então acrescentar o `d` não moveu um byte de
+nenhum documento que já existia — medido antes de qualquer outra coisa.
+
+**E o censo que a 2C vai querer:** 1 das 11 saídas seladas espera papel
+de volta (um convênio). É a única onde o bloco `d` importa hoje, e a
+única onde `documentos_nao_conferem` é exercitável contra dado real.
+**Nenhum vale de crediário foi lançado ainda** — a consulta de
+levantamento voltou zero linhas, então a migration nasceu sem backfill, e
+aquele caminho inteiro segue sem exercício até alguém vender um.
 
 ## Commits desta sessão
 
@@ -4039,6 +4196,38 @@ Todas **aplicadas e conferidas no banco** pelo usuário, na ordem:
     por diff antes e por recomputação depois: baseline seguiu 9 · 9 · 0,
     e foi a **10 · 10 · 0** depois do `R-000013`.
 
+Sessão de 2026-08-20 — a 2B e o bloco `d`. Todas **aplicadas e
+conferidas no banco** pelo usuário, na ordem:
+
+41. `20260820120000_dcrr1_formas_de_pagamento.sql` — o domínio de `forma`
+    do DCRR1 era o do SCHEMA INICIAL, substituído doze dias antes do
+    congelamento. Sai `vale`, entram `convcard` e `crediario`. Só
+    `romaneio_retorno_validar` muda; o canônico não é tocado. Conferido:
+    **43 de 43** contra os golden vectors.
+42. `20260820130000_selar_romaneio_retorno.sql` — a etapa 2B. Quatro
+    funções: snapshot, conflito, a transação interna e a porta online.
+    Recusa é CONFLITO e não exceção, porque quando o retorno chega ali as
+    duas partes já assinaram. Conferido pelas recusas contra o
+    `R-000014`, e o `42501` na autorização é o resultado mais forte.
+43. `20260820140000_verificador_do_retorno.sql` — a 2B.4. Despacho por
+    protocolo com fórmulas internas SEPARADAS, coluna `resultado` com
+    cinco valores, camada `saida_referenciada` e resumo decomposto por
+    tipo. Drop+create em transação, sem cascade, com os atributos
+    conferidos por abort. Baseline: **11 · 11 · 0**.
+44. `20260820150000_dcrr1_bloco_documentos.sql` — o gêmeo SQL do bloco
+    `d`. Conferido: **65 de 65**.
+45. `20260820160000_retorno_documentos_esperados.sql` — a metade
+    contextual: `documentos_esperados = documentos_declarados` derivado
+    das linhas `p` do canônico ASSINADO da saída, mais o
+    `status_documental` por recomputação absoluta. Conferido: **8 de 8**.
+    **Sem backfill de propósito** — a consulta de levantamento voltou
+    zero linhas, porque nenhum vale de crediário foi lançado ainda.
+
+**Atenção pra quem for reescrever `selar_romaneio_retorno_interno`:** ela
+já tem DUAS definições no repositório (`20260820130000` e
+`20260820160000`). Parta da mais recente, mesma regra da
+`selar_romaneio_interno`.
+
 **Atenção pra quem for reescrever `selar_romaneio_interno` de novo:** há
 TRÊS definições dela no repositório agora — a original de
 `20260816140000`, a de `20260816180000` (que corrigiu a FK do item 40) e
@@ -4062,7 +4251,56 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: etapa 2B — `selar_romaneio_retorno`
+### PRÓXIMA SESSÃO: 2B.6 e depois a 2C
+
+> **Esta é a seção atual. A de baixo ("etapa 2B") é histórica** — ficou
+> como registro de onde a frente estava antes, e o que ela descreve como
+> "próximo" já foi feito.
+
+Fechado em 2026-08-20: **2B, 2B.4 e 2B.5**, todas aplicadas no banco e
+medidas. O que resta antes da 2C são duas coisas pequenas e uma
+formalidade:
+
+```
+2B.5  bloco `d`                              ✓  65/65 e 8/8 no banco
+      ├─ teste de TRANSPORTE com documentos  ← falta
+      └─ (a spec já está no CLAUDE.md)
+
+2B.6  repetir os gates                       ← formalidade: já verdes
+2C    fila offline + envelope + sync-romaneio
+2D    tela + caminho feliz real
+```
+
+**O teste de transporte é o que falta de verdade.** O
+`scripts/conferir-canonico-retorno-no-console.js` ainda monta cenários
+sem bloco `d` — ele responde "o fio preserva o que os gêmeos concordam?"
+e precisa passar a fazer essa pergunta com documento no payload. Depois
+do defeito do `paraJsonbRetorno` (item 65), é o teste mais relevante que
+existe nesta frente: foi exatamente essa camada que escondeu o problema.
+
+**Dois ramos continuam sem exercício, e não bloqueiam:**
+
+- `documentos_nao_conferem` — exercitável contra dado real, porque
+  **1 das 11 saídas seladas espera um convênio**. É a única.
+- o caminho do **crediário inteiro** — nenhum vale foi lançado ainda. O
+  primeiro que for vendido será o primeiro teste da cadeia toda.
+- o `(a) vale faltando` do placar da 2B, que precisa de uma corrida com
+  dois vales ou mais.
+
+**Antes de escrever a 2C, releia no CLAUDE.md:** a seção do DCRR1 (o
+bloco `d` está congelado lá, com o porquê de cada valor do domínio) e o
+item 4 da lista de etapas, que traz a arquitetura do verificador —
+orquestrador comum, fórmulas internas SEPARADAS, e nunca "melhorar" a
+fórmula da saída dentro dele.
+
+E a armadilha do item 65 vale pra 2C inteira: **`paraJsonbRetorno` é a
+única tradução domínio → jsonb do projeto.** Campo novo no vale entra ali
+na mesma edição, e o caso `paraJsonbRetorno leva tudo que o canônico
+assina` do `canonico-retorno.spec.mts` existe pra pegar quem esquecer.
+
+---
+
+### (histórico) A retomada de antes da 2B
 
 **A etapa 2A FECHOU em 2026-08-20**, os dez itens. O gate está cumprido,
 e o que vem agora é a **2B — `selar_romaneio_retorno` transacional**,

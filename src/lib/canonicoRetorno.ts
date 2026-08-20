@@ -134,6 +134,55 @@ export type FormaPagamento = (typeof FORMAS_PAGAMENTO)[number]
 export const MOTIVOS_INSUCESSO = ['ausente', 'endereco_errado', 'recusou', 'outro'] as const
 export type MotivoInsucesso = (typeof MOTIVOS_INSUCESSO)[number]
 
+/**
+ * OS DOIS TIPOS DE PAPEL QUE SAEM E TÊM QUE VOLTAR.
+ *
+ * Congelado em 2026-08-20, com o processo real: convênio e crediário
+ * geram, cada um, exatamente um documento físico que acompanha a entrega
+ * e volta assinado pra filial. O do crediário é a nota do aceite da
+ * dívida.
+ *
+ * **`convcard` NÃO ESTÁ AQUI, e a assimetria é o ponto.** Ele é forma de
+ * pagamento VÁLIDA (está em `FORMAS_PAGAMENTO`) e tipo de documento
+ * INVÁLIDO, porque nele o cliente manda os dados do cartão e a farmácia
+ * processa a compra — não há papel saindo com ninguém. Confundi-lo com
+ * convênio faria o documento assinado afirmar custódia de um papel que
+ * nunca existiu, e a transação exigiria de volta algo que ninguém
+ * emitiu. São três conceitos distintos.
+ */
+export const TIPOS_DOCUMENTO_FISICO = ['convenio', 'crediario'] as const
+export type TipoDocumentoFisico = (typeof TIPOS_DOCUMENTO_FISICO)[number]
+
+/**
+ * DELIBERADAMENTE POBRE, e é isso que o torna verdadeiro.
+ *
+ * No instante do retorno, caixa e motoboy só conseguem afirmar duas
+ * coisas: o papel voltou pra custódia da filial, ou o papel que deveria
+ * voltar não veio. `recebido` é PRESENÇA FÍSICA — não afirma assinatura,
+ * validade nem preenchimento.
+ *
+ * Nada de `retornado_assinado`, `assinatura_valida`, `irregular` ou
+ * `conferido`: tudo isso depende da conferência do gestor, que acontece
+ * DEPOIS e é outro fluxo. Um documento que voltou sem assinatura é
+ * `recebido`, porque fisicamente foi; a irregularidade vira evento
+ * posterior. Pôr o julgamento aqui faria o documento assinado afirmar o
+ * que quem assinou não tinha como saber.
+ *
+ * E `faltante` não é desfecho: é PENDÊNCIA ABERTA. O processo da
+ * farmácia é que o papel precisa vir, então o motoboy volta pra buscar.
+ * Se ele chegar depois — outra corrida, no dia seguinte —, **isso não
+ * corrige nem reescreve este DCRR1**: `faltante` descreve corretamente o
+ * estado físico no momento em que o retorno foi selado, e a chegada
+ * posterior constitui evento novo sobre o vale.
+ */
+export const SITUACOES_DOCUMENTO = ['recebido', 'faltante'] as const
+export type SituacaoDocumento = (typeof SITUACOES_DOCUMENTO)[number]
+
+export type DocumentoFisicoCanonico = {
+  tipo: TipoDocumentoFisico
+  situacao: SituacaoDocumento
+}
+
 export type PagamentoRealizadoCanonico = {
   pagamentoId: string
   forma: FormaPagamento
@@ -153,6 +202,22 @@ export type ValeRetornoCanonico = {
   motivo: MotivoInsucesso | null
   detalhe: string | null
   pagamentosRealizados: PagamentoRealizadoCanonico[]
+  /**
+   * ANINHADO no vale, como os pagamentos, e pelo mesmo motivo: com o
+   * `entrega_id` vindo do pai, "documento apontando pra vale que não
+   * está no documento" fica INDESCRITÍVEL por construção. Tornar um erro
+   * impossível de representar vale mais que rejeitá-lo — e obriga o lado
+   * SQL a espelhar o aninhamento, senão um `select` plano reabre o caso.
+   *
+   * A identidade da linha é o PAR (entrega_id, tipo): um vale pode ter
+   * convênio e crediário ao mesmo tempo.
+   *
+   * O que este arquivo NÃO sabe: se um documento ERA ESPERADO. Isso
+   * depende do que a saída selou, e quem tem essa informação é
+   * `selar_romaneio_retorno`. Manter a ignorância aqui é o que preserva
+   * a pureza da função.
+   */
+  documentos: DocumentoFisicoCanonico[]
 }
 
 export type EntradaRetorno = {
@@ -180,6 +245,14 @@ export type MotivoRejeicao =
   | 'forma_invalida'
   | 'valor_negativo'
   | 'valor_nao_inteiro'
+  // Bloco `d`, 2026-08-20. Todos SOBRE A ESTRUTURA do documento — nenhum
+  // deles depende de saber o que a saída esperava, e é isso que mantém
+  // esta função pura. "Esperava crediário e não veio linha `d`" NÃO é
+  // motivo daqui: é recusa de `selar_romaneio_retorno`, que é quem tem a
+  // saída selada em mãos.
+  | 'tipo_documento_invalido'
+  | 'situacao_documento_invalida'
+  | 'documento_duplicado'
 
 export class RetornoInvalido extends Error {
   // Campo declarado à parte em vez de parameter property: o projeto roda
@@ -268,6 +341,32 @@ export function validarRetorno(entrada: EntradaRetorno): MotivoRejeicao | null {
       }
       if (pagamento.valorCents < 0 || pagamento.trocoCents < 0) return 'valor_negativo'
     }
+
+    // DOCUMENTOS DEPOIS DE PAGAMENTOS, e a ordem é contrato.
+    //
+    // Acrescentado em 2026-08-20. Pôr o bloco `d` DEPOIS preserva a
+    // precedência histórica: um payload que antes respondia
+    // `pagamento_duplicado` continua respondendo isso mesmo que também
+    // traga documento inválido. Se documentos viessem antes, acrescentar
+    // o bloco teria mudado, em silêncio, o motivo reportado para
+    // entradas que já existiam — e os dois gêmeos precisam reportar o
+    // MESMO motivo para a MESMA entrada.
+    //
+    // A duplicata é por (entrega_id, tipo), e o conjunto é POR VALE, não
+    // global: diferente dos pagamentos, cujo id é único no documento
+    // inteiro, dois vales podem legitimamente ter cada um o seu
+    // crediário.
+    const tipos = new Set<string>()
+    for (const documento of vale.documentos ?? []) {
+      if (!(TIPOS_DOCUMENTO_FISICO as readonly string[]).includes(documento.tipo)) {
+        return 'tipo_documento_invalido'
+      }
+      if (!(SITUACOES_DOCUMENTO as readonly string[]).includes(documento.situacao)) {
+        return 'situacao_documento_invalida'
+      }
+      if (tipos.has(documento.tipo)) return 'documento_duplicado'
+      tipos.add(documento.tipo)
+    }
   }
 
   return null
@@ -283,6 +382,7 @@ type ValeNormalizado = {
   motivo: string
   detalhe: string
   pagamentos: { entregaId: string; pagamentoId: string; forma: string; valor: string; troco: string }[]
+  documentos: { entregaId: string; tipo: string; situacao: string }[]
 }
 
 export type RetornoNormalizado = {
@@ -324,6 +424,17 @@ export function normalizarRetorno(entrada: EntradaRetorno): RetornoNormalizado {
             troco: String(pagamento.trocoCents),
           }))
           .sort((a, b) => ordemBinaria(a.pagamentoId, b.pagamentoId)),
+        // Ordenado por TIPO dentro do vale. Como os vales já são
+        // ordenados por entrega_id logo abaixo, achatar os dois laços na
+        // serialização produz (entrega_id, tipo_documento) sem precisar
+        // de um sort composto — o mesmo arranjo dos pagamentos.
+        documentos: (vale.documentos ?? [])
+          .map((documento) => ({
+            entregaId: idCanonico(vale.entregaId),
+            tipo: documento.tipo,
+            situacao: documento.situacao,
+          }))
+          .sort((a, b) => ordemBinaria(a.tipo, b.tipo)),
       }
     })
     .sort((a, b) => ordemBinaria(a.entregaId, b.entregaId))
@@ -365,6 +476,20 @@ export function serializarRetorno(n: RetornoNormalizado): string {
   for (const vale of n.vales) {
     for (const p of vale.pagamentos) {
       linhas.push(['pr', p.entregaId, p.pagamentoId, p.forma, p.valor, p.troco].join(TAB))
+    }
+  }
+
+  // E os documentos DEPOIS dos pagamentos, terceiro bloco. Mesmo laço
+  // aninhado, mesma razão: os vales já vêm ordenados por entrega_id e os
+  // documentos de cada um por tipo, então achatar produz
+  // (entrega_id, tipo_documento) sem sort composto.
+  //
+  // O bloco fica VAZIO quando nenhum vale da corrida exige papel — e
+  // vazio significa nenhuma linha, nunca um placeholder. É por isso que
+  // acrescentar o bloco `d` não moveu nenhum dos dez hashes anteriores.
+  for (const vale of n.vales) {
+    for (const d of vale.documentos) {
+      linhas.push(['d', d.entregaId, d.tipo, d.situacao].join(TAB))
     }
   }
 
@@ -418,6 +543,29 @@ export function paraJsonbRetorno(entrada: EntradaRetorno): unknown[] {
       forma: pagamento.forma,
       valor_cents: pagamento.valorCents,
       troco_cents: pagamento.trocoCents,
+    })),
+    // ESQUECER UM CAMPO AQUI É O PIOR DEFEITO POSSÍVEL DESTE ARQUIVO, e
+    // aconteceu com `documentos` em 2026-08-20: o canônico local passou a
+    // emitir linhas `d` e esta função continuou mandando o vale sem elas.
+    //
+    // O sintoma não é erro de compilação nem teste vermelho no TS —
+    // **é assinar uma coisa e mandar outra.** O servidor reconstrói o
+    // DCRR1 do que RECEBEU, chega noutro hash, e recusa
+    // `documento_alterado` depois de colhidas as duas assinaturas, com o
+    // motoboy no balcão.
+    //
+    // Quem pegou foi a conferência dos golden vectors contra o banco: os
+    // seis vetores com documento falharam em texto/bytes/hash e os
+    // quatro inválidos do bloco `d` passaram batido, enquanto TODOS os
+    // antigos continuaram verdes. Assinatura limpa demais pra ser
+    // coincidência.
+    //
+    // Campo novo no vale? Acrescente AQUI na mesma edição, e confira o
+    // caso `paraJsonbRetorno leva tudo que o canônico assina` do
+    // `canonico-retorno.spec.mts`, que existe justamente pra isto.
+    documentos: (vale.documentos ?? []).map((documento) => ({
+      tipo: documento.tipo,
+      situacao: documento.situacao,
     })),
   }))
 }

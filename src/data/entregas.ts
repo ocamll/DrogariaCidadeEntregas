@@ -5,6 +5,21 @@ import { criarPagamentoPrevisto, type FormaPagamento } from '@/data/pagamentos'
 import { inserirEventoIdempotente } from '@/data/eventos'
 import { centsFromDigits } from '@/lib/money'
 
+/**
+ * As formas que geram PAPEL FÍSICO — o que sai com o motoboy e tem que
+ * voltar assinado pra filial.
+ *
+ * É a mesma regra que `romaneio_documentos_esperados` aplica no servidor
+ * pra derivar quais linhas `d` o Romaneio de Retorno tem que trazer. As
+ * duas precisam continuar concordando: divergindo, o retorno recusa
+ * `documentos_nao_conferem` depois de colhidas as duas assinaturas.
+ *
+ * `convcard` NÃO entra — nele o cliente manda os dados do cartão e a
+ * farmácia processa a compra, sem papel saindo com ninguém. Ele parece
+ * convênio e não é.
+ */
+const GERAM_DOCUMENTO_FISICO: FormaPagamento[] = ['convenio', 'crediario']
+
 export type NovaEntrega = {
   id: string
   tenantId: string
@@ -54,7 +69,24 @@ export async function criarEntrega(input: NovaEntrega): Promise<{ numeroVale: st
       entrega_paga_cliente_cents: input.entregaPagaClienteCents,
       ocorrido_em_local: input.ocorridoEmLocal,
       convenio_id: input.convenioId,
-      status_documental: input.convenioId ? 'pendente' : 'nao_aplica',
+      // CREDIÁRIO TAMBÉM GERA PAPEL, e até 2026-08-20 nascia
+      // `nao_aplica`. Não era só implementação antiga: com o processo
+      // real levantado, virou semanticamente errado — convênio e
+      // crediário geram, cada um, um documento físico que acompanha a
+      // entrega e tem que voltar assinado pra filial.
+      //
+      // Sem isto, o primeiro Romaneio de Retorno com crediário criaria
+      // uma contradição: o documento assinado dizendo `d ... faltante` e
+      // o banco dizendo que não há questão documental aplicável.
+      //
+      // `convcard` fica de fora de propósito — nele o cliente manda os
+      // dados do cartão e a farmácia processa a compra, sem papel saindo
+      // com ninguém. A regra é a mesma que
+      // `romaneio_documentos_esperados` usa no servidor, e as duas
+      // precisam continuar concordando.
+      status_documental: GERAM_DOCUMENTO_FISICO.includes(input.formaPagamento)
+        ? 'pendente'
+        : 'nao_aplica',
       tem_receita: input.temReceita,
     })
     .select('numero_vale')

@@ -1562,9 +1562,20 @@ código enfileira `fechamento_corrida`.**
    Nunca `if saida then 'caixa' / if retorno then 'responsavel_loja'` —
    isso é fixar o literal com passos extras.
 
-5. **2B.5 — decidir e congelar o bloco `d` do crediário**, antes da 2C.
-   Ver a seção do DCRR1: o prazo real não é "antes do primeiro selo", é
-   **antes de a 2C começar a persistir o payload em IndexedDB**. Item na
+5. **2B.5 — o bloco `d`.** **FEITO em 2026-08-20**, com o processo real
+   levantado. Migrations `20260820150000` (gêmeo SQL) e `20260820160000`
+   (`esperado = declarado` + `status_documental`), ambas aplicadas.
+   Conferido: **65 de 65** contra os golden vectors no banco, e as 6
+   asserções da 2B.5 verdes. Detalhe completo na seção do DCRR1 acima.
+
+   O censo que veio junto e que a 2C vai querer: **1 das 11 saídas
+   seladas espera papel** (um convênio). É a única onde o bloco `d`
+   importa hoje, e é onde `documentos_nao_conferem` é exercitável contra
+   dado real. Nenhum vale de crediário foi lançado ainda — aquele caminho
+   inteiro segue sem exercício.
+
+   Ver a seção do DCRR1: o prazo era **antes de a 2C começar a persistir
+   o payload em IndexedDB**, e não antes do primeiro selo. Item na
    fila de um caixa é documento já assinado esperando subir; mudar o
    formato depois disso quebra o que está guardado no navegador dele.
 
@@ -1609,7 +1620,24 @@ v   <entrega_id>  <desfecho>  <motivo>  <detalhe>
 v   ...
 pr  <entrega_id>  <pagamento_id>  <forma>  <valor_cents>  <troco_cents>
 pr  ...
+d   <entrega_id>  <tipo_documento>  <situacao>
+d   ...
 ```
+
+**Três blocos, nessa ordem, e cada um pode estar vazio.** `pr` some no
+vale com insucesso; `d` some quando nenhum vale da corrida gera papel.
+Bloco vazio é ausência de linha, nunca placeholder — é por isso que
+acrescentar o `d` em 2026-08-20 não moveu nenhum dos dez hashes que já
+existiam.
+
+```
+tipo_documento ∈ { convenio, crediario }
+situacao       ∈ { recebido, faltante }
+```
+
+Ordenação do `d`: por `entrega_id`, depois por `tipo_documento`. A
+identidade da linha é o PAR, não só o `entrega_id` — um vale pode ter
+convênio e crediário ao mesmo tempo.
 
 Convenções idênticas às do `DCR1`, sem exceção: TAB como separador, `-`
 para nulo, ids em minúscula, ordenação por code unit (`collate "C"` no
@@ -1784,33 +1812,90 @@ fica aberto depois da corrida — receita, convênio que volta dias depois.
 O papel do crediário é diferente: sai naquela corrida, é assinado durante
 aquela entrega, e deve voltar na mesma. Ele pertence ao ciclo do retorno.
 
-O desenho conversado (2026-08-20) é um bloco próprio, **não construído**:
+**CONSTRUÍDO E CONGELADO EM 2026-08-20**, depois de levantado o processo
+real com o usuário. `pr` = o que aconteceu com o dinheiro; `d` = o que
+aconteceu com o papel. Um vale pode dizer as duas coisas sem que uma
+finja pela outra:
 
 ```
-d   <entrega_id>  crediario  <situacao>     situacao ∈ { retornado_assinado,
-                                                         nao_retornado, … }
+pr  E1  P1  crediario  12000  0
+d   E1      crediario  recebido
 ```
 
-`pr` = o que aconteceu com o dinheiro; `d` = o que aconteceu com o papel.
-Um vale pode dizer as duas coisas sem que uma finja pela outra.
+O que o fluxo real respondeu, e o que cada resposta decidiu:
 
-**Ele só entra depois de levantado o fluxo real** — quando o papel é
-impresso, quem leva, quem assina, se volta obrigatoriamente na mesma
-corrida, e o que acontece quando não volta. Congelar situações antes de
-observar o balcão repetiria, no bloco `d`, o erro que a lista de `forma`
-acabou de custar.
+| pergunta | resposta | consequência |
+|---|---|---|
+| quando o papel existe? | emitido na VENDA, sai com a entrega | a saída já sabe: a obrigatoriedade sai do canônico assinado dela |
+| quantas vias voltam? | UMA (a nota fiscal fica com o cliente) | o `d` não precisa de quantidade nem de id |
+| volta na mesma corrida? | sim; excepcionalmente outro tele busca depois | ver a regra do `faltante` abaixo |
+| e se não voltar? | o tele volta e traz — "PRECISA vir" | `faltante` é pendência aberta, não desfecho |
+| volta sem assinatura? | nunca aconteceu | o domínio não julga assinatura |
 
-**E o prazo é antes da 2C, não antes do primeiro selo** (corrigido pelo
-usuário em 2026-08-20). A leitura ingênua é "DCRR1 vira história quando
-o primeiro retorno real for selado". O prazo verdadeiro chega antes: a
-2C persiste em IndexedDB o payload que produz o `document_hash`, e um
-item na fila do caixa **é um documento já assinado** esperando subir.
-Mudar o formato depois disso não quebra só código — quebra o que está
-guardado no navegador de quem já usou, e que vai sincronizar contra um
-servidor que passou a esperar outra coisa.
+**`recebido` É PRESENÇA FÍSICA, e nada além.** Não afirma assinatura,
+validade nem preenchimento. Nada de `retornado_assinado`, `irregular` ou
+`conferido`: isso depende da conferência do gestor, que é outro fluxo e
+acontece depois — documento que voltou sem assinatura é `recebido`,
+porque fisicamente foi, e a irregularidade vira evento posterior. Pôr o
+julgamento aqui faria o documento assinado afirmar o que quem assinou não
+tinha como saber.
 
-Ou seja: `verificador → fechar o d → repetir os gates → 2C`. Depois da
-2C, mudança estrutural é `DCRR2`.
+Por isso este par é válido e não é contraditório (vetor V014):
+
+```
+v   E1  insucesso  ausente   -
+d   E1  crediario  recebido
+```
+
+A entrega falhou e o papel voltou em branco. O `d` **não** é filtrado por
+desfecho, ao contrário do `pr`: o papel saiu sob custódia do motoboy,
+então o destino dele é declarado de qualquer jeito.
+
+**`faltante` descreve o estado físico NO INSTANTE em que o retorno foi
+selado.** Se o documento chegar depois — outra corrida, no dia seguinte —,
+**isso não corrige nem reescreve o DCRR1**: constitui evento novo sobre o
+vale. A corrida B nem poderia declará-lo, porque aquele vale não estava
+na saída dela. Alguém vai querer "consertar" um `faltante` daqui a seis
+meses; é a regra 7 dizendo que não.
+
+**A obrigatoriedade sai da `forma` das linhas `p` do canônico ASSINADO da
+saída** — `convenio` ou `crediario` esperam um `d` cada. Nenhuma tabela
+mutável participa. E a checagem é **igualdade de conjunto**
+(`documentos_esperados = documentos_declarados`), não continência: "todo
+esperado apareceu" deixaria sobra passar, e sobra é o documento afirmando
+custódia de papel que aquela saída nunca gerou.
+
+**Ausência NÃO vira `faltante`.** Esperava crediário e não veio linha
+`d` → recusa. Normalizar inventaria um fato que ninguém declarou.
+
+**A FRONTEIRA, e ela decide onde cada regra mora:**
+
+```
+canônico PURO      domínio, duplicata, normalização, ordenação, bytes
+                   NÃO sabe o que a saída esperava
+
+selar_romaneio_    esperado = declarado, contra a saída selada
+retorno
+```
+
+Trazer a expectativa pra dentro do canônico custaria a pureza — que é o
+que permitiu, na 2A, montar um documento multi-vale quando nenhum
+romaneio selado tinha mais de um. Por isso "esperava e não veio" não é
+golden vector: é recusa contextual, provada no placar da 2B.
+
+**`entregas.status_documental` é recomputado do zero a cada retorno**, e
+é AGREGADO por vale (a coluna é uma só e um vale pode ter os dois tipos):
+nenhum esperado → `nao_aplica`; todos recebidos → `recebido`; ao menos um
+faltante → `pendente`. Nunca `extraviado` automático — isso é conclusão
+posterior de que o papel se perdeu. Quando a conferência do gestor exigir
+granularidade por `(entrega_id, tipo_documento)`, é tabela própria, não
+mais um valor nesta coluna.
+
+E o cadastro passou a marcar **crediário** como `pendente` junto com
+convênio (`GERAM_DOCUMENTO_FISICO` em `data/entregas.ts`). Sem isso o
+primeiro retorno com crediário criaria a contradição que a 2B.5 veio
+impedir: o documento assinado dizendo que falta papel e o banco dizendo
+que não há questão documental aplicável.
 
 ##### A divergência deixa de ser um botão
 

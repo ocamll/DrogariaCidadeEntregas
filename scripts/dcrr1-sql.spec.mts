@@ -18,6 +18,7 @@
 // "mudou um caractere" de "mudou a codificação" — o que o V003, fora do
 // BMP, existe pra revelar.
 import { VETORES, VETORES_INVALIDOS } from './dcrr1-vetores.mts'
+import { paraJsonbRetorno, type EntradaRetorno } from '../src/lib/canonicoRetorno.ts'
 
 const ASPA = String.fromCharCode(39)
 
@@ -31,35 +32,22 @@ function literal(texto: string): string {
   return `E${ASPA}${escapado}${ASPA}`
 }
 
-/** O `p_retorno` como jsonb, na forma aninhada que o contrato exige. */
+/**
+ * O `p_retorno` como jsonb, na forma aninhada que o contrato exige.
+ *
+ * USA `paraJsonbRetorno`, a MESMA função que a tela vai usar. Isto aqui
+ * já foi uma tradução própria, escrita à mão, e em 2026-08-20 ela custou
+ * caro: o bloco `d` entrou no canônico e as DUAS cópias do conversor
+ * ficaram sem o campo. A conferência contra o banco acusou os seis
+ * vetores com documento falhando em texto/bytes/hash, e a causa não
+ * estava no SQL — estava em mandar menos do que se assinou.
+ *
+ * Uma tradução só, no lugar de três. Se ela esquecer um campo agora, o
+ * caso `paraJsonbRetorno leva tudo que o canônico assina` do
+ * `canonico-retorno.spec.mts` pega antes de chegar no banco.
+ */
 function comoJsonb(entrada: unknown): string {
-  const e = entrada as {
-    vales: {
-      entregaId: string
-      desfecho: string
-      motivo: string | null
-      detalhe: string | null
-      pagamentosRealizados: {
-        pagamentoId: string
-        forma: string
-        valorCents: number
-        trocoCents: number
-      }[]
-    }[]
-  }
-  const vales = e.vales.map((v) => ({
-    entrega_id: v.entregaId,
-    desfecho: v.desfecho,
-    motivo: v.motivo,
-    detalhe: v.detalhe,
-    pagamentos_realizados: (v.pagamentosRealizados ?? []).map((p) => ({
-      pagamento_id: p.pagamentoId,
-      forma: p.forma,
-      valor_cents: p.valorCents,
-      troco_cents: p.trocoCents,
-    })),
-  }))
-  return `${literal(JSON.stringify(vales))}::jsonb`
+  return `${literal(JSON.stringify(paraJsonbRetorno(entrada as EntradaRetorno)))}::jsonb`
 }
 
 function chamada(entrada: unknown): string {
