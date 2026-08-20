@@ -1,4 +1,4 @@
-# Notas de trabalho — 2026-08-09 a 2026-08-19
+# Notas de trabalho — 2026-08-09 a 2026-08-20
 
 Registro de trabalho, não é documentação permanente do projeto (isso é o
 CLAUDE.md). Decisões duráveis já foram incorporadas lá; aqui fica o que é
@@ -20,15 +20,25 @@ sincronizada (`R-000010`), mais o cartão físico lido no leitor da farmácia
 e a credencial CR80 conferida contra o desenho original. O item 57 fechou
 o envio do romaneio ao Drive.
 
+Em 19 e 20/08 entrou a frente do **Romaneio de Retorno**: desenho fechado
+antes de qualquer código (item 58), schema aplicado, e a **etapa 2A
+fechada** (item 59) — verificador de hash, golden vectors, os dois
+canônicos gêmeos e o teste de transporte. **Nada disso tem tela ainda**;
+o retorno continua sendo o `fecharCorrida` de sempre, e nada mudou pra
+quem opera. O item 60 traz quatro defeitos de tela que a 2A expôs de
+passagem.
+
 **O que NÃO existe ainda, e é fácil supor errado:** não há deploy — nem
 conta na Cloudflare, nem site no ar. Tudo rodou em localhost, numa
 máquina só. A premissa de dois dispositivos (PC do caixa + tablet do
-motoboy) nunca foi exercitada de verdade.
+motoboy) nunca foi exercitada de verdade. E o **Romaneio de Retorno não
+existe como funcionalidade** — o que existe é o contrato dele, provado
+dos dois lados.
 
 **Se você está retomando, comece por "PRÓXIMA SESSÃO", perto do fim deste
 arquivo.** É lá que está o trabalho combinado. Logo abaixo dela, "Estado
-em 2026-08-19" traz o que falta em ordem de risco e o que já foi aplicado
-no Supabase. **O trabalho vive na `main`** — a `cadeia-de-custodia` já foi
+em 2026-08-20" traz onde a frente parou e o que já foi aplicado no
+Supabase. **O trabalho vive na `main`** — a `cadeia-de-custodia` já foi
 mergeada e está para trás.
 
 ## 1. Fila offline nas outras 4 escritas
@@ -2723,6 +2733,93 @@ bateram.
   dinamicamente (no clique). É cosmético — o módulo é pequeno e não puxa
   dependência pesada —, mas se for arrumar, arrume nas duas.
 
+## 58. O desenho do Romaneio de Retorno, fechado antes do código
+
+Sessão de 2026-08-19, depois do Drive. O usuário trouxe a modelagem
+pronta e pediu conversa antes de qualquer linha — o que se provou certo,
+porque a conversa mudou duas das decisões dele.
+
+**A proposta dele estava certa no núcleo:** a assinatura hoje está presa
+à *corrida* e deveria estar presa ao *documento*; o retorno é um segundo
+documento que referencia a saída e nunca a altera; unicidade por
+`romaneio_id` com índices parciais, sem reescrever histórico. Nada disso
+precisou de ajuste.
+
+O desenho final está no CLAUDE.md. Aqui fica o que a conversa **achou**.
+
+### O que o código respondeu, e que ninguém teria adivinhado
+
+**O papel do signatário está dentro do hash.**
+
+```sql
+v_hash_caixa := encode(digest(
+  v_hash || '|caixa|' || p_caixa_id::text || '|' || ...
+```
+
+Ele queria renomear `tipo_signatario` de `caixa` pra `responsavel_loja`,
+com um argumento bom (no retorno quem recebe pode ser gerente). Mas o
+literal entra no `signature_hash`, e o `final_hash` é
+`digest(document_hash | hash_caixa | hash_motoboy)` — renomear as linhas
+existentes quebraria a verificação de **todo romaneio já selado**.
+
+É a regra 7 alcançando um lugar onde ninguém procuraria: o vocabulário
+virou dado assinado. A saída foi ampliar o CHECK em vez de renomear, e o
+efeito colateral é bom — `papel_no_momento` vira coluna própria, que era
+o que ele queria de verdade, e entra no hash do retorno desde o dia um.
+
+**Ressalva honesta: nada recomputa esses hashes hoje.** São gravados e
+exibidos truncados, nunca conferidos. Então o risco é latente, não ativo.
+O que fica registrado é a regra pro dia em que alguém escrever um
+verificador: ler `tipo_signatario` da linha, jamais fixar o literal.
+
+**O bloqueio progressivo que ele propôs já existe.** Ele desenhou
+"3 erros → pequeno atraso, mais → bloqueio temporário, gestor recupera".
+O banco já faz exatamente isso desde 16/08: 30s → 2min → 5min → teto de
+15min, e um acerto zera o contador. A preocupação com "5 erros e ninguém
+fecha o dia" nunca foi o comportamento. Uma sessão economizada por ir
+olhar em vez de aceitar a premissa.
+
+**`redefinir_pin` exige `is_admin()`, não gestor.** A decisão dele dizia
+"Gestor/Admin conclui o excepcional", mas o gerente não tem esse poder
+hoje — e não é acidente, é a separação de 12/08 entre escopo de filial e
+capacidade de gestão. O problema prático: o admin é o dono, não está no
+balcão de cada filial às 20h, então excepcional restrito a admin
+**paralisaria justamente o caso que ele existe pra destravar**. Ele
+confirmou `is_gerente()`, e ficou registrado como ampliação deliberada —
+segundo uso daquela função, que até aqui tinha um só.
+
+### Duas coisas que simplificaram por si
+
+**O fluxo excepcional é online por construção.** Offline não existe
+"não foi possível autenticar": o PIN é selado no envelope RSA e o
+servidor decide na sincronização. Não há a quem o servidor diga "não".
+Uma máquina de estados a menos, de graça.
+
+**`UNIQUE (corrida_id, tipo)` isenta os conflitos sozinho** — romaneio em
+conflito tem `corrida_id` nulo por construção, e no Postgres nulo não
+colide. Não precisa de índice parcial ali.
+
+### A decisão de escopo que ele tomou, e o que ela custa
+
+O retorno **substitui** o fechamento manual. Não vão existir dois
+caminhos pra encerrar uma corrida — mesma família do "notificar não tira
+da fila": dois caminhos pro mesmo fato, nenhum definitivo.
+
+O custo é a fila offline. Um `fechamento_corrida` pendente no IndexedDB
+**não tem como virar** um romaneio de retorno: falta assinatura, PIN e
+snapshot, que nunca foram coletados. Ficou uma janela de compatibilidade
+de duas releases, com o item legado executando o comportamento antigo e
+gravando auditoria própria. Descartar em silêncio seria a perda que a
+chave própria da fila veio corrigir em 16/08.
+
+### O tamanho
+
+Seis etapas, como a saída. A perigosa é a 2: o canônico do retorno tem
+mais campos que o da saída — desfecho por vale, previsto contra
+realizado, motivo de insucesso —, então são dois gêmeos TypeScript/SQL de
+novo com mais superfície pra divergir num byte. Spec próprio e
+`conferir-canonico-no-console.js` próprio, separados dos da saída.
+
 ## 59. Etapa 2A: verificar antes de mudar, e contratar antes de implementar
 
 Sessão de 2026-08-19, depois do desenho do retorno. Duas peças, e as duas
@@ -2971,6 +3068,55 @@ ACEITASSE um vetor inválido, `validar` devolve NULL e `NULL = 'motivo'` é
 NULL — a linha viria em BRANCO, não `false`. Falha que se apresenta como
 célula vazia é a pior forma de falha. Virou `is not distinct from`.
 
+## 60. Quatro defeitos de tela que só o uso real achou
+
+Depois de selar o `R-000013`, o usuário reparou em coisas que nenhum
+teste desta sessão pegaria — todas da mesma família, a que este projeto
+persegue desde o §39: **a tela afirmando o que não sabe, ou não dizendo o
+que sabe.**
+
+**1. "Assinatura do caixa" estava fixo no código.** Ele selou como admin
+e a tela dizia "caixa". `tipo_signatario` é o nome do SLOT (o lado da
+farmácia) e está dentro do hash — nunca foi afirmação sobre cargo, mas a
+tela lia como se fosse. Virou "Assinatura DA FARMÁCIA", com o cargo real
+vindo de `papel_no_momento`, que a 2A acabara de passar a gravar. Nas
+assinaturas antigas a linha não aparece: derivar de `profiles.papel`
+mostraria o cargo de HOJE pra um ato de meses atrás, que é exatamente o
+que a coluna existe pra evitar.
+
+**2. O romaneio não mostrava o retorno.** Ele esperava ver o horário e
+não achou. O PDF mostra os quatro relógios desde 18/08; a PÁGINA não
+mostrava nenhum. Corrida ainda aberta agora é DITA, não omitida.
+
+`duracaoDaCorrida` mudou de `romaneioPdf.ts` pra `lib/datas.ts` —
+importar aquele módulo só pela duração puxaria o gerador de PDF pro
+bundle principal. Chunk conferido no build: continua separado.
+
+**3. As corridas abertas vinham da mais antiga.** Virou descendente, a
+pedido. Seguro porque `LIMITE_OPERACIONAL` é 500: não há truncamento
+silencioso, que é o que tornaria a ordem uma decisão sobre o que se
+PERDE em vez de sobre o que se vê primeiro.
+
+**4. A lista não identificava a corrida.** Mostrava motoboy, horário e
+"N vale(s)" — com duas corridas do mesmo motoboy, só o relógio
+distinguia. Os vales JÁ VINHAM na consulta e simplesmente não eram
+desenhados.
+
+**O padrão que liga o 1 e o 2, e que vale mais que os quatro:** o PDF e a
+tela evoluíram SEPARADOS. O PDF sabia dizer "corrida ainda aberta" e
+mostrar os relógios; a tela não sabia. O mesmo documento contava duas
+histórias conforme onde se olhava. Quando o Romaneio de Retorno ganhar
+PDF (etapa final da frente), vale conferir os dois lado a lado antes de
+considerar pronto.
+
+**E uma coisa que eu fiz errado e vale registrar como método:** descrevi
+o E2E do item 10 como se algo novo fosse aparecer na tela. Não era — a
+mudança do item 7 é invisível por construção, e o teste era de
+REGRESSÃO: provar que nada mudou pra quem opera. O usuário foi procurar
+uma assinatura extra que nunca ia existir. Descrever teste de regressão
+com vocabulário de teste de funcionalidade manda a pessoa procurar o que
+não há.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -3044,6 +3190,43 @@ Os de 43 em diante são de 16/08:
 Do 30 em diante os commits foram feitos pelo usuário no terminal: o
 classificador do modo automático bloqueou `git commit`/`push` a partir de
 certo ponto da sessão.
+
+### Sessão de 2026-08-19 e 20 — Drive, desenho do retorno e a etapa 2A
+
+Vinte e quatro commits, todos já em `origin/main`. Em ordem:
+
+    6b66079  logo de documento nos PDFs + a faixa da marca (item 57)
+    931e645  romaneio no Drive, com sangria no Fechamento (item 57)
+    eceb770  .gitignore do AGENTS.md
+
+    3ac4e11  fecha o DESENHO do Romaneio de Retorno, antes do código (58)
+    ad4d109  etapa 1 — schema do retorno, aplicado e conferido
+    2fb42ff  etapa 2A vira GATE: verificar antes de mudar
+
+    2378b45  verificador de hash + baseline 9 · 9 · 0        (2A, 1 e 2)
+    2338d6a  congela o DCRR1
+    e755224  golden vectors, escritos à mão antes de tudo    (2A, 3)
+    da1b2af  vetores de rejeição, e o defeito que acharam no V007
+    234d938  canônico do retorno em TypeScript, 60/60        (2A, 4)
+    7de63d7  canônico do retorno em SQL                      (2A, 5)
+    eaffd62  conferência do gêmeo SQL numa consulta só
+    907f6da  corrige o gerador: só o 1º ramo do union é select
+    88d44c1  gêmeo SQL conferido no banco: 36 de 36
+    4fe2473  teste de transporte: mesmo objeto gera canônico e payload
+    86972b4  cobertura deixa de depender do tamanho do romaneio
+    d2bd3eb  escolhe o romaneio com mais vales
+    079153e  documento multi-vale atravessa o fio; script re-colável
+    89f2e69  transporte provado: 5 cenários, 3 vales          (2A, 6)
+    92b584c  papel_no_momento no INSERT da saída              (2A, 7)
+    f5b458f  baseline intacto: 9 · 9 · 0                      (2A, 8 e 9)
+    6eb7f5e  etapa 2A FECHADA: R-000013, verificador 10·10·0  (2A, 10)
+    c057def  quatro defeitos de tela que o R-000013 expôs     (item 60)
+
+Repare na densidade de commits de correção do próprio ferramental
+(`eaffd62`, `907f6da`, `86972b4`, `d2bd3eb`, `079153e`): cinco dos vinte
+e quatro são consertos em SCRIPT DE TESTE, não em código de produção.
+Cada um apareceu porque o usuário mandou o resultado COMPLETO em vez de
+"passou" — e três deles eram cobertura que eu tinha declarado sem ter.
 
 ## Migrations aplicadas nesta sessão
 
@@ -3165,7 +3348,41 @@ Sessão de 2026-08-16 — cadeia de custódia (itens 33 a 38):
   pendências).
 
 Todas confirmadas rodando pelo usuário. Nenhuma migration pendente ao fim
-desta sessão — a 35 foi a última, aplicada e conferida em 2026-08-18.
+daquela sessão — a 35 foi a última, aplicada e conferida em 2026-08-18.
+
+### Sessão de 2026-08-19 e 20 — o Romaneio de Retorno
+
+Todas **aplicadas e conferidas no banco** pelo usuário, na ordem:
+
+36. `20260819120000_romaneio_de_retorno_schema.sql` — `romaneios.tipo`,
+    `romaneio_saida_id` com CHECK nos dois sentidos,
+    `UNIQUE (corrida_id, tipo)`, `tipo_signatario` ampliado com
+    `responsavel_loja`, `papel_no_momento`, e a unicidade das assinaturas
+    passando de corrida pra DOCUMENTO com dois índices parciais.
+    Conferido: o CHECK devolveu UMA linha citando `responsavel_loja` (o
+    caminho de falha silenciosa que o `do $$` do arquivo fecha), e os
+    dois índices trocaram.
+37. `20260819130000_verificador_de_hash.sql` — `verificar_romaneio` e
+    `verificar_romaneios_selados`, read-only e `security invoker`.
+    Baseline: **9 · 9 · 0**.
+38. `20260819140000_canonico_retorno.sql` — `romaneio_retorno_validar` e
+    `romaneio_retorno_canonico`, gêmeos de `src/lib/canonicoRetorno.ts`.
+    Conferido: **36 de 36** contra os golden vectors.
+39. `20260819150000_conferir_canonico_retorno.sql` — diagnóstico
+    read-only que devolve canônico, bytes e sha256. Não sela nada.
+40. `20260819160000_papel_no_momento_na_saida.sql` — reescreve
+    `selar_romaneio_interno` só pra acrescentar a coluna ao INSERT da
+    assinatura interna. **A fórmula do hash não muda um byte**, conferido
+    por diff antes e por recomputação depois: baseline seguiu 9 · 9 · 0,
+    e foi a **10 · 10 · 0** depois do `R-000013`.
+
+**Atenção pra quem for reescrever `selar_romaneio_interno` de novo:** há
+TRÊS definições dela no repositório agora — a original de
+`20260816140000`, a de `20260816180000` (que corrigiu a FK do item 40) e
+a de `20260819160000`. Parta SEMPRE da mais recente. Copiar de uma antiga
+reintroduz bug corrigido, em silêncio.
+
+Nada fora de migration nesta sessão. Nenhuma migration pendente.
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
@@ -3182,110 +3399,7 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-## 58. O desenho do Romaneio de Retorno, fechado antes do código
-
-Sessão de 2026-08-19, depois do Drive. O usuário trouxe a modelagem
-pronta e pediu conversa antes de qualquer linha — o que se provou certo,
-porque a conversa mudou duas das decisões dele.
-
-**A proposta dele estava certa no núcleo:** a assinatura hoje está presa
-à *corrida* e deveria estar presa ao *documento*; o retorno é um segundo
-documento que referencia a saída e nunca a altera; unicidade por
-`romaneio_id` com índices parciais, sem reescrever histórico. Nada disso
-precisou de ajuste.
-
-O desenho final está no CLAUDE.md. Aqui fica o que a conversa **achou**.
-
-### O que o código respondeu, e que ninguém teria adivinhado
-
-**O papel do signatário está dentro do hash.**
-
-```sql
-v_hash_caixa := encode(digest(
-  v_hash || '|caixa|' || p_caixa_id::text || '|' || ...
-```
-
-Ele queria renomear `tipo_signatario` de `caixa` pra `responsavel_loja`,
-com um argumento bom (no retorno quem recebe pode ser gerente). Mas o
-literal entra no `signature_hash`, e o `final_hash` é
-`digest(document_hash | hash_caixa | hash_motoboy)` — renomear as linhas
-existentes quebraria a verificação de **todo romaneio já selado**.
-
-É a regra 7 alcançando um lugar onde ninguém procuraria: o vocabulário
-virou dado assinado. A saída foi ampliar o CHECK em vez de renomear, e o
-efeito colateral é bom — `papel_no_momento` vira coluna própria, que era
-o que ele queria de verdade, e entra no hash do retorno desde o dia um.
-
-**Ressalva honesta: nada recomputa esses hashes hoje.** São gravados e
-exibidos truncados, nunca conferidos. Então o risco é latente, não ativo.
-O que fica registrado é a regra pro dia em que alguém escrever um
-verificador: ler `tipo_signatario` da linha, jamais fixar o literal.
-
-**O bloqueio progressivo que ele propôs já existe.** Ele desenhou
-"3 erros → pequeno atraso, mais → bloqueio temporário, gestor recupera".
-O banco já faz exatamente isso desde 16/08: 30s → 2min → 5min → teto de
-15min, e um acerto zera o contador. A preocupação com "5 erros e ninguém
-fecha o dia" nunca foi o comportamento. Uma sessão economizada por ir
-olhar em vez de aceitar a premissa.
-
-**`redefinir_pin` exige `is_admin()`, não gestor.** A decisão dele dizia
-"Gestor/Admin conclui o excepcional", mas o gerente não tem esse poder
-hoje — e não é acidente, é a separação de 12/08 entre escopo de filial e
-capacidade de gestão. O problema prático: o admin é o dono, não está no
-balcão de cada filial às 20h, então excepcional restrito a admin
-**paralisaria justamente o caso que ele existe pra destravar**. Ele
-confirmou `is_gerente()`, e ficou registrado como ampliação deliberada —
-segundo uso daquela função, que até aqui tinha um só.
-
-### Duas coisas que simplificaram por si
-
-**O fluxo excepcional é online por construção.** Offline não existe
-"não foi possível autenticar": o PIN é selado no envelope RSA e o
-servidor decide na sincronização. Não há a quem o servidor diga "não".
-Uma máquina de estados a menos, de graça.
-
-**`UNIQUE (corrida_id, tipo)` isenta os conflitos sozinho** — romaneio em
-conflito tem `corrida_id` nulo por construção, e no Postgres nulo não
-colide. Não precisa de índice parcial ali.
-
-### A decisão de escopo que ele tomou, e o que ela custa
-
-O retorno **substitui** o fechamento manual. Não vão existir dois
-caminhos pra encerrar uma corrida — mesma família do "notificar não tira
-da fila": dois caminhos pro mesmo fato, nenhum definitivo.
-
-O custo é a fila offline. Um `fechamento_corrida` pendente no IndexedDB
-**não tem como virar** um romaneio de retorno: falta assinatura, PIN e
-snapshot, que nunca foram coletados. Ficou uma janela de compatibilidade
-de duas releases, com o item legado executando o comportamento antigo e
-gravando auditoria própria. Descartar em silêncio seria a perda que a
-chave própria da fila veio corrigir em 16/08.
-
-### O tamanho
-
-Seis etapas, como a saída. A perigosa é a 2: o canônico do retorno tem
-mais campos que o da saída — desfecho por vale, previsto contra
-realizado, motivo de insucesso —, então são dois gêmeos TypeScript/SQL de
-novo com mais superfície pra divergir num byte. Spec próprio e
-`conferir-canonico-no-console.js` próprio, separados dos da saída.
-
-### PRÓXIMA SESSÃO: romaneio de retorno — comece por aqui
-
-~~Envio do romaneio ao Drive~~ — **feito em 2026-08-19** (item 57).
-Terminou em `Romaneios › <Filial> › AAAA-MM › AAAA-MM-DD › <Via>`, as duas vias,
-com dois botões: um por romaneio (na página dele) e a **sangria do fim do
-dia** na aba Fechamento, que é a que de fato monta o arquivo.
-
-**O que falta desta frente, e é clique de usuário:** o envio nunca rodou
-contra o Google de verdade — nem o do romaneio, nem o do acerto depois da
-correção do item 32. Vale começar pelo acerto, que é um clique num
-terreno conhecido; se ele estiver quebrado, é melhor descobrir ali do que
-no meio de uma frente nova.
-
-A próxima frente é o **romaneio de retorno**. A conversa de desenho que
-ele exigia **já aconteceu, em 2026-08-19**, e a **etapa 1 (schema) já foi
-aplicada e conferida** — ver a migration
-`20260819120000_romaneio_de_retorno_schema.sql`.
+### PRÓXIMA SESSÃO: etapa 2B — `selar_romaneio_retorno`
 
 **A etapa 2A FECHOU em 2026-08-20**, os dez itens. O gate está cumprido,
 e o que vem agora é a **2B — `selar_romaneio_retorno` transacional**,
@@ -3302,7 +3416,31 @@ O que a 2A deixou pronto e a 2B usa:
 | `conferir_canonico_retorno` | read-only, pra perguntar "o que o servidor entendeu?" sem selar |
 | `verificar_romaneio` / `verificar_romaneios_selados` | o baseline, hoje **10 · 10 · 0** |
 | `papel_no_momento` | preenchido na saída desde o `R-000013` |
+| `paraJsonbRetorno` | o builder que a TELA tem que usar — canônico e payload do mesmo objeto |
 | schema do retorno | `romaneios.tipo`, os dois índices parciais, a FK pra saída |
+
+**O que a 2B tem que fazer**, e está detalhado no CLAUDE.md: uma
+transação que valida a saída e o `saida_hash`, confere que cada
+`entrega_id` pertence àquele romaneio (não falta nem sobra vale), confere
+o motoboy da custódia e o responsável server-side, sela o romaneio de
+retorno com as duas assinaturas, grava desfechos e pagamentos, **deriva a
+divergência** da comparação previsto × realizado, gera os eventos e fecha
+a corrida. Tudo atômico, e `fecharCorrida` sobrevive DENTRO dela, nunca
+como ação de usuário.
+
+Duas coisas que a 2A descobriu e que a 2B precisa respeitar:
+
+- **a fórmula da assinatura do retorno NÃO pode ter cast de
+  `timestamptz`.** `timestamptz::text` depende do `TimeZone` da sessão, e
+  a da saída tem esse problema latente — o verificador só funciona porque
+  fixa UTC e porque todas as selagens vieram por PostgREST. Use
+  `to_char` com máscara explícita, ou epoch.
+- **o lado SQL do canônico já existe e espelha o aninhamento.** A 2B
+  chama `romaneio_retorno_canonico`, não reimplementa.
+
+**Pendência de clique do usuário, herdada:** o envio ao Drive do ACERTO
+nunca rodou contra o Google depois da correção do item 32. O do romaneio
+rodou e funciona; é o mesmo transporte, mas outro fluxo.
 
 O item que talvez surpreenda quem retomar: **a 2A começou por construir
 um verificador de hash dos romaneios de SAÍDA**, que não tem nada de retorno
@@ -3345,23 +3483,69 @@ romaneio de retorno provavelmente vai subir também:
   Cloudflare **e** a URL do Pages nas origens autorizadas do cliente
   OAuth — e o deploy inteiro ainda não existe (ver pendências).
 
-### Estado em 2026-08-19
+### Estado em 2026-08-20
 
-A cadeia de custódia (itens 33 a 57) está construída e **funcionando
-online**: saídas reais foram seladas de ponta a ponta — cartão bipado,
-PIN conferido pelo servidor, duas assinaturas, tudo visível pelo chevron
-do vale. Seis romaneios estão gravados com `modo = 'online'` (`R-000003`,
-`05`, `07`, `08`, `11`, `12`).
+**Onde a frente do Romaneio de Retorno está:**
+
+```
+etapa 1  schema                          APLICADO e conferido
+etapa 2A gate de integridade e canônico  FECHADA — os dez itens
+etapa 2B selar_romaneio_retorno          próxima, destravada
+etapa 2C fila offline                    depende da 2B
+etapa 2D tela                            depende da 2C
+```
+
+O que a 2A deixou pronto e a 2B usa direto:
+
+| | |
+|---|---|
+| `romaneio_retorno_canonico` / `_validar` | os bytes e as recusas, gêmeos de `src/lib/canonicoRetorno.ts` |
+| `conferir_canonico_retorno` | read-only, pra perguntar "o que o servidor entendeu?" sem selar |
+| `verificar_romaneio` / `_selados()` | o baseline, hoje **10 · 10 · 0** |
+| `paraJsonbRetorno` | o builder que a TELA tem que usar, pra canônico e payload saírem do mesmo objeto |
+| `papel_no_momento` | preenchido na saída desde o `R-000013` |
+
+**As três camadas de prova do canônico do retorno**, e cada uma responde
+o que a outra não alcança:
+
+    golden vectors escritos à mão   →  o contrato está certo?
+    TS 60/60 · SQL 36/36            →  as implementações obedecem?
+    transporte real 5/5             →  o fio preserva o que elas concordam?
+
+**Nada disso tem tela ainda.** O retorno continua sendo o
+`fecharCorrida` de sempre; nada mudou pra quem opera.
+
+---
+
+A cadeia de custódia da SAÍDA (itens 33 a 57) está construída e
+**funcionando online**: saídas reais foram seladas de ponta a ponta —
+cartão bipado, PIN conferido pelo servidor, duas assinaturas, tudo
+visível pelo chevron do vale. Sete romaneios estão gravados com
+`modo = 'online'` (`R-000003`, `05`, `07`, `08`, `11`, `12`, `13`).
 
 *(Até 19/08 esta seção citava o `R-000001` como a prova do online. O
 verificador de hash mostrou que ele está gravado como
 `offline_sincronizada` — ver a correção no item 42.)*
 
-**E os 9 romaneios selados verificam criptograficamente.** Baseline de
-2026-08-19: **9 verificados, 9 válidos, 0 divergências**, 4 camadas cada
-(documento, as duas assinaturas, envelope). É a primeira vez que esses
-hashes são recomputados — até aqui o projeto gerava evidência sem
-conseguir conferi-la.
+**E TODOS os romaneios selados verificam criptograficamente.** Baseline
+de 2026-08-19: 9 · 9 · 0. Depois do `papel_no_momento` e do `R-000013`:
+**10 verificados, 10 válidos, 0 divergências**, 4 camadas cada
+(documento, as duas assinaturas, envelope). É a primeira vez na vida do
+projeto que esses hashes são recomputados — até aqui ele gerava evidência
+sem conseguir conferi-la.
+
+**Como rodar de novo** (como ADMIN, senão a RLS devolve baseline parcial
+sem avisar):
+
+    select count(*) as verificados,
+           count(*) filter (where divergencias = 0) as validos,
+           coalesce(sum(divergencias), 0) as divergencias
+      from public.verificar_romaneios_selados();
+
+O número sobe um a cada saída nova. **Qualquer divergência precisa ser
+explicada antes de seguir com o que estiver sendo feito** — a coluna
+`onde` de `verificar_romaneios_selados()` diz qual camada caiu, e
+`verificar_romaneio('<uuid>')` abre o detalhe.
 
 **E o elo físico fechou em 17/08**: cartão v3 impresso em laser sobre
 papel comum, bipado no leitor da farmácia, token de 22 dígitos
@@ -3391,9 +3575,17 @@ romaneio, logo nova, e o envio ao Drive. `origin/main` está igual, ou
 seja, tudo empurrado. **Trabalhe na `main`.**
 
 **Tudo que precisava de passo manual no Supabase já foi aplicado:** as
-nove migrations, o segredo `credencial_hmac` no Vault, a Edge Function
+migrations (nove da cadeia de custódia + as cinco de 19 e 20/08, listadas
+acima), o segredo `credencial_hmac` no Vault, a Edge Function
 `sync-romaneio` (nome dela no dashboard, não `sincronizar-romaneio`) e o
 secret `ROMANEIO_KEYS`.
+
+**O Drive funciona de verdade**, testado contra o Google em 19/08: o
+romaneio sobe nas duas vias, em
+`Romaneios › Filial › AAAA-MM › AAAA-MM-DD › Via da …`, pelo botão da
+página ou pela **sangria** no fim do dia (aba Fechamento). O envio do
+ACERTO, esse, continua sem ter passado por consentimento OAuth desde a
+correção do item 32 — é o mesmo transporte, mas outro fluxo.
 
 #### O que falta, em ordem de risco
 
@@ -3774,3 +3966,26 @@ apagar isso pela interface.
   seed da migration — essas são dado real e ficam.
 - **V-1001 e V-1002 foram APAGADOS** (item 31), junto com a corrida sem
   agência. São os únicos registros que deixaram de existir no projeto.
+
+**Acrescentado em 19 e 20 de agosto:**
+
+- **`R-000011`, `R-000012` e `R-000013`** — saídas seladas nos testes da
+  cadeia e da etapa 2A. O `R-000013` é o **único com
+  `papel_no_momento` preenchido** (`admin`), e por isso é ele que prova a
+  coluna funcionando. Se for apagado algum dia, essa prova some.
+- Os romaneios do Drive subiram para a conta Google do usuário, em
+  `Drogaria Cidade Entregas - Romaneios`. Os arquivos do PRIMEIRO envio
+  ficaram soltos na pasta do dia, antes de existir a subpasta por via —
+  o usuário limpou à mão. **O app não apaga nada no Drive**, e não
+  deveria: limpeza lá é sempre manual.
+- Nenhum dado de teste novo foi criado pela etapa 2A. O canônico do
+  retorno e o verificador são funções **puras ou read-only**, e
+  `conferir_canonico_retorno` não grava nada — dá pra rodar em cima de
+  produção sem consequência.
+
+**Pra quando a limpeza acontecer** (é o último passo antes de
+apresentar): apagar romaneio selado agora custa mais do que custava. Eles
+são o que o `verificar_romaneios_selados()` conta, e o baseline
+documentado nesta sessão — `10 · 10 · 0` — deixa de bater. Não é motivo
+pra não limpar; é motivo pra **anotar o número novo** depois de limpar,
+senão a próxima sessão vai achar que perdeu documento.
