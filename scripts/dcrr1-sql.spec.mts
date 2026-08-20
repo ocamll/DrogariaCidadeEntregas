@@ -84,7 +84,7 @@ function chamada(entrada: unknown): string {
 // mostra apenas o resultado do ÚLTIMO statement. Emitir 20 selects
 // separados fazia 19 conferências rodarem e desaparecerem — quem rodasse
 // via só a última e não teria como saber das outras. Um `union all`
-// devolve as 36 linhas de uma vez.
+// devolve todas de uma vez.
 // Cada conferência é um RAMO sem a palavra-chave da frente. Quem junta
 // decide o que vai antes de cada um — só assim o primeiro é `select` e
 // todos os outros são `union all select`.
@@ -127,9 +127,16 @@ console.log('-- vetores que o lado TypeScript usa — não de vetores "equivalen
 console.log('-- que é como duas verdades nascem.')
 console.log('--')
 console.log('-- UMA CONSULTA SÓ: o SQL Editor mostra apenas o último statement, e')
-console.log('-- 20 selects separados fariam 19 conferências sumirem.')
+console.log(`-- ${linhas.length} selects separados fariam ${linhas.length - 1} conferências sumirem.`)
 console.log('--')
-console.log('-- 36 linhas: 8 vetores válidos × (texto, bytes, hash) + 12 motivos de')
+// Contado, nunca fixo. Estas duas linhas diziam "36" e "20" quando já
+// eram 43 e 43, porque os vetores cresceram em 2026-08-20 e o cabeçalho
+// não: número escrito à mão dentro de texto gerado envelhece calado, e
+// quem for rodar a conferência lê o cabeçalho pra saber o que esperar.
+console.log(
+  `-- ${linhas.length} linhas: ${VETORES.length} vetores válidos × (texto, bytes, hash) + ` +
+    `${VETORES_INVALIDOS.length} motivos de`
+)
 console.log('-- recusa. As que falharem vêm PRIMEIRO.')
 console.log('-- =====================================================================')
 console.log('with conferencia(vetor, criterio, ok) as (')

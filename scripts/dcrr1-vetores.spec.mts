@@ -30,7 +30,21 @@ const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const HEX64 = /^[0-9a-f]{64}$/
 const DESFECHOS = ['entregue', 'insucesso']
 const MOTIVOS = ['ausente', 'endereco_errado', 'recusou', 'outro', '-']
-const FORMAS = ['dinheiro', 'credito', 'debito', 'pix', 'convenio', 'vale', 'outro']
+// Escrita AQUI de novo, à mão, e não importada de `canonicoRetorno.ts`:
+// este spec confere os vetores contra a ESPECIFICAÇÃO, e importar a lista
+// da implementação faria a checagem concordar consigo mesma. A
+// especificação é o CHECK de `pagamentos.forma`, corrigido em 2026-08-20
+// (era a lista do schema inicial, substituída em 07/08).
+const FORMAS = [
+  'dinheiro',
+  'credito',
+  'debito',
+  'pix',
+  'convenio',
+  'convcard',
+  'crediario',
+  'outro',
+]
 
 for (const vetor of VETORES) {
   console.log(`\n--- ${vetor.nome} ---`)
@@ -196,9 +210,27 @@ checa(
   Object.keys(violaDeFato).every((m) => VETORES_INVALIDOS.some((v) => v.motivo === m)),
   `${VETORES_INVALIDOS.length} vetores para ${Object.keys(violaDeFato).length} motivos`
 )
+// Um vetor por classe de erro, com UMA exceção declarada: `forma_invalida`
+// tem dois, e eles provam coisas diferentes. I010 é uma forma que NUNCA
+// existiu (`boleto`) — o domínio recusa o desconhecido. I013 é uma forma
+// que EXISTIU e saiu (`vale`, removida do banco em 2026-08-07) — sem ele,
+// "tirei do domínio" e "esqueci de tirar" ficariam indistinguíveis, que é
+// a mesma razão dos casos `v2 não é mais lido` do parser do cartão.
+//
+// A exceção é nomeada em vez de a regra ser afrouxada: assim um segundo
+// motivo duplicado, esse sim por descuido, continua caindo aqui.
+const DUPLICATA_DELIBERADA: MotivoRejeicao[] = ['forma_invalida']
+const motivosSemExcecao = VETORES_INVALIDOS.map((v) => v.motivo).filter(
+  (m) => !DUPLICATA_DELIBERADA.includes(m)
+)
 checa(
   'nenhum motivo repetido — um vetor por classe de erro',
-  new Set(VETORES_INVALIDOS.map((v) => v.motivo)).size === VETORES_INVALIDOS.length
+  new Set(motivosSemExcecao).size === motivosSemExcecao.length
+)
+checa(
+  'a duplicata deliberada é exatamente a esperada',
+  VETORES_INVALIDOS.filter((v) => v.motivo === 'forma_invalida').length === 2,
+  'I010 (nunca existiu) e I013 (existiu e saiu)'
 )
 // A recíproca: nenhum vetor VÁLIDO pode disparar um motivo de rejeição.
 // Sem isto, uma regra escrita larga demais tornaria os oito válidos

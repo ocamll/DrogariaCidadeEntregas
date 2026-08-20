@@ -98,13 +98,35 @@ function ordemBinaria(a: string, b: string): number {
   return a < b ? -1 : a > b ? 1 : 0
 }
 
+/**
+ * O DOMÍNIO É O CHECK DE `pagamentos.forma` — nem mais, nem menos.
+ *
+ * Corrigido em 2026-08-20. A lista congelada em 19/08 era a do SCHEMA
+ * INICIAL, que a migration `20260807123331` já tinha substituído doze
+ * dias antes: `vale` saiu e entraram `convcard` e `crediario`. Os três
+ * lugares (vetores, este arquivo e o gêmeo SQL) copiaram o mesmo engano.
+ *
+ * As duas metades do erro custavam caro na mesma transação: `convcard`
+ * seria recusado como `forma_invalida` DEPOIS das duas assinaturas, e
+ * `vale` passaria por aqui pra morrer no INSERT em `pagamentos`.
+ *
+ * **Mudar isto exige mudar os três lugares JUNTOS**, e a partir do
+ * primeiro retorno real selado o custo deixa de ser esse — vira
+ * histórico assinado.
+ */
 export const FORMAS_PAGAMENTO = [
   'dinheiro',
   'credito',
   'debito',
   'pix',
   'convenio',
-  'vale',
+  // Cliente manda os dados do cartão e a farmácia passa a compra. O
+  // cartão não está na porta, mas a venda é processada: é pagamento.
+  'convcard',
+  // A forma financeira da venda, e SÓ ela. O papel que o cliente assina
+  // é outro fato, e de propósito não tem representação nesta linha —
+  // ver a nota do bloco `d` no CLAUDE.md.
+  'crediario',
   'outro',
 ] as const
 export type FormaPagamento = (typeof FORMAS_PAGAMENTO)[number]

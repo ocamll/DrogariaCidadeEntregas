@@ -55,9 +55,36 @@
 // acima do BMP. Como só UUID é ordenado, isso nunca morde — e é por isso
 // que nenhum vetor tenta ordenar texto.
 
+// O DOMÍNIO É O CHECK DE `pagamentos.forma`, e essa lista foi corrigida
+// em 2026-08-20 — ver o vetor I010, que já dizia isso quando o contrato
+// foi congelado.
+//
+// A lista original daqui era a do SCHEMA INICIAL (2026-08-06), que a
+// migration `20260807123331` substituiu doze dias antes de o DCRR1 ser
+// congelado: `vale` saiu ("não é usado, confundia com número do vale da
+// entrega") e entraram `convcard` e `crediario`. Os três lugares —
+// vetores, `canonicoRetorno.ts` e o gêmeo SQL — copiaram o mesmo engano,
+// que é exatamente o que os golden vectors existiam pra impedir e não
+// impediram, porque o erro estava neles também.
+//
+// O que isso teria custado na 2B: um cliente que paga com cartão de
+// convênio faz o canônico responder `forma_invalida` e o retorno NÃO
+// sela — depois de colhidas as duas assinaturas. E `vale` passaria pelo
+// canônico pra morrer no INSERT, dentro da mesma transação.
+//
+// Corrigir custou nada porque nenhum retorno real foi selado ainda. Ver
+// V009 e V010 pros dois casos novos, e I013 pro `vale`.
 export type PagamentoRealizadoCanonico = {
   pagamentoId: string
-  forma: 'dinheiro' | 'credito' | 'debito' | 'pix' | 'convenio' | 'vale' | 'outro'
+  forma:
+    | 'dinheiro'
+    | 'credito'
+    | 'debito'
+    | 'pix'
+    | 'convenio'
+    | 'convcard'
+    | 'crediario'
+    | 'outro'
   valorCents: number
   trocoCents: number
 }
@@ -405,6 +432,78 @@ export const VETORES: Vetor[] = [
     bytes: 454,
     sha256: 'b6621d141b61a874e34aa47e7ca347661d1211982552bb71e2f53ea6edd28727',
   },
+
+  {
+    nome: 'V009 — convcard, o cartão de convênio da própria farmácia',
+    porque:
+      'Acrescentado em 2026-08-20, junto da correção do domínio. O fluxo ' +
+      'real: o cliente manda os dados do cartão e a farmácia passa a ' +
+      'compra — o cartão não está na porta, mas a venda é processada, ' +
+      'então é forma de pagamento de verdade e o documento assinado tem ' +
+      'que poder dizer isso. Antes desta correção o canônico recusaria ' +
+      '`forma_invalida` DEPOIS de colhidas as duas assinaturas.',
+    entrada: {
+      saidaRomaneioId: SAIDA,
+      saidaDocumentHash: SAIDA_HASH,
+      motoboyId: MOTOBOY,
+      responsavelId: RESPONSAVEL,
+      vales: [
+        {
+          entregaId: E1,
+          desfecho: 'entregue',
+          motivo: null,
+          detalhe: null,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'convcard', valorCents: 8500, trocoCents: 0 },
+          ],
+        },
+      ],
+    },
+    canonico: [
+      ...CABECALHO,
+      `v\t${E1}\tentregue\t-\t-`,
+      `pr\t${E1}\t${P1}\tconvcard\t8500\t0`,
+    ].join('\n'),
+    bytes: 363,
+    sha256: 'cbe90fb86fe7c9315e89e530d3c86e49ad70f18c6bd8638bc1a08681e4604e48',
+  },
+
+  {
+    nome: 'V010 — crediário: a forma financeira, e SÓ ela',
+    porque:
+      'O crediário tem duas naturezas ao mesmo tempo, e este vetor congela ' +
+      'só uma. A linha `pr` afirma o PAGAMENTO — "o realizado desta ' +
+      'entrega foi crediário, R$ 120,00". O papel que sai junto pra o ' +
+      'cliente assinar é OUTRO FATO, e deliberadamente não está ' +
+      'representado aqui: enfiá-lo na linha de pagamento faria o documento ' +
+      'confundir "o dinheiro foi combinado" com "o papel voltou ' +
+      'assinado". Decidido em 2026-08-20 — ver a nota sobre o bloco `d` no ' +
+      'CLAUDE.md, que fica pra depois de levantar o fluxo do papel.',
+    entrada: {
+      saidaRomaneioId: SAIDA,
+      saidaDocumentHash: SAIDA_HASH,
+      motoboyId: MOTOBOY,
+      responsavelId: RESPONSAVEL,
+      vales: [
+        {
+          entregaId: E1,
+          desfecho: 'entregue',
+          motivo: null,
+          detalhe: null,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'crediario', valorCents: 12000, trocoCents: 0 },
+          ],
+        },
+      ],
+    },
+    canonico: [
+      ...CABECALHO,
+      `v\t${E1}\tentregue\t-\t-`,
+      `pr\t${E1}\t${P1}\tcrediario\t12000\t0`,
+    ].join('\n'),
+    bytes: 365,
+    sha256: 'c88e6feea9bb23812523bdfc8a04705c9f3dcfc0bf9fd4195925117c0c0a25b7',
+  },
 ]
 
 // =====================================================================
@@ -677,6 +776,29 @@ export const VETORES_INVALIDOS: VetorInvalido[] = [
           ...VALE_OK,
           pagamentosRealizados: [
             { pagamentoId: P1, forma: 'pix', valorCents: 12.5, trocoCents: 0 },
+          ],
+        },
+      ],
+    },
+  },
+  {
+    nome: 'I013 — `vale` não é mais forma de pagamento',
+    porque:
+      'Existe pelo mesmo motivo dos casos `v2 não é mais lido` do parser ' +
+      'do cartão: sem ele, "tirei do domínio" e "esqueci de tirar" ficam ' +
+      'indistinguíveis. `vale` era forma no schema inicial e saiu em ' +
+      '2026-08-07 ("não é usado, confundia com número do vale da ' +
+      'entrega") — mas ficou na lista do DCRR1 até 2026-08-20, aceito ' +
+      'pelo canônico pra morrer no INSERT em `pagamentos`, dentro da ' +
+      'transação do selo e depois das duas assinaturas.',
+    motivo: 'forma_invalida',
+    entrada: {
+      ...BASE,
+      vales: [
+        {
+          ...VALE_OK,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'vale', valorCents: 100, trocoCents: 0 },
           ],
         },
       ],
