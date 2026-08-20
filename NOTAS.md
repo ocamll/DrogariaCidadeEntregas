@@ -2820,6 +2820,60 @@ invisíveis numa tradução:
   só. `coalesce` em volta de cada `lower`, e o mesmo no dedupe, onde
   `NULL = any(array)` é NULL e não false.
 
+### O item 6 mudou de pergunta, e a resposta veio em 5 cenários
+
+Com os vetores fechados dos dois lados, "TS × SQL concordam?" deixou de
+ser a pergunta. O item 6 virou **teste de transporte**: o caminho
+`supabase-js → PostgREST → jsonb` preserva o input que o navegador
+assinou? É onde moram `undefined` sumindo no `JSON.stringify`, string
+vazia virando nulo, número chegando como string e Unicode atravessando
+quatro camadas.
+
+**5 cenários, três critérios cada, todos verdes**, sobre o `R-000001`
+com documento de 3 vales.
+
+O que o canônico impresso provou e os booleanos não mostram:
+
+- **a ordenação atravessou o fio** — o input mandou
+  entregue/insucesso/entregue, a saída veio ordenada por `entrega_id`
+  com o insucesso primeiro. Os dois lados reordenaram igual, com dado
+  real;
+- **o bloco `pr` convive com vale sem pagamento** — três `v` juntos,
+  depois dois `pr`, e o vale de insucesso ausente do segundo bloco;
+- **o par vazio/nulo escala**: 1 byte de diferença com 1 vale, 3 bytes
+  com 3 vales. Um `-` por vale, exatamente.
+
+**A exigência do usuário que fez o teste valer alguma coisa:** o canônico
+local e o `p_retorno` enviado saem do MESMO objeto de domínio, pela mesma
+função (`paraJsonbRetorno`). Sem isso o teste provaria que um SCRIPT
+monta JSON certo, e a tela poderia montar outro formato depois —
+assinando uma coisa e mandando outra.
+
+### Três revisões do script, e o que cada uma achou
+
+Vale registrar porque nenhuma foi capricho: cada uma expôs uma cobertura
+que eu tinha declarado sem ter.
+
+1. **A cobertura estava amarrada ao tamanho do documento.** Eu
+   distribuía os casos entre os vales em rodízio, e o romaneio mais
+   recente tinha UM vale — então só o caso `entregue` atravessou. Ficaram
+   de fora justamente os dois que motivam testar transporte. Cada forma
+   virou um cenário próprio.
+2. **Escolher o romaneio mais recente era conveniência**, não critério.
+   Passou a escolher o com mais vales.
+3. **Nenhum romaneio selado tem mais de um vale**, então nem isso
+   bastava. A saída foi outra: `conferir_canonico_retorno` é PURA e não
+   valida pertencimento, então dá pra montar um documento multi-vale com
+   `entrega_id` reais quaisquer. Não é fabricar dado — o que precisa ser
+   real aqui são os UUID vindos do banco e o texto atravessando as
+   camadas, não a relação de negócio. Na 2B a mesma liberdade seria erro.
+
+E uma quarta coisa, que não é cobertura mas atrapalhava igual: **`const`
+de topo no console do Chrome persiste entre colagens**, então rodar o
+script duas vezes na mesma aba dava "Identifier ... has already been
+declared" e nada rodava. Repetir um teste é o uso normal. Tudo passou a
+viver dentro de um bloco.
+
 ### Dois defeitos meus no gerador do SQL, e o método que os deixou passar
 
 O gerador emitia **20 statements separados**, e o SQL Editor mostra só o

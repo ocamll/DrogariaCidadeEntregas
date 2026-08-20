@@ -1448,12 +1448,14 @@ código enfileira `fechamento_corrida`.**
       (`20260819140000_canonico_retorno.sql`): **36 de 36**, ou seja os 8
       vetores válidos batendo em texto, bytes e hash, e os 12 inválidos
       recusados pelo mesmo motivo do lado TypeScript
-   6. ~~`canonico-retorno.spec.mts`~~ (feito no item 4) e
-      **`conferir-canonico-retorno-no-console.js`** — escrito, falta
-      RODAR. Ele deixou de ser "TS × SQL concordam?" (os vetores já
-      provaram, com mais força) e virou **teste de TRANSPORTE**: o
-      caminho `supabase-js → PostgREST → jsonb` preserva o input que o
-      navegador assinou? Precisa da migration
+   6. ~~`canonico-retorno.spec.mts` e
+      `conferir-canonico-retorno-no-console.js`~~ — **feito e rodado em
+      2026-08-19: 5 cenários, três critérios cada, todos verdes**, sobre
+      o `R-000001` com documento de 3 vales. Ele deixou de ser "TS × SQL
+      concordam?" (os vetores já provaram, com mais força) e virou
+      **teste de TRANSPORTE**: o caminho
+      `supabase-js → PostgREST → jsonb` preserva o input que o navegador
+      assinou? Precisa da migration
       `20260819150000_conferir_canonico_retorno.sql`
    7. `papel_no_momento` no INSERT da saída
    8. rodar o verificador **de novo**
@@ -1674,12 +1676,23 @@ retrofitá-los lá depois.
 referência escrita à mão antes de ambos, concordam entre si — e não por
 um ter sido traduzido do outro.
 
-**O que a etapa 6 ainda acrescenta, agora que isso está provado:** os
-vetores são sintéticos. Ela responde outra pergunta — *o transporte
-preserva o que os gêmeos concordam?* UUID de verdade, texto digitado por
-gente de verdade, e o caminho `supabase-js → PostgREST → jsonb`, que os
-vetores não exercitam porque rodam dos dois lados de dentro. É o mesmo
-papel que `conferir-canonico-no-console.js` cumpre pra saída.
+**O que a etapa 6 acrescentou, e o resultado:** os vetores são
+sintéticos, e rodam dos dois lados *de dentro*. Ela respondeu outra
+pergunta — *o transporte preserva o que os gêmeos concordam?* — com **5
+cenários verdes** em 2026-08-19, sobre um documento real de 3 vales.
+
+Três coisas que o canônico impresso provou e que os booleanos não
+mostram: a **ordenação atravessou o fio** (o input mandou
+entregue/insucesso/entregue e a saída veio ordenada por `entrega_id`, com
+o insucesso primeiro); o **bloco `pr` convive com vale sem pagamento**; e
+o par vazio/nulo **escala** — 1 byte de diferença com 1 vale, 3 bytes com
+3 vales, um `-` por vale.
+
+**Um detalhe do desenho que precisa continuar valendo:**
+`conferir_canonico_retorno` é PURA e **não valida pertencimento**, e é
+isso que permitiu montar um documento multi-vale quando nenhum romaneio
+selado tinha mais de um vale. Quem confere se o vale é daquela saída é
+`selar_romaneio_retorno` — lá a mesma liberdade seria erro grave.
 
 Fixtures obrigatórias: acentuação, Unicode fora do BMP, TAB, CRLF, LF,
 string vazia, null, `motivo = outro` com detalhe, detalhe com espaços nas
