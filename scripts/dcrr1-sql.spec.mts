@@ -80,38 +80,56 @@ function chamada(entrada: unknown): string {
   ].join('\n')
 }
 
+// UMA CONSULTA SÓ, e isso não é estética: o SQL Editor do Supabase
+// mostra apenas o resultado do ÚLTIMO statement. Emitir 20 selects
+// separados fazia 19 conferências rodarem e desaparecerem — quem rodasse
+// via só a última e não teria como saber das outras. Um `union all`
+// devolve as 36 linhas de uma vez.
+const linhas: string[] = []
+
+for (const vetor of VETORES) {
+  const r = literal(vetor.nome.split(' —')[0])
+  linhas.push(`  select ${r} as vetor, 'texto' as criterio,`)
+  linhas.push(`${chamada(vetor.entrada)} = ${literal(vetor.canonico)} as ok`)
+  linhas.push(`  union all select ${r}, 'bytes', octet_length(`)
+  linhas.push(`${chamada(vetor.entrada)}`)
+  linhas.push(`  ) = ${vetor.bytes}`)
+  linhas.push(`  union all select ${r}, 'hash', encode(digest(`)
+  linhas.push(`${chamada(vetor.entrada)}`)
+  linhas.push(`  , 'sha256'), 'hex') = ${literal(vetor.sha256)}`)
+}
+
+for (const vetor of VETORES_INVALIDOS) {
+  const r = literal(vetor.nome.split(' —')[0])
+  const e = vetor.entrada as { saidaDocumentHash: string }
+  // `is not distinct from` e não `=`: se o SQL ACEITAR um vetor inválido,
+  // `romaneio_retorno_validar` devolve NULL, e `NULL = 'motivo'` é NULL —
+  // a linha apareceria vazia em vez de `false`, que é o pior jeito de uma
+  // falha se apresentar.
+  linhas.push(`  union all select ${r}, 'motivo', public.romaneio_retorno_validar(`)
+  linhas.push(`    ${literal(e.saidaDocumentHash)},`)
+  linhas.push(`    ${comoJsonb(vetor.entrada)}`)
+  linhas.push(`  ) is not distinct from ${literal(vetor.motivo)}`)
+}
+
 console.log('-- =====================================================================')
 console.log('-- DCRR1 — o gêmeo SQL contra os golden vectors')
 console.log('--')
 console.log('-- Gerado por `npx tsx scripts/dcrr1-sql.spec.mts` a partir dos MESMOS')
-console.log('-- vetores que o lado TypeScript usa. Toda coluna tem que vir `true`.')
+console.log('-- vetores que o lado TypeScript usa — não de vetores "equivalentes",')
+console.log('-- que é como duas verdades nascem.')
+console.log('--')
+console.log('-- UMA CONSULTA SÓ: o SQL Editor mostra apenas o último statement, e')
+console.log('-- 20 selects separados fariam 19 conferências sumirem.')
+console.log('--')
+console.log('-- 36 linhas: 8 vetores válidos × (texto, bytes, hash) + 12 motivos de')
+console.log('-- recusa. As que falharem vêm PRIMEIRO.')
 console.log('-- =====================================================================')
+console.log('with conferencia(vetor, criterio, ok) as (')
+console.log(linhas.join('\n'))
+console.log(')')
+console.log('select vetor, criterio, ok from conferencia order by ok, vetor, criterio;')
 console.log('')
-
-console.log('-- ---- os oito válidos: texto, bytes e hash --------------------------')
-for (const vetor of VETORES) {
-  const rotulo = vetor.nome.split(' —')[0]
-  console.log(`select ${literal(rotulo)} as vetor,`)
-  console.log(`${chamada(vetor.entrada)} = ${literal(vetor.canonico)} as texto,`)
-  console.log(`  octet_length(`)
-  console.log(`${chamada(vetor.entrada)}`)
-  console.log(`  ) = ${vetor.bytes} as bytes,`)
-  console.log(`  encode(digest(`)
-  console.log(`${chamada(vetor.entrada)}`)
-  console.log(`  , 'sha256'), 'hex') = ${literal(vetor.sha256)} as hash;`)
-  console.log('')
-}
-
-console.log('-- ---- os doze inválidos: o MESMO motivo do lado TypeScript ----------')
-console.log('-- `romaneio_retorno_validar` devolve o motivo; `_canonico` levanta.')
-console.log('-- O motivo faz parte do contrato: recusar pelo motivo errado é tão')
-console.log('-- divergente quanto aceitar.')
-for (const vetor of VETORES_INVALIDOS) {
-  const rotulo = vetor.nome.split(' —')[0]
-  const e = vetor.entrada as { saidaDocumentHash: string }
-  console.log(`select ${literal(rotulo)} as vetor,`)
-  console.log(`  public.romaneio_retorno_validar(`)
-  console.log(`    ${literal(e.saidaDocumentHash)},`)
-  console.log(`    ${comoJsonb(vetor.entrada)}`)
-  console.log(`  ) = ${literal(vetor.motivo)} as motivo_confere;`)
-}
+console.log('-- E o resumo, se quiser só o número:')
+console.log('--   ... select count(*) filter (where ok) as passaram,')
+console.log('--              count(*) filter (where not ok) as falharam from conferencia;')
