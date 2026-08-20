@@ -38,6 +38,18 @@
 // assinatura. Dá pra rodar em cima de dado de produção sem consequência.
 // ---------------------------------------------------------------------
 
+// ---------------------------------------------------------------------
+// TUDO DENTRO DE UM BLOCO, e não é estética.
+//
+// `const` de topo no console do Chrome PERSISTE entre colagens: rodar
+// este script duas vezes na mesma aba dava
+// "Identifier ... has already been declared" e nada rodava. Repetir um
+// teste é o uso normal, não a exceção.
+//
+// Com o bloco, cada colagem tem escopo próprio e pode ser repetida à
+// vontade sem F5.
+// ---------------------------------------------------------------------
+{
 const { supabase } = await import('/src/lib/supabase.ts')
 const { montarCanonicoRetorno, paraJsonbRetorno } = await import('/src/lib/canonicoRetorno.ts')
 const { uuidv7 } = await import('/src/lib/uuid.ts')
@@ -81,7 +93,30 @@ const escolhido = [...porRomaneio.values()].sort(
 )[0]
 
 const saida = escolhido.romaneio
-const ligacoes = escolhido.entregas.map((entrega_id) => ({ entrega_id }))
+
+// COMPLETA ATÉ TRÊS VALES COM ENTREGAS REAIS QUAISQUER, e isso é legítimo
+// aqui — não é fabricar dado pra o teste passar.
+//
+// Nenhum romaneio selado deste banco tem mais de um vale, então esperar
+// por dado que não existe deixaria o documento com VÁRIOS `v` sem nunca
+// atravessar o fio: a ordenação entre vales e o bloco `pr` convivendo com
+// vale sem pagamento ficariam cobertos só pelos vetores, dos dois lados
+// de dentro.
+//
+// `conferir_canonico_retorno` é PURA: reconstrói o DCRR1 e devolve, sem
+// validar pertencimento. Quem confere se o vale é daquela saída é
+// `selar_romaneio_retorno`, na etapa 2B — lá isso seria erro, aqui é o
+// ponto. O que este teste precisa que seja real são os UUID vindos do
+// banco e o texto atravessando as camadas, não a relação de negócio.
+const ids = [...escolhido.entregas]
+if (ids.length < 3) {
+  const { data: extras } = await supabase
+    .from('entregas')
+    .select('id')
+    .not('id', 'in', `(${ids.join(',')})`)
+    .limit(3 - ids.length)
+  for (const e of extras ?? []) ids.push(e.id)
+}
 
 // ---------------------------------------------------------------------
 // 2. UM CENÁRIO POR FORMA, e não um documento com N vales
@@ -112,7 +147,6 @@ const cabecalho = {
   motoboyId: corrida?.mototaxista_id ?? uuidv7(),
   responsavelId: user.id,
 }
-const ids = ligacoes.map((l) => l.entrega_id)
 
 const cenarios = [
   {
@@ -260,8 +294,10 @@ for (const cenario of cenarios) {
 // ---------------------------------------------------------------------
 console.log(
   `romaneio ${saida.numero} (o com mais vales dos ${porRomaneio.size} selados), ` +
-    `${ids.length} vale(s), ${cenarios.length} cenários` +
-    (ids.length > 1 ? ' — inclui documento com vários v' : ' — SEM cenário misto: nenhum romaneio tem 2+ vales')
+    `${ids.length} vale(s) no documento, ${cenarios.length} cenários` +
+    (ids.length > 1
+      ? ` — documento multi-vale exercitado`
+      : ` — SEM documento multi-vale: não achei entregas suficientes`)
 )
 console.table(linhas)
 
@@ -272,3 +308,4 @@ console.log(
     : '\nDIVERGIU — ver a coluna `diferenca` e o padrão dos três\n'
 )
 console.log('último canônico, pra conferir a olho:\n' + ultimoCanonico)
+}
