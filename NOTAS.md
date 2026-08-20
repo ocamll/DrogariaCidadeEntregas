@@ -2797,6 +2797,55 @@ ao que o Node reporta. E `bytes` virou critério separado do hash, a
 pedido do usuário — quando algo diverge, contagem de bytes dá
 diagnóstico muito melhor que "o hash deu outro".
 
+### O triângulo fechou
+
+```
+TypeScript  60/60 contra os vetores
+SQL         36/36 contra os MESMOS vetores
+```
+
+Os dois concordam com uma terceira referência escrita à mão antes de
+ambos — logo concordam entre si, e não porque um foi traduzido do outro.
+
+**Escrever o segundo gêmeo separado pagou duas vezes**, e as duas seriam
+invisíveis numa tradução:
+
+- JSON aceita `"valor_cents": "12345"` como STRING, e `->>` devolveria os
+  MESMOS BYTES que o número. Passaria no SQL, seria recusado no TS por
+  `Number.isInteger` — a divergência "TS rejeita, SQL aceita" que os
+  vetores inválidos existem pra fechar. A checagem virou de TIPO JSON.
+- Pior porque some sem erro: com `entrega_id` ausente, `lower(NULL)` é
+  NULL, a concatenação vira NULL, e **`array_to_string` descarta linha
+  nula em silêncio**. Um vale sumiria do documento assinado de um lado
+  só. `coalesce` em volta de cada `lower`, e o mesmo no dedupe, onde
+  `NULL = any(array)` é NULL e não false.
+
+### Dois defeitos meus no gerador do SQL, e o método que os deixou passar
+
+O gerador emitia **20 statements separados**, e o SQL Editor mostra só o
+último — 19 conferências rodavam e desapareciam. O usuário mandou o
+resultado do I012 e mais nada, o que era exatamente o sintoma. Virou uma
+consulta só, com `union all` num CTE.
+
+Aí o segundo: o laço punha `select` na frente de CADA conferência, quando
+só a primeira pode ser `select`. Erro de sintaxe em `E'V002'`.
+
+**O que deixou passar foi o método:** eu tinha conferido o começo e o fim
+do arquivo gerado, e o defeito estava no MEIO, na fronteira entre o
+primeiro vetor e o segundo. Ponta de arquivo não prova estrutura de
+arquivo. A conferência virou estrutural — 1 ramo com `select`, 35 com
+`union all select`, 36 no total, ordem dos rótulos, parênteses
+balanceados fora dos literais, CTE fechando num statement.
+
+E a correção não foi um contador no laço: foi separar O QUE É O RAMO de
+COMO OS RAMOS SE LIGAM. Concatenar SQL cegamente dentro de um laço é como
+esse erro nasce.
+
+Junto, uma terceira coisa: os inválidos comparavam com `=`. Se o SQL
+ACEITASSE um vetor inválido, `validar` devolve NULL e `NULL = 'motivo'` é
+NULL — a linha viria em BRANCO, não `false`. Falha que se apresenta como
+célula vazia é a pior forma de falha. Virou `is not distinct from`.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)

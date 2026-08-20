@@ -1444,9 +1444,10 @@ código enfileira `fechamento_corrida`.**
       vetores~~ — **feito** (`src/lib/canonicoRetorno.ts`), com as três
       responsabilidades separadas: validar, normalizar, serializar
    5. ~~canônico do retorno em SQL, conferido contra os MESMOS
-      vetores~~ — **escrito** (`20260819140000_canonico_retorno.sql`),
-      espelhando o aninhamento e a ordem de validação. Falta APLICAR e
-      rodar o SQL que `scripts/dcrr1-sql.spec.mts` gera
+      vetores~~ — **feito e conferido no banco em 2026-08-19**
+      (`20260819140000_canonico_retorno.sql`): **36 de 36**, ou seja os 8
+      vetores válidos batendo em texto, bytes e hash, e os 12 inválidos
+      recusados pelo mesmo motivo do lado TypeScript
    6. `canonico-retorno.spec.mts` e
       `conferir-canonico-retorno-no-console.js` (TS × SQL, dado real)
    7. `papel_no_momento` no INSERT da saída
@@ -1662,6 +1663,18 @@ notar que o canônico da SAÍDA tem só duas (`canonico.spec.mts` testa
 propriedades, `conferir-canonico-no-console.js` compara TS×SQL) — os
 golden vectors são melhoria sobre o que existe, e vale considerar
 retrofitá-los lá depois.
+
+**O triângulo fechou em 2026-08-19**: TS 60/60 contra os vetores, SQL
+36/36 contra os MESMOS vetores. Como os dois concordam com uma terceira
+referência escrita à mão antes de ambos, concordam entre si — e não por
+um ter sido traduzido do outro.
+
+**O que a etapa 6 ainda acrescenta, agora que isso está provado:** os
+vetores são sintéticos. Ela responde outra pergunta — *o transporte
+preserva o que os gêmeos concordam?* UUID de verdade, texto digitado por
+gente de verdade, e o caminho `supabase-js → PostgREST → jsonb`, que os
+vetores não exercitam porque rodam dos dois lados de dentro. É o mesmo
+papel que `conferir-canonico-no-console.js` cumpre pra saída.
 
 Fixtures obrigatórias: acentuação, Unicode fora do BMP, TAB, CRLF, LF,
 string vazia, null, `motivo = outro` com detalhe, detalhe com espaços nas
