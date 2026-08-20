@@ -48,28 +48,40 @@ const {
 if (!user) throw new Error('Faça login primeiro.')
 
 // ---------------------------------------------------------------------
-// 1. UM ROMANEIO DE SAÍDA REAL, e os vales REAIS dele
+// 1. O ROMANEIO DE SAÍDA REAL COM MAIS VALES, e os vales dele
 //
 // Não há romaneio de RETORNO ainda (a etapa 2B nem começou), então o
 // dado real disponível é o da saída. Serve: o que este teste exercita é
 // o transporte, e os ids e o texto vêm do banco do mesmo jeito.
 // ---------------------------------------------------------------------
-const { data: saida, error: erroSaida } = await supabase
-  .from('romaneios')
-  .select('id, numero, document_hash, corrida_id')
-  .eq('status', 'selado')
-  .order('recebido_em_servidor', { ascending: false })
-  .limit(1)
-  .maybeSingle()
-if (erroSaida) throw erroSaida
-if (!saida) throw new Error('Nenhum romaneio de saída selado no alcance da sua RLS.')
-
-const { data: ligacoes, error: erroLig } = await supabase
+// ESCOLHE O ROMANEIO COM MAIS VALES, não o mais recente.
+//
+// A versão anterior pegava o mais recente e caiu num de UM vale só.
+// Todos os cenários rodaram com um `v` no documento, então nunca
+// atravessou o fio um documento com VÁRIOS vales — nem a ordenação entre
+// eles, nem o bloco `pr` convivendo com vales sem pagamento.
+//
+// "Mais recente" é conveniência; "mais vales" é o que este teste precisa.
+const { data: todas, error: erroLig } = await supabase
   .from('romaneio_entregas')
-  .select('entrega_id, entregas(numero_vale, cliente_nome)')
-  .eq('romaneio_id', saida.id)
+  .select('entrega_id, romaneios!inner(id, numero, document_hash, corrida_id, status)')
+  .eq('romaneios.status', 'selado')
 if (erroLig) throw erroLig
-if (!ligacoes?.length) throw new Error('Romaneio sem vales.')
+if (!todas?.length) throw new Error('Nenhum romaneio de saída selado no alcance da sua RLS.')
+
+const porRomaneio = new Map()
+for (const lig of todas) {
+  const r = lig.romaneios
+  const grupo = porRomaneio.get(r.id) ?? { romaneio: r, entregas: [] }
+  grupo.entregas.push(lig.entrega_id)
+  porRomaneio.set(r.id, grupo)
+}
+const escolhido = [...porRomaneio.values()].sort(
+  (a, b) => b.entregas.length - a.entregas.length
+)[0]
+
+const saida = escolhido.romaneio
+const ligacoes = escolhido.entregas.map((entrega_id) => ({ entrega_id }))
 
 // ---------------------------------------------------------------------
 // 2. UM CENÁRIO POR FORMA, e não um documento com N vales
@@ -246,7 +258,11 @@ for (const cenario of cenarios) {
 // divergirem, é codificação e não conteúdo; se os três divergirem, o
 // input chegou diferente ao servidor.
 // ---------------------------------------------------------------------
-console.log(`romaneio ${saida.numero}, ${ids.length} vale(s), ${cenarios.length} cenários`)
+console.log(
+  `romaneio ${saida.numero} (o com mais vales dos ${porRomaneio.size} selados), ` +
+    `${ids.length} vale(s), ${cenarios.length} cenários` +
+    (ids.length > 1 ? ' — inclui documento com vários v' : ' — SEM cenário misto: nenhum romaneio tem 2+ vales')
+)
 console.table(linhas)
 
 const todosOk = linhas.every((l) => l.texto && l.bytes && l.hash)
