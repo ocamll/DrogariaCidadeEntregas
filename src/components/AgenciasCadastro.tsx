@@ -19,6 +19,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Carregando, EmAndamento } from '@/components/EmAndamento'
 
 export function AgenciasCadastro({ profile }: { profile: AuthProfile }) {
   const { data, isLoading, isError, error } = useAgenciasCadastro()
@@ -43,7 +44,7 @@ export function AgenciasCadastro({ profile }: { profile: AuthProfile }) {
         <Button onClick={abrirNova}>Nova agência</Button>
       </div>
 
-      {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
+      {isLoading && <Carregando />}
       {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
       {!isLoading && !isError && data?.length === 0 && (
         <p className="text-sm text-muted-foreground">Nenhuma agência cadastrada ainda.</p>
@@ -205,7 +206,7 @@ function AgenciaFormDialog({
 
         <DialogFooter>
           <Button onClick={handleSalvar} disabled={salvar.isPending}>
-            {salvar.isPending ? 'Salvando…' : 'Salvar'}
+            {salvar.isPending ? <EmAndamento>Salvando</EmAndamento> : 'Salvar'}
           </Button>
         </DialogFooter>
       </DialogContent>

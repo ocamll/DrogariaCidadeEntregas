@@ -1,4 +1,5 @@
 import { Button } from '@/components/ui/button'
+import { EmAndamento } from '@/components/EmAndamento'
 
 // Quantos números mostrar de cada lado da página atual. Com meses de
 // vales a lista passa de 100 páginas — mostrar todas viraria uma parede
@@ -98,7 +99,12 @@ export function ResumoPagina({
   return (
     <p className="text-sm text-muted-foreground">
       Mostrando {primeiro}–{ultimo} de {total} vale{total > 1 ? 's' : ''}
-      {atualizando && ' · atualizando…'}
+      {atualizando && (
+        <>
+          {' · '}
+          <EmAndamento>atualizando</EmAndamento>
+        </>
+      )}
     </p>
   )
 }

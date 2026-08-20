@@ -27,6 +27,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Carregando, EmAndamento } from '@/components/EmAndamento'
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfile }) {
@@ -74,7 +75,7 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
         primeiro uso do cartão — ninguém aqui escolhe nem consegue ver.
       </p>
 
-      {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
+      {isLoading && <Carregando />}
       {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
       {credenciaisComErro && (
         <p className="text-sm text-destructive">
@@ -356,7 +357,7 @@ function CredencialEmitidaDialog({
               />
             </div>
           ) : (
-            <p className="text-xs">Gerando…</p>
+            <Carregando texto="Gerando" className="text-xs" />
           )}
 
           <div className="flex flex-col gap-1 text-sm">
@@ -398,7 +399,7 @@ function CredencialEmitidaDialog({
             Baixar verso
           </Button>
           <Button onClick={() => void baixarPdf()} disabled={!gerada || ocupado}>
-            {ocupado ? 'Gerando PDF…' : 'Baixar PDF'}
+            {ocupado ? <EmAndamento>Gerando PDF</EmAndamento> : 'Baixar PDF'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -452,7 +453,7 @@ function ConfirmarAcaoDialog({
             disabled={pendente}
             onClick={() => void onConfirmar()}
           >
-            {pendente ? 'Aplicando…' : acao === 'revogar' ? 'Revogar' : 'Redefinir'}
+            {pendente ? <EmAndamento>Aplicando</EmAndamento> : acao === 'revogar' ? 'Revogar' : 'Redefinir'}
           </Button>
         </DialogFooter>
       </DialogContent>

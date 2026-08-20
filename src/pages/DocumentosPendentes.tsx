@@ -22,6 +22,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Carregando, EmAndamento } from '@/components/EmAndamento'
 
 function formatarData(iso: string): string {
   return new Date(iso).toLocaleDateString('pt-BR')
@@ -119,7 +120,7 @@ function NaoVoltouDialog({
             Cancelar
           </Button>
           <Button onClick={confirmar} disabled={salvando}>
-            {salvando ? 'Registrando…' : 'Registrar ocorrência'}
+            {salvando ? <EmAndamento>Registrando</EmAndamento> : 'Registrar ocorrência'}
           </Button>
         </DialogFooter>
       </DialogContent>
@@ -231,7 +232,7 @@ function DocumentosConvenio({ profile }: { profile: AuthProfile }) {
   const marcarRecebido = useMarcarDocumentoConvenioRecebido()
   const naoVoltou = useNaoVoltou(profile, useNotificarDocumentoConvenio())
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Carregando…</p>
+  if (isLoading) return <Carregando />
   if (isError) return <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>
   if (!data || data.itens.length === 0) {
     return <p className="text-sm text-muted-foreground">Nenhum documento de convênio pendente.</p>
@@ -276,7 +277,7 @@ function ReceitasPendentes({ profile }: { profile: AuthProfile }) {
   const marcarRecebida = useMarcarReceitaRecebida()
   const naoVoltou = useNaoVoltou(profile, useNotificarFaltaReceita())
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Carregando…</p>
+  if (isLoading) return <Carregando />
   if (isError) return <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>
   if (!data || data.itens.length === 0) {
     return <p className="text-sm text-muted-foreground">Nenhuma receita pendente de devolução.</p>

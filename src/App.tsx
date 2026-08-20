@@ -3,11 +3,12 @@ import { Login } from '@/pages/Login'
 import { Painel } from '@/pages/Painel'
 import { AppLayout } from '@/components/AppLayout'
 import { Button } from '@/components/ui/button'
+import { Carregando } from '@/components/EmAndamento'
 
 function LoadingScreen() {
   return (
     <div className="flex min-h-svh items-center justify-center">
-      <p className="text-muted-foreground">Carregando…</p>
+      <Carregando className="text-base" />
     </div>
   )
 }

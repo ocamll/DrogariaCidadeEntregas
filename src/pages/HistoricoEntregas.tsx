@@ -13,6 +13,7 @@ import { Paginacao, ResumoPagina } from '@/components/Paginacao'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
+import { Carregando } from '@/components/EmAndamento'
 
 const SELECT_CLASSNAME =
   'h-9 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -147,7 +148,7 @@ export function HistoricoEntregas({ profile }: { profile: AuthProfile }) {
         </Button>
       </div>
 
-      {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
+      {isLoading && <Carregando />}
       {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
       {!isLoading && !isError && (
         <>

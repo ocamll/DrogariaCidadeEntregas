@@ -13,6 +13,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { EmAndamento } from '@/components/EmAndamento'
 
 export function CancelarValeDialog({
   entregaId,
@@ -91,7 +92,7 @@ export function CancelarValeDialog({
             Voltar
           </Button>
           <Button variant="destructive" onClick={handleConfirmar} disabled={cancelar.isPending}>
-            {cancelar.isPending ? 'Cancelando…' : 'Cancelar vale'}
+            {cancelar.isPending ? <EmAndamento>Cancelando</EmAndamento> : 'Cancelar vale'}
           </Button>
         </DialogFooter>
       </DialogContent>

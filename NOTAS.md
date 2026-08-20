@@ -31,7 +31,8 @@ signatário interno em mais quatro lugares (dois na página, dois no PDF) e
 os relógios do romaneio, que trocavam de coluna conforme o romaneio. O
 **item 62** conserta o aviso "— sincronizando…" das telas de lançamento,
 que nunca era apagado e dizia a mesma coisa tendo a operação subido ou
-falhado.
+falhado; o **63** estende as reticências animadas aos outros 41 rótulos
+de processo do app.
 
 **O que NÃO existe ainda, e é fácil supor errado:** não há deploy — nem
 conta na Cloudflare, nem site no ar. Tudo rodou em localhost, numa
@@ -3376,6 +3377,91 @@ desfechos, e o caso 10 confere que a fila voltou exatamente ao que era.
 Dez de dez em três execuções seguidas, aba limpa, console sem erro.
 `tsc -b`, lint e build limpos; o CSS sai no bundle de produção com os
 dois keyframes.
+
+## 63. As reticências no resto do app
+
+Continuação direta do item 62, a pedido: *"sim, aplica nos outros
+também"*. Quarenta e um rótulos de processo passaram a ter reticências
+animadas.
+
+### A regra que separa o que anima do que não anima
+
+Não é "todo `…` anima". Ficou escrita em `EmAndamento.tsx` e no
+CLAUDE.md:
+
+```
+reticência de PROCESSO     → anima   (Carregando, Salvando, Enviando…)
+reticência de TRUNCAMENTO
+       ou de PLACEHOLDER   → parada  (1 … 5 6 … 84, hash abc123…,
+                                      Selecione…, Motivo…)
+```
+
+Movimento onde o `…` quer dizer "tem mais coisa" ou "escolha algo" seria
+mentira — a mesma família de defeito que o item 62 corrigiu, com o sinal
+trocado. Sobraram 19 reticências paradas no `src/`, e conferi uma a uma:
+todas são truncamento de hash, corte de nome longo na credencial, vão da
+paginação, placeholder de select, ou comentário.
+
+### Três componentes, e cada um resolve um problema diferente
+
+`src/components/EmAndamento.tsx` (o `Reticencias.tsx` do item 62 virou
+este, pra os três morarem juntos):
+
+- **`<Reticencias />`** — os três pontos, o primitivo.
+- **`<Carregando />`** — o parágrafo. Existia como
+  `<p className="text-sm text-muted-foreground">Carregando…</p>` copiado
+  à mão em **19 lugares**, que é exatamente por que ele ia sair de 19
+  lugares na hora de animar. Aceita `texto` (o "Carregando filiais" da
+  transferência) e `className` (o `p-4` do romaneio, o `text-base` da
+  tela de carregamento inicial).
+- **`<EmAndamento>Salvando</EmAndamento>`** — o rótulo de botão, e o
+  `<span>` dele não é supérfluo.
+
+**O `<span>` é a única parte com risco real, e ela foi medida.** O
+`Button` do shadcn é `inline-flex` com `gap-1.5`: `<Reticencias />` solto
+lá dentro vira um item de flex separado do texto e ganha 6px de
+distância — "Salvando   . . .". Envolvidos num `<span>`, são um item só.
+O caso 11 do script monta **as duas formas lado a lado** e mede:
+
+```
+com <EmAndamento>   0px   ← colado
+solto              -6px   ← o gap-1.5 do botão, exatamente
+```
+
+Sem montar a forma errada junto, a certa passaria sem provar nada — o
+método do §22 e do §49.
+
+### O que a aplicação em massa custou
+
+Foram 41 substituições em 21 arquivos, feitas por script com contagem
+exata (cada padrão tinha que casar N vezes, senão parava). O que o script
+errou foi o **import**: ele inseria depois da última linha começando com
+`import `, e num `import {` multi-linha isso cai DENTRO do bloco. Nove
+arquivos ficaram com um import no meio de outro.
+
+O conserto expôs uma segunda camada: **três desses arquivos são CRLF** e
+a linha inserida era LF pura, então o `import {` anterior era na verdade
+`"import {\r"` e o corretor não o reconhecia. Ficou anotado porque volta
+a morder: nesta pasta convivem arquivos CRLF e LF, e comparação de linha
+em script precisa tolerar o `\r`. Conferido no fim que **nenhum arquivo
+ficou com fim de linha misto**.
+
+### Uma advertência de lint que apontou pra um lugar melhor
+
+`gravacaoEnfileirada` morava em `StatusDeGravacao.tsx`, e exportar
+função não-componente ali desliga o Fast Refresh do arquivo — justamente
+o que mais se mexe quando se ajusta texto de tela, numa máquina onde
+módulo velho em memória já custou um diagnóstico (§41). Ela e o tipo
+`Gravacao` foram pra `filaOffline.ts`, que é de quem eles falam. O
+componente reexporta o tipo, então nenhum call site mudou de forma. Lint
+voltou às 8 advertências pré-existentes.
+
+### Verificação
+
+Os casos 11 e 12 entraram no
+`scripts/conferir-aviso-de-sincronizacao.js` (agora 12 casos), e o
+`conferir-romaneio-na-tela.js` do item 61 foi rodado de novo — os dois
+verdes, em aba limpa, console sem erro. `tsc -b`, lint e build limpos.
 
 ## Commits desta sessão
 

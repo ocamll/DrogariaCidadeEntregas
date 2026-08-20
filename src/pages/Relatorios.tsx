@@ -27,6 +27,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Carregando, EmAndamento } from '@/components/EmAndamento'
 
 // mesmo estilo dos outros selects nativos do app (Fechamento, Histórico)
 const SELECT_CLASSNAME =
@@ -273,16 +274,16 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
             e o relatório precisam contar a mesma história, senão vira duas
             versões do acerto e alguém tem que decidir em qual acreditar. */}
         <Button variant="outline" onClick={() => exportar('xlsx')} disabled={!data || !!exportando}>
-          {exportando === 'xlsx' ? 'Gerando…' : 'Exportar .xlsx'}
+          {exportando === 'xlsx' ? <EmAndamento>Gerando</EmAndamento> : 'Exportar .xlsx'}
         </Button>
         <Button variant="outline" onClick={() => exportar('pdf')} disabled={!data || !!exportando}>
-          {exportando === 'pdf' ? 'Gerando…' : 'Exportar PDF'}
+          {exportando === 'pdf' ? <EmAndamento>Gerando</EmAndamento> : 'Exportar PDF'}
         </Button>
         {/* só aparece se o ambiente tem o Client ID configurado — sem ele
             o botão existiria só pra dar erro ao ser clicado */}
         {driveConfigurado() && (
           <Button variant="outline" onClick={enviarParaDrive} disabled={!data || !!exportando}>
-            {exportando === 'drive' ? 'Enviando…' : 'Enviar ao Drive'}
+            {exportando === 'drive' ? <EmAndamento>Enviando</EmAndamento> : 'Enviar ao Drive'}
           </Button>
         )}
       </div>
@@ -290,7 +291,7 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
       {erroExport && <p className="text-sm text-destructive">{erroExport}</p>}
       {enviadoAoDrive && <p className="text-sm text-foreground/70">{enviadoAoDrive}</p>}
 
-      {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
+      {isLoading && <Carregando />}
       {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
 
       {data && (

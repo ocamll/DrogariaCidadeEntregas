@@ -24,6 +24,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
+import { Carregando, EmAndamento } from '@/components/EmAndamento'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -54,7 +55,7 @@ export function UsuariosCadastro({ profile }: { profile: AuthProfile }) {
         <Button onClick={abrirNovo}>Novo usuário</Button>
       </div>
 
-      {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
+      {isLoading && <Carregando />}
       {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
       {erroToggle && <p className="text-sm text-destructive">{erroToggle}</p>}
 
@@ -290,7 +291,7 @@ function UsuarioFormDialog({
 
         <DialogFooter>
           <Button onClick={handleSalvar} disabled={salvando}>
-            {salvando ? 'Salvando…' : 'Salvar'}
+            {salvando ? <EmAndamento>Salvando</EmAndamento> : 'Salvar'}
           </Button>
         </DialogFooter>
       </DialogContent>

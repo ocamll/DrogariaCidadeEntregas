@@ -15,6 +15,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Carregando } from '@/components/EmAndamento'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -126,7 +127,7 @@ export function RegistroAuditoria({ profile }: { profile: AuthProfile }) {
           )}
         </div>
 
-        {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
+        {isLoading && <Carregando />}
         {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
         {!isLoading && !isError && eventos.length === 0 && (
           <p className="text-sm text-muted-foreground">Nenhum evento no período.</p>

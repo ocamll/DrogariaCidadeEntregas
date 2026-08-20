@@ -2327,6 +2327,16 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   ser consultada **pelo id** com carimbo de qual id é — ler a fila
   inteira e procurar na lista conclui "sincronizada" no instante entre o
   `put` e a liveQuery reconsultar.
+- **Reticência de PROCESSO anima; de truncamento ou placeholder, não.**
+  `Carregando`, `Salvando`, `Enviando`, `Gerando` levam `…` animado, via
+  `src/components/EmAndamento.tsx` — `<Carregando />` pro parágrafo de
+  lista/tela, `<EmAndamento>Salvando</EmAndamento>` pro rótulo de botão,
+  `<Reticencias />` pro resto. Já `1 … 5 6 … 84` da paginação,
+  `hash abc123…` e `Selecione…` ficam parados: ali o `…` quer dizer "tem
+  mais coisa" ou "escolha algo", e movimento seria mentira. **O `<span>`
+  do `<EmAndamento>` não é supérfluo** — o `Button` é `inline-flex` com
+  `gap-1.5`, e as reticências soltas lá dentro viram outro item de flex,
+  com 6px de vão entre a palavra e os pontos (medido).
 - **`prefers-reduced-motion` tira o deslocamento, não o sinal.** As
   reticências de "sincronizando" pulsam porque o movimento é a
   informação: parado, o aviso volta a ser indistinguível de frase

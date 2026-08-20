@@ -1,7 +1,7 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
 import type { AuthProfile } from '@/data/auth'
 import type { NovaEntrega } from '@/data/entregas'
-import { enfileirarOperacao, donoDaFila } from '@/data/filaOffline'
+import { enfileirarOperacao, donoDaFila, gravacaoEnfileirada } from '@/data/filaOffline'
 import { FORMA_PAGAMENTO_OPTIONS, type FormaPagamento } from '@/data/pagamentos'
 import { useConveniosCadastro } from '@/data/cadastros'
 import { uuidv7 } from '@/lib/uuid'
@@ -12,11 +12,7 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import {
-  StatusDeGravacao,
-  gravacaoEnfileirada,
-  type Gravacao,
-} from '@/components/StatusDeGravacao'
+import { StatusDeGravacao, type Gravacao } from '@/components/StatusDeGravacao'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'

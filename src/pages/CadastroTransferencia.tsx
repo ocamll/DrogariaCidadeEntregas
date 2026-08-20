@@ -1,18 +1,15 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
 import type { AuthProfile } from '@/data/auth'
 import type { NovaTransferencia } from '@/data/entregas'
-import { enfileirarOperacao, donoDaFila } from '@/data/filaOffline'
+import { enfileirarOperacao, donoDaFila, gravacaoEnfileirada } from '@/data/filaOffline'
 import { useLojas, useTarifaDaLoja } from '@/data/lojas'
 import { formatBRL } from '@/lib/money'
 import { uuidv7 } from '@/lib/uuid'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
-import {
-  StatusDeGravacao,
-  gravacaoEnfileirada,
-  type Gravacao,
-} from '@/components/StatusDeGravacao'
+import { StatusDeGravacao, type Gravacao } from '@/components/StatusDeGravacao'
+import { Carregando } from '@/components/EmAndamento'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -133,7 +130,7 @@ function CadastroTransferenciaForm({
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label htmlFor="loja-origem">Filial que tem o produto</Label>
-              {isLoading && <p className="text-sm text-muted-foreground">Carregando filiais…</p>}
+              {isLoading && <Carregando texto="Carregando filiais" />}
               {isError && (
                 <p className="text-sm text-destructive">Não consegui carregar as filiais.</p>
               )}

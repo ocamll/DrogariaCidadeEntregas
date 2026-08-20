@@ -22,6 +22,7 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
+import { Carregando, EmAndamento } from '@/components/EmAndamento'
 
 const SELECT_CLASSNAME =
   'h-9 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -108,7 +109,7 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
         vindo do Trier. O que esta tela responde é <strong>o que, da tele, explica uma diferença</strong>.
       </p>
 
-      {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
+      {isLoading && <Carregando />}
       {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
 
       {fechamento && (
@@ -186,7 +187,7 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
 
               <div className="flex items-center gap-3">
                 <Button onClick={handleConferir} disabled={conferir.isPending || fechamento.pendentes === 0}>
-                  {conferir.isPending ? 'Marcando…' : 'Marcar dia como conferido'}
+                  {conferir.isPending ? <EmAndamento>Marcando</EmAndamento> : 'Marcar dia como conferido'}
                 </Button>
                 {aviso && <span className="text-sm text-muted-foreground">{aviso}</span>}
               </div>

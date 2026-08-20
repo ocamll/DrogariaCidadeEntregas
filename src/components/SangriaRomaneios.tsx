@@ -4,6 +4,7 @@ import { driveConfigurado, prepararDrive } from '@/lib/googleDrive'
 import { dataLocal } from '@/lib/datas'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
+import { Carregando, EmAndamento } from '@/components/EmAndamento'
 
 // A sangria dos romaneios: no fim do dia, uma passada que arquiva no
 // Drive tudo que saiu.
@@ -135,7 +136,7 @@ export function SangriaRomaneios({ data, lojaId }: { data: string; lojaId: strin
           não duplica: um arquivo que já está lá é substituído.
         </p>
 
-        {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
+        {isLoading && <Carregando />}
         {isError && (
           <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>
         )}
@@ -150,9 +151,13 @@ export function SangriaRomaneios({ data, lojaId }: { data: string; lojaId: strin
         {romaneios && (
           <div className="flex flex-wrap items-center gap-3">
             <Button onClick={() => void enviar()} disabled={enviando || quantos === 0}>
-              {progresso
-                ? `Enviando ${progresso.feitos} de ${progresso.total}…`
-                : 'Enviar ao Drive'}
+              {progresso ? (
+                <EmAndamento>
+                  Enviando {progresso.feitos} de {progresso.total}
+                </EmAndamento>
+              ) : (
+                'Enviar ao Drive'
+              )}
             </Button>
             <span className="text-sm text-foreground/70">
               {quantos === 0

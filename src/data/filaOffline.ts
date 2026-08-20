@@ -300,6 +300,44 @@ export function useFilaOperacoesPendentes(): ItemFilaOperacao[] {
 }
 
 /**
+ * Uma operação recém-enfileirada, do jeito que a TELA precisa acompanhar
+ * — o fato já consumado mais a promessa que entrega a chave da fila.
+ *
+ * Mora aqui, e não no componente que a desenha, por dois motivos: ela
+ * descreve uma operação da fila (o assunto deste arquivo), e deixar o
+ * construtor junto do componente fazia o arquivo dele exportar coisa que
+ * não é componente — o que desliga o Fast Refresh dele, justamente o
+ * arquivo que mais se mexe quando se ajusta texto de tela. Numa máquina
+ * onde módulo velho em memória já custou um diagnóstico (§41), não vale.
+ */
+export type Gravacao = {
+  /** O fato, sem cláusula de sincronização: "Entrega de José salva". */
+  texto: string
+  /** O que `enfileirarOperacao` devolve. A promessa resolve depois do
+   *  `put`, então até lá a resposta honesta é "sincronizando". */
+  enfileirando: Promise<string>
+}
+
+/**
+ * Monta a `Gravacao`. Use SEMPRE isto, nunca o objeto literal.
+ *
+ * O `catch` vazio parece decorativo e não é. Quem trata a rejeição de
+ * verdade é o efeito dentro do `StatusDeGravacao` — mas efeito roda num
+ * tick posterior, e até lá o navegador já decidiu que a promessa é uma
+ * `Uncaught (in promise)` e despejou o erro no console. Anexar uma
+ * reação AQUI, no mesmo tick em que a promessa nasce, marca-a como
+ * tratada sem tirar nada de quem trata depois: `.catch()` registra uma
+ * reação sobre a original, não a consome.
+ *
+ * Medido: sem esta linha, cada falha de gravação suja o console com um
+ * erro não tratado, ao lado da mensagem correta na tela.
+ */
+export function gravacaoEnfileirada(texto: string, enfileirando: Promise<string>): Gravacao {
+  void enfileirando.catch(() => {})
+  return { texto, enfileirando }
+}
+
+/**
  * O que aconteceu com UMA operação, pela chave de fila que
  * `enfileirarOperacao` devolveu.
  *

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
-import { useSituacaoDaOperacao } from '@/data/filaOffline'
-import { Reticencias } from '@/components/Reticencias'
+import { useSituacaoDaOperacao, type Gravacao } from '@/data/filaOffline'
+import { Reticencias } from '@/components/EmAndamento'
+
+export type { Gravacao }
 
 /**
  * O aviso que aparece depois de a tela enfileirar alguma coisa.
@@ -29,33 +31,6 @@ import { Reticencias } from '@/components/Reticencias'
  * certo: é verdade, e o indicador do cabeçalho conta quantas estão
  * paradas.
  */
-export type Gravacao = {
-  /** O fato, sem cláusula de sincronização: "Entrega de José salva". */
-  texto: string
-  /** O que `enfileirarOperacao` devolve. A promessa resolve depois do
-   *  `put`, então até lá a resposta honesta é "sincronizando". */
-  enfileirando: Promise<string>
-}
-
-/**
- * Monta a `Gravacao`. Use SEMPRE isto, nunca o objeto literal.
- *
- * O `catch` vazio parece decorativo e não é. Quem trata a rejeição de
- * verdade é o efeito lá embaixo — mas efeito roda num tick posterior, e
- * até lá o navegador já decidiu que a promessa é uma
- * `Uncaught (in promise)` e despejou o erro no console. Anexar uma
- * reação AQUI, no mesmo tick em que a promessa nasce, marca-a como
- * tratada sem tirar nada de quem trata depois: `.catch()` registra uma
- * reação sobre a original, não a consome.
- *
- * Medido: sem esta linha, cada falha de gravação suja o console com um
- * erro não tratado, ao lado da mensagem correta na tela.
- */
-export function gravacaoEnfileirada(texto: string, enfileirando: Promise<string>): Gravacao {
-  void enfileirando.catch(() => {})
-  return { texto, enfileirando }
-}
-
 /** Quanto o "sincronizada" fica no ar antes de o aviso sumir. */
 const MS_ATE_SUMIR = 2_500
 

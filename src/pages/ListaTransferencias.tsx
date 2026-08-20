@@ -3,6 +3,7 @@ import type { AuthProfile } from '@/data/auth'
 import { useTransferencias, useEntregasRealtime, TAMANHO_PAGINA_HOJE } from '@/data/entregas'
 import { EntregasTable } from '@/components/EntregasTable'
 import { Paginacao, ResumoPagina } from '@/components/Paginacao'
+import { Carregando } from '@/components/EmAndamento'
 
 // Aba própria das transferências entre filiais. Diferente de "Hoje", aqui
 // não há corte por dia: o volume é baixo (uma filial pede produto pra
@@ -15,7 +16,7 @@ export function ListaTransferencias({ profile }: { profile: AuthProfile }) {
   // ['transferencias'] junto, então a página aberta se atualiza sozinha.
   useEntregasRealtime()
 
-  if (isLoading) return <p className="text-sm text-muted-foreground">Carregando…</p>
+  if (isLoading) return <Carregando />
   if (isError) return <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>
 
   const total = data?.total ?? 0

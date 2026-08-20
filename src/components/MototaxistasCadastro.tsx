@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Carregando, EmAndamento } from '@/components/EmAndamento'
 
 export function MototaxistasCadastro({ profile }: { profile: AuthProfile }) {
   const { data, isLoading, isError, error } = useMototaxistasCadastro()
@@ -55,7 +56,7 @@ export function MototaxistasCadastro({ profile }: { profile: AuthProfile }) {
         </p>
       )}
 
-      {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
+      {isLoading && <Carregando />}
       {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
       {!isLoading && !isError && data?.length === 0 && (
         <p className="text-sm text-muted-foreground">Nenhum motoboy cadastrado ainda.</p>
@@ -207,7 +208,7 @@ function MototaxistaFormDialog({
 
         <DialogFooter>
           <Button onClick={handleSalvar} disabled={salvar.isPending}>
-            {salvar.isPending ? 'Salvando…' : 'Salvar'}
+            {salvar.isPending ? <EmAndamento>Salvando</EmAndamento> : 'Salvar'}
           </Button>
         </DialogFooter>
       </DialogContent>

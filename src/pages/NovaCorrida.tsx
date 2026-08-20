@@ -39,6 +39,7 @@ import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
+import { Carregando, EmAndamento } from '@/components/EmAndamento'
 
 export function NovaCorrida({ profile, onVoltar }: { profile: AuthProfile; onVoltar: () => void }) {
   if (!profile.lojaId) {
@@ -530,7 +531,7 @@ function NovaCorridaFluxo({
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
           <Secao numero={1} titulo="Vales">
-            {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
+            {isLoading && <Carregando />}
             {!isLoading && disponiveis.length === 0 && (
               // "Nenhum vale pendente" é uma AFIRMAÇÃO sobre o estoque de
               // vales, e sem lista carregada ela é mentira. Sem rede e sem
@@ -677,7 +678,7 @@ function NovaCorridaFluxo({
                           disabled={!!pinAceitavel(pin) || ocupado === 'conferindo'}
                           onClick={() => void handleConferirPin()}
                         >
-                          {ocupado === 'conferindo' ? 'Conferindo…' : 'Confirmar identidade'}
+                          {ocupado === 'conferindo' ? <EmAndamento>Conferindo</EmAndamento> : 'Confirmar identidade'}
                         </Button>
                       ) : (
                         <Button
@@ -742,7 +743,7 @@ function NovaCorridaFluxo({
             </div>
             <Button onClick={() => void handleConfirmar()} disabled={!podeConfirmar || !!ocupado}>
               {ocupado === 'confirmar'
-                ? 'Registrando…'
+                ? <EmAndamento>Registrando</EmAndamento>
                 : online
                   ? 'Confirmar saída'
                   : 'Registrar saída offline'}

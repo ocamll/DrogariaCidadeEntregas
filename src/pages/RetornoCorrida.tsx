@@ -7,17 +7,14 @@ import {
   type FecharCorridaInput,
   type InsucessoMotivo,
 } from '@/data/corridas'
-import { enfileirarOperacao, donoDaFila } from '@/data/filaOffline'
+import { enfileirarOperacao, donoDaFila, gravacaoEnfileirada } from '@/data/filaOffline'
 import { uuidv7 } from '@/lib/uuid'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-import {
-  StatusDeGravacao,
-  gravacaoEnfileirada,
-  type Gravacao,
-} from '@/components/StatusDeGravacao'
+import { StatusDeGravacao, type Gravacao } from '@/components/StatusDeGravacao'
+import { Carregando } from '@/components/EmAndamento'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -54,7 +51,7 @@ export function RetornoCorrida({ profile, onVoltar }: { profile: AuthProfile; on
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3">
-            {isLoading && <p className="text-sm text-muted-foreground">Carregando…</p>}
+            {isLoading && <Carregando />}
             {isError && (
               <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>
             )}

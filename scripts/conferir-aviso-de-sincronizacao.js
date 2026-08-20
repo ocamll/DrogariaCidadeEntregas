@@ -51,9 +51,8 @@
   const React = (await importar(`/node_modules/.vite/deps/react.js?v=${v}`)).default
   const { createRoot } = (await importar(`/node_modules/.vite/deps/react-dom_client.js?v=${v}`))
     .default
-  const { StatusDeGravacao, gravacaoEnfileirada } = await import(
-    '/src/components/StatusDeGravacao.tsx'
-  )
+  const { StatusDeGravacao } = await import('/src/components/StatusDeGravacao.tsx')
+  const { gravacaoEnfileirada } = await import('/src/data/filaOffline.ts')
   const { db } = await import('/src/lib/db.ts')
 
   const ID_TESTE = 'conferencia-aviso-sincronizacao'
@@ -275,6 +274,74 @@
       testeNaoEhVacuo: redesenhos >= 2 && maiorIntervalo < 2500,
     }
     root3.unmount()
+    // ---------------------------------------------------------------
+    // 11: as reticências DENTRO de um Button
+    //
+    // O `Button` do shadcn é `inline-flex` com `gap-1.5`. Um
+    // `<Reticencias />` solto ali vira um item de flex separado do texto
+    // e ganha 6px de distância — "Salvando   . . ." em vez de
+    // "Salvando...". `<EmAndamento>` envolve os dois num `<span>` pra
+    // serem UM item. Aqui as duas formas são montadas lado a lado, senão
+    // a versão certa passaria sem provar que a errada falha.
+    // ---------------------------------------------------------------
+    const { Button } = await import('/src/components/ui/button.tsx')
+    const { EmAndamento, Reticencias } = await import('/src/components/EmAndamento.tsx')
+
+    const root4 = createRoot(host)
+    root4.render(
+      React.createElement(
+        'div',
+        null,
+        React.createElement(
+          Button,
+          { id: 'botao-certo' },
+          React.createElement(EmAndamento, null, 'Salvando')
+        ),
+        React.createElement(
+          Button,
+          { id: 'botao-ingenuo' },
+          'Salvando',
+          React.createElement(Reticencias, null)
+        )
+      )
+    )
+    await esperar(250)
+
+    const vaoDoBotao = (id) => {
+      const botao = host.querySelector('#' + id)
+      const primeiroPonto = botao.querySelector('.reticencia')
+      const alcance = document.createRange()
+      alcance.selectNodeContents(botao)
+      alcance.setEnd(primeiroPonto.parentElement, 0)
+      return Math.round(alcance.getBoundingClientRect().right - primeiroPonto.getBoundingClientRect().left)
+    }
+    resultado['11. sem vão dentro do Button'] = {
+      comEmAndamento: vaoDoBotao('botao-certo'),
+      semEnvolver: vaoDoBotao('botao-ingenuo'),
+      // O envolvido cola (0px); o solto herda o `gap-1.5` do botão.
+      envolvidoCola: Math.abs(vaoDoBotao('botao-certo')) < 1,
+      soltoAbreVao: Math.abs(vaoDoBotao('botao-ingenuo')) >= 4,
+    }
+
+    // 12: `<Carregando />` continua sendo o parágrafo de sempre, com as
+    // reticências animadas — 19 telas passaram a chamá-lo.
+    const { Carregando } = await import('/src/components/EmAndamento.tsx')
+    root4.render(
+      React.createElement(
+        'div',
+        null,
+        React.createElement(Carregando, null),
+        React.createElement(Carregando, { texto: 'Carregando filiais' })
+      )
+    )
+    await esperar(250)
+    const paragrafos = [...host.querySelectorAll('p')]
+    resultado['12. Carregando'] = {
+      textos: paragrafos.map((p) => p.innerText.replace(/\s+/g, ' ').trim()),
+      pontos: host.querySelectorAll('.reticencia').length,
+      classe: paragrafos[0].className,
+    }
+    root4.unmount()
   } finally {
     await db.filaOperacoes.delete(ID_TESTE)
     host.remove()

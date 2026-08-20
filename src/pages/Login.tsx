@@ -12,6 +12,7 @@ import {
   CardTitle,
 } from '@/components/ui/card'
 import { LOGO_URL } from '@/lib/marca'
+import { EmAndamento } from '@/components/EmAndamento'
 
 export function Login() {
   const [email, setEmail] = useState('')
@@ -63,7 +64,7 @@ export function Login() {
               <p className="text-sm text-destructive">E-mail ou senha inválidos.</p>
             )}
             <Button type="submit" disabled={mutation.isPending}>
-              {mutation.isPending ? 'Entrando…' : 'Entrar'}
+              {mutation.isPending ? <EmAndamento>Entrando</EmAndamento> : 'Entrar'}
             </Button>
           </form>
         </CardContent>

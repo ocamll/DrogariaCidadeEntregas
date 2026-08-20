@@ -11,6 +11,7 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
+import { Carregando, EmAndamento } from '@/components/EmAndamento'
 
 // O documento em si. Ele é a fonte da verdade da saída — o PDF, quando
 // existir, sai daqui e não o contrário.
@@ -134,7 +135,7 @@ export function Romaneio({
     }
   }
 
-  if (isLoading) return <p className="p-4 text-sm text-muted-foreground">Carregando…</p>
+  if (isLoading) return <Carregando className="p-4" />
   if (isError) {
     return <p className="p-4 text-sm text-destructive">Não consegui carregar: {error.message}</p>
   }
@@ -187,17 +188,17 @@ export function Romaneio({
             entra no acerto. */}
         <div className="flex flex-wrap gap-2">
           <Button variant="outline" disabled={!!ocupado} onClick={() => void baixar('farmacia')}>
-            {ocupado === 'farmacia' ? 'Gerando…' : 'PDF — via da farmácia'}
+            {ocupado === 'farmacia' ? <EmAndamento>Gerando</EmAndamento> : 'PDF — via da farmácia'}
           </Button>
           <Button variant="outline" disabled={!!ocupado} onClick={() => void baixar('agencia')}>
-            {ocupado === 'agencia' ? 'Gerando…' : 'PDF — via da agência'}
+            {ocupado === 'agencia' ? <EmAndamento>Gerando</EmAndamento> : 'PDF — via da agência'}
           </Button>
           {/* Sem VITE_GOOGLE_CLIENT_ID o botão não aparece: prometer envio
               num ambiente que não tem como autorizar seria a tela
               afirmando o que não sabe. */}
           {driveConfigurado() && (
             <Button variant="outline" disabled={!!ocupado} onClick={() => void enviarParaDrive()}>
-              {ocupado === 'drive' ? 'Enviando…' : 'Enviar ao Drive'}
+              {ocupado === 'drive' ? <EmAndamento>Enviando</EmAndamento> : 'Enviar ao Drive'}
             </Button>
           )}
         </div>
