@@ -1466,9 +1466,22 @@ código enfileira `fechamento_corrida`.**
       **PROVADO: `9 · 9 · 0`, idêntico ao baseline.** 36 camadas
       recomputadas depois da mudança, todas ainda verificando. Não é "li
       o código e não mudou": é medição no mesmo instrumento
-   10. fluxo E2E da saída: cartão → PIN → assinaturas → canônico →
-       hashes → selo. **Depende do usuário** (cartão e PIN de verdade), e
-       é o único item da 2A que sobra
+   10. ~~fluxo E2E da saída: cartão → PIN → assinaturas → canônico →
+       hashes → selo~~ — **feito em 2026-08-20**: `R-000013` selado com
+       `papel_no_momento = 'admin'` na assinatura do caixa, e o
+       verificador foi a **10 · 10 · 0**
+
+   **A 2A FECHOU.** E o `R-000013` verificando prova mais que o baseline
+   intacto: os nove antigos batendo mostram que nada existente foi
+   corrompido; o **novo** batendo mostra que a função reescrita produz
+   hashes que o verificador reproduz — e o verificador foi escrito a
+   partir da função ANTIGA. Fórmula alterada sem querer teria deixado os
+   nove velhos passando e só o novo divergindo.
+
+   A linha que parece estranha e está certa: `tipo_signatario = 'caixa'`
+   com `papel_no_momento = 'admin'`. O documento diz o slot estrutural (o
+   lado da farmácia) e o cargo real de quem assinou, separados. Era pra
+   isso que a coluna existia.
 3. **2B** — `selar_romaneio_retorno` transacional
 4. **2C** — fila offline: `romaneio_retorno`, envelope, `sync-romaneio`
 5. **2D** — tela: Retorno de Corrida vira o fluxo do documento

@@ -2913,6 +2913,38 @@ Na prática o único papel que dispara isso é `agencia`, que
 `profiles.papel` aceita desde o schema inicial e que não deveria estar
 selando saída nenhuma.
 
+### A 2A fechou — e o E2E prova mais que o baseline
+
+`R-000013` selado em 2026-08-20, pelo fluxo normal de Nova Corrida:
+cartão, PIN, as duas assinaturas de sempre. A assinatura do caixa veio
+com `papel_no_momento = 'admin'`; a do motoboy, nula, como tem que ser
+(ele não é um `profiles`). Verificador: **10 · 10 · 0**.
+
+**Vale entender por que este resultado é mais forte que o `9 · 9 · 0`.**
+Os nove antigos verificando provam que nada existente foi corrompido. O
+NOVO verificando prova outra coisa: que a função REESCRITA produz hashes
+que o verificador reproduz — e o verificador foi escrito a partir da
+função ANTIGA. Se eu tivesse mudado a fórmula sem perceber, os nove
+velhos continuariam batendo e só o `R-000013` divergiria.
+
+E materializou-se a linha que a decisão previu, e que parece errada pra
+quem lê o banco sem contexto:
+
+    tipo_signatario  = 'caixa'    ← o slot: o lado da farmácia
+    papel_no_momento = 'admin'    ← o cargo real de quem assinou
+
+Não é inconsistência. É a separação funcionando: o rótulo estrutural não
+afirma cargo, e o cargo tem coluna própria.
+
+**Uma confusão que a minha explicação causou, e vale registrar:** o
+usuário rodou o fluxo e estranhou que nada pedisse assinatura nova. Nada
+devia mesmo — a mudança do item 7 é invisível na tela, e o "E2E" é só a
+Nova Corrida de sempre. Eu tinha descrito o teste como se algo novo fosse
+acontecer, quando o que se testa é o contrário: que **nada** mudou pra
+quem opera, e que a coluna foi preenchida no servidor. Descrever teste de
+regressão como se fosse teste de funcionalidade manda a pessoa procurar o
+que não existe.
+
 ### Dois defeitos meus no gerador do SQL, e o método que os deixou passar
 
 O gerador emitia **20 statements separados**, e o SQL Editor mostra só o
@@ -3255,13 +3287,25 @@ ele exigia **já aconteceu, em 2026-08-19**, e a **etapa 1 (schema) já foi
 aplicada e conferida** — ver a migration
 `20260819120000_romaneio_de_retorno_schema.sql`.
 
-**O que vem agora é a etapa 2A, e ela é GATE.** Nenhuma linha de
-`selar_romaneio_retorno` antes de ela fechar. A ordem exata, o
-verificador de hash e as quatro regras dele estão no CLAUDE.md, seção
-"O Romaneio de Retorno". **Comece por lá, não por aqui.**
+**A etapa 2A FECHOU em 2026-08-20**, os dez itens. O gate está cumprido,
+e o que vem agora é a **2B — `selar_romaneio_retorno` transacional**,
+destravada. O canônico do retorno já está provado em três camadas:
+golden vectors escritos à mão, os dois gêmeos contra eles (TS 60/60, SQL
+36/36), e o transporte real (5 cenários). O desenho completo está no
+CLAUDE.md, seção "O Romaneio de Retorno". **Comece por lá, não por aqui.**
 
-O item que talvez surpreenda quem retomar: **a 2A começa por construir um
-verificador de hash dos romaneios de SAÍDA**, que não tem nada de retorno
+O que a 2A deixou pronto e a 2B usa:
+
+| | |
+|---|---|
+| `romaneio_retorno_canonico` / `_validar` | os bytes e as recusas, gêmeos do `canonicoRetorno.ts` |
+| `conferir_canonico_retorno` | read-only, pra perguntar "o que o servidor entendeu?" sem selar |
+| `verificar_romaneio` / `verificar_romaneios_selados` | o baseline, hoje **10 · 10 · 0** |
+| `papel_no_momento` | preenchido na saída desde o `R-000013` |
+| schema do retorno | `romaneios.tipo`, os dois índices parciais, a FK pra saída |
+
+O item que talvez surpreenda quem retomar: **a 2A começou por construir
+um verificador de hash dos romaneios de SAÍDA**, que não tem nada de retorno
 nele. Ele existe porque a 2A também acrescenta `papel_no_momento` ao
 INSERT da saída, e sem verificador "não mudou nada" seria leitura de
 código, não medição. De quebra fecha um buraco antigo: até aqui o projeto
