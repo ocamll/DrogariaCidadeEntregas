@@ -1457,7 +1457,9 @@ código enfileira `fechamento_corrida`.**
       `supabase-js → PostgREST → jsonb` preserva o input que o navegador
       assinou? Precisa da migration
       `20260819150000_conferir_canonico_retorno.sql`
-   7. `papel_no_momento` no INSERT da saída
+   7. `papel_no_momento` no INSERT da saída — **escrito**
+      (`20260819160000_papel_no_momento_na_saida.sql`), falta APLICAR. A
+      fórmula do hash não muda um byte, conferido por diff
    8. rodar o verificador **de novo**
    9. provar que nenhum hash existente mudou nem deixou de verificar
    10. fluxo E2E da saída: cartão → PIN → assinaturas → canônico →
