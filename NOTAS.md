@@ -3463,6 +3463,270 @@ Os casos 11 e 12 entraram no
 `conferir-romaneio-na-tela.js` do item 61 foi rodado de novo — os dois
 verdes, em aba limpa, console sem erro. `tsc -b`, lint e build limpos.
 
+## 64. Etapa 2B — e o defeito que ela achou no contrato congelado
+
+Sessão de 2026-08-20. Pedido: "vai para a etapa 2b". Antes da primeira
+linha da transação, lendo o que ela ia encostar, apareceu uma coisa que
+ela não podia ser construída por cima.
+
+### O domínio de `forma` do DCRR1 era o do schema inicial
+
+```
+schema inicial, 2026-08-06   dinheiro credito debito pix convenio vale outro
+migration 20260807123331     dinheiro credito debito pix convenio convcard crediario outro
+DCRR1 congelado, 19/08       dinheiro credito debito pix convenio vale outro   ← o de cima
+```
+
+A lista foi transcrita do arquivo errado, doze dias depois de o banco ter
+mudado. `vale` saiu ("não é usado, confundia com número do vale da
+entrega") e continuou no contrato; `convcard` e `crediario` entraram e
+não entraram nele.
+
+**As duas metades custavam caro, na mesma transação e no pior momento.**
+Um cliente pagando com cartão de convênio faria o canônico responder
+`forma_invalida` e o retorno não selaria — depois de colhidas as duas
+assinaturas, com o motoboy no balcão. E `vale` passaria pelo canônico pra
+morrer no INSERT em `pagamentos`, dentro do selo.
+
+O que torna isso inequívoco é que a **justificativa do próprio vetor
+I010**, escrita à mão junto com o contrato, já dizia qual era a intenção:
+*"O domínio é o CHECK de `pagamentos.forma`. Valor fora dele passaria
+pelo canônico e morreria no INSERT, dentro da transação do selo — depois
+de colhidas as duas assinaturas."*
+
+**E aqui está a lição que vale além deste caso.** Os três lugares
+concordavam — vetores, TS e SQL — porque os três copiaram o mesmo
+engano. Golden vector trava a IMPLEMENTAÇÃO contra a ESPECIFICAÇÃO; não
+trava a especificação estar certa sobre o banco. O triângulo de três
+referências, que a 2A montou justamente pra não depender de dois gêmeos
+concordarem, tinha o vértice de cima apontando pro lugar errado.
+
+O usuário escolheu alinhar ao banco e trouxe o fluxo real de cada forma:
+`convcard` é o cliente mandando os dados do cartão pra farmácia passar a
+compra — pagamento de verdade, e o documento tem que poder dizê-lo.
+`crediario` é a forma financeira **e** um papel que sai pra assinar.
+
+**A parte do papel ficou fora, por decisão dele, e o motivo é bom:**
+enfiar a custódia do carnê na linha `pr` faria o documento confundir "o
+dinheiro foi combinado" com "o papel voltou assinado". Fica pra um bloco
+`d` próprio, depois de levantado o fluxo (quem imprime, quem leva, quem
+assina, se volta na mesma corrida, o que acontece quando não volta) —
+e antes do primeiro retorno real ser selado, senão vira `DCRR2`. Isso
+revisa parcialmente a decisão de manter toda custódia de papel fora do
+retorno: o papel do crediário pertence ao ciclo da corrida, ao contrário
+da receita e do convênio, que voltam dias depois.
+
+Corrigido nos quatro lugares (os vetores, o `FORMAS` do spec deles, o
+gêmeo TS e uma migration nova pro gêmeo SQL — a `20260819140000` já foi
+aplicada e não se edita). Mais dois vetores válidos (V009 `convcard`,
+V010 `crediario`) e um inválido (I013, `vale` **não é mais** forma, pelo
+mesmo motivo dos casos `v2 não é mais lido` do parser do cartão).
+
+**Nenhum hash existente se moveu** — o diff dos vetores só ACRESCENTA
+linhas de `bytes`/`sha256`, e era isso que o usuário tinha pedido pra
+provar. E as contagens dos dois novos foram somadas campo a campo na
+mão antes de rodar o Node: 363 e 365, bateram.
+
+**Conferido nos três lados, em 2026-08-20:**
+
+```
+vetores × especificação   259 asserções, 0 falhas
+TypeScript × vetores       70 asserções, 0 falhas
+SQL × vetores              43 de 43        ← rodado no banco pelo usuário
+```
+
+Duas linhas daquele 43 valem mais que as outras. **I013 verdadeiro** é o
+que prova que a migration foi aplicada — só o validador novo recusa
+`vale`, e com o antigo aquela linha viria `false`. E **V009/V010 nos três
+critérios** provam a outra metade: se a migration não estivesse
+aplicada, essas seis linhas nem viriam `false`, porque
+`romaneio_retorno_canonico` levanta exceção com entrada inválida e a
+consulta inteira teria morrido. As 24 de V001 a V008 seguem intactas,
+que é a prova de que o domínio mudou sem nenhum documento válido mudar
+de bytes.
+
+Duas coisas menores que saíram junto: o spec dos vetores exigia "um vetor
+por classe de erro", e a exceção do `forma_invalida` virou **nomeada** em
+vez de a regra ser afrouxada — assim uma segunda duplicata, essa por
+descuido, continua caindo. E o gerador do SQL trazia "36 linhas" e "20
+selects" fixos no cabeçalho quando já eram 43: número escrito à mão
+dentro de texto gerado envelhece calado, e quem vai rodar a conferência
+lê o cabeçalho pra saber o que esperar.
+
+### A 2B
+
+`20260820130000_selar_romaneio_retorno.sql`, quatro funções:
+`romaneio_retorno_payload`, `registrar_conflito_retorno`,
+`selar_romaneio_retorno_interno` e a porta online
+`selar_romaneio_retorno`.
+
+O que ela obedece da 2A, e que não dá pra descobrir lendo só o desenho:
+
+- **nenhum cast de `timestamptz` no hash.** `timestamptz::text` depende
+  do `TimeZone` da sessão, e a fórmula da SAÍDA tem esse problema
+  latente — o verificador só funciona porque fixa UTC. Aqui o instante
+  entra por `to_char(... at time zone 'UTC', máscara)`;
+- **`papel_no_momento` DENTRO do digest**, desde o primeiro dia. Na saída
+  ele é metadado ao lado porque a fórmula já estava assinada;
+- **`responsavel_loja`, não `caixa`** — e quem escrever o verificador tem
+  que ler `tipo_signatario` da linha, senão não verifica as duas eras.
+
+E a decisão de desenho que a 2B teve que tomar sozinha, porque o CLAUDE.md
+não a cobria: **recusa é conflito, não exceção.** Quando o retorno chega
+na função, o motoboy já devolveu os vales e as duas partes já assinaram;
+um `raise` daria rollback e levaria a prova junto. Então corrida já
+fechada, hash que não bate, vale a mais ou a menos, outro motoboy e
+documento inválido viram `romaneios` com `status = 'conflito'` guardando
+os dois traços — mesmo desenho do `R-000004` da saída. Continua sendo
+exceção o que não tem prova a preservar: sessão inválida, saída
+inexistente, autorização inválida, papel fora do domínio.
+
+Detalhe do schema que cai bem: conflito de retorno tem `corrida_id` nulo,
+então não colide no `UNIQUE (corrida_id, tipo)` — um retorno recusado
+**não consome a única vaga** daquela corrida, e dá pra tentar de novo
+depois de resolver.
+
+### Quatro defeitos meus, achados relendo o que eu tinha acabado de escrever
+
+Nenhum apareceria antes de a tela existir, e dois quebrariam telas atuais
+em silêncio:
+
+1. **`pagamento_alterado` com payload próprio.** `notificacoes.ts` e
+   `auditoria.ts` leem `de`, `para`, `justificativa` e `autor_nome` — o
+   meu tinha `previsto`/`realizado`, e as duas telas mostrariam "Era
+   undefined, virou undefined". Passou a emitir o MESMO formato de
+   `marcarDivergencia`, com as chaves extras ao lado.
+2. **`insucesso_detalhado` sem `autor_nome`**, mesma família: o autor
+   apareceria em branco nas Notificações.
+3. **O snapshot não normalizava** motivo e detalhe de vale `entregue`, e o
+   canônico normaliza. O PDF do retorno sai do snapshot, como o da saída
+   — mostraria um motivo que o documento assinado não afirma.
+4. **`observacoes` era gravada mesmo em vale entregue**, pelo mesmo
+   descompasso.
+
+A `justificativa` do evento derivado diz, com todas as letras, que
+ninguém a digitou. A divergência do retorno é consequência dos fatos, não
+decisão manual — e a gestão lê aquele campo como se fosse alguém
+explicando.
+
+### As duas migrations aplicadas, e as recusas medidas
+
+Aplicadas pelo usuário em 2026-08-20, nesta ordem. O gêmeo SQL do DCRR1
+voltou **43 de 43** (acima), e as recusas da 2B foram exercitadas contra
+a corrida aberta do `R-000014`:
+
+```
+(a)  vale faltando            nao aplicavel — a corrida tem 1 vale só
+(a2) vale sobrando            vales_nao_conferem
+(b)  outro motoboy            outro_motoboy
+(c)  saida_hash nao confere   saida_hash_nao_confere
+(d)  so falta a autorizacao   42501 | Autorização inválida, expirada, …
+```
+
+**O (d) é o que prova mais.** Parar na autorização só acontece se a saída
+foi encontrada, o `saida_hash` bateu, a corrida está aberta, não existe
+retorno ainda, os vales conferem exatamente, o motoboy é o da custódia, o
+DCRR1 foi reconstruído do input estruturado e o hash do documento fechou.
+Qualquer uma dessas falhando teria devolvido conflito ANTES de chegar
+lá — a autorização é consumida depois de todas, de propósito.
+
+O (a) não era exercitável e o (a2) resolveu: com um vale só não há como
+FALTAR vale, mas há como SOBRAR. Mesmo ramo, mesma linha de código, pelo
+outro lado — e ele voltou `faltando []` com o uuid inventado em
+`sobrando`, que é a recusa dizendo exatamente o que viu.
+
+**Décima primeira vez que o instrumento mente, e desta vez com o
+resultado certo do lado.** O `raise` do (a2) imprimiu `R-000014s` e um
+uuid terminando em `s`: eu tinha escrito `%s` nos placeholders, e o
+placeholder do `raise` do PL/pgSQL é `%` PURO — `%s` é do `format()`.
+Não dá erro; o `s` sobra como literal grudado no valor. Os valores
+estavam corretos, a leitura é que ficava mentindo. Corrigido no script.
+Repare que o outro arquivo não tinha o problema justamente porque lá as
+linhas de caso saem de `format()`, onde `%s` é o certo — as duas funções
+têm sintaxe de placeholder diferente, e misturá-las é fácil.
+
+### Dois defeitos no MEU roteiro de conferência, e eles se repetem fácil
+
+O rodapé que eu tinha escrito na migration mandava rodar as recusas num
+`begin … rollback`. Errado nas duas pontas:
+
+- **o caso (d) levanta exceção de propósito**, e exceção aborta a
+  transação inteira — os resultados de (a) a (c) sumiriam junto e o
+  editor mostraria só o erro do último caso. O (d) precisa de um bloco
+  aninhado com `exception when others`, que desfaz só a própria
+  subtransação;
+- **num `begin … rollback` o editor mostra o último statement**, que é o
+  `rollback`: nada. Pôr o `select` por último resolveria a exibição e
+  deixaria a transação ABERTA, dependendo de alguém lembrar de desfazer.
+  Conferência que depende de ninguém esquecer não é conferência.
+
+A versão que ficou (`scripts/conferir-2b-no-sql-editor.sql`) termina em
+`raise exception` com o relatório na mensagem: desfaz tudo que escreveu e
+mostra o resultado sem depender de ninguém. **O erro vermelho é o
+resultado**, e isso está dito no cabeçalho — senão parece falha.
+
+É a mesma família do defeito do gerador do DCRR1 em 19/08 (20 statements
+onde o editor mostra um). Vale a regra: **conferência no SQL Editor
+termina em UM resultado, e ela mesma tem que desfazer o que escreveu.**
+
+### A ordem que vem, reordenada pelo usuário — e ele estava certo
+
+```
+2B.1  transação e recusas                    ✓
+2B.2  DCRR1 no SQL                           ✓  43/43
+2B.3  baseline das saídas                    ✓  10 · 10 · 0
+
+2B.4  verificador de hashes do retorno       ← agora
+2B.5  decidir e congelar o bloco `d`
+2B.6  repetir vetores, gêmeos e verificador
+
+2C    fila offline + envelope + sync-romaneio
+2D    tela + caminho feliz real
+```
+
+**O prazo do bloco `d` era mais curto do que eu tinha escrito.** Eu vinha
+dizendo "antes do primeiro retorno real ser selado". O usuário apontou o
+prazo verdadeiro: **antes da 2C**. A fila persiste em IndexedDB o payload
+que produz o `document_hash`, e um item parado na fila de um caixa já é
+um documento assinado esperando subir. Mudar o formato depois disso não
+quebra só código — quebra o que está guardado no navegador de quem já
+usou, contra um servidor que passou a esperar outra coisa. Construir
+`sync-romaneio` sobre um contrato com uma última mudança gratuita
+pendente é garantir retrabalho de DADO, não de código.
+
+**E a correção sobre o verificador vale mais que a reordenação.** Eu
+tinha escrito "um ramo próprio pra fórmula nova", que é ambíguo o
+bastante pra alguém ler como "unificar as duas fórmulas". Não é isso:
+
+```
+verificar_romaneio(id)
+  ├── lê `tipo_signatario` DA LINHA          (comum, sempre)
+  ├── tipo = 'saida'   → fórmula histórica da saída
+  ├── tipo = 'retorno' → fórmula DCRR1
+  └── diagnóstico uniforme por camada
+```
+
+As duas já são criptograficamente diferentes: a saída concatena
+`selado_em::text`, o retorno usa `to_char` com máscara e ainda inclui
+`papel_no_momento` no digest. **O verificador reproduz o documento como
+ele foi criado, defeitos históricos da fórmula incluídos** — o `to_char`
+conserta a fórmula NOVA e não muda retroativamente o significado de
+nenhum hash já assinado. "Melhorar" a fórmula da saída dentro do
+verificador transformaria a ferramenta de medir em fonte de divergência.
+
+O que continua comum é ler `tipo_signatario` da linha. Nunca
+`if saida then 'caixa' / if retorno then 'responsavel_loja'`, que é fixar
+o literal com passos extras.
+
+### O que ainda falta
+
+- **O caminho feliz não tem como ser testado daqui**: exige cartão e PIN,
+  e o E2E é de tela (2D).
+- **O caso (a) por FALTA de vale** continua sem transporte real — a única
+  corrida aberta tinha um vale. O ramo está coberto pelo outro lado
+  (sobrando), e vale exercitar o lado que falta quando existir uma
+  corrida de dois vales ou mais.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)

@@ -1490,10 +1490,75 @@ código enfileira `fechamento_corrida`.**
    com `papel_no_momento = 'admin'`. O documento diz o slot estrutural (o
    lado da farmácia) e o cargo real de quem assinou, separados. Era pra
    isso que a coluna existia.
-3. **2B** — `selar_romaneio_retorno` transacional
-4. **2C** — fila offline: `romaneio_retorno`, envelope, `sync-romaneio`
-5. **2D** — tela: Retorno de Corrida vira o fluxo do documento
-6. Fluxo excepcional (online), depois PDF do retorno + Drive
+3. **2B** — `selar_romaneio_retorno` transacional. **Escrita em
+   2026-08-20 (`20260820130000`), ainda NÃO aplicada no banco.** Junto
+   veio `20260820120000`, que corrige o domínio de `forma` do DCRR1 — e
+   ela tem que ser aplicada ANTES, senão a 2B recusaria `convcard` e
+   `crediario` depois de colhidas as duas assinaturas. As duas trazem no
+   rodapé as consultas de conferência; a de 2B exercita as recusas contra
+   dado real dentro de um `rollback`, porque o caminho feliz exige PIN e
+   é E2E de tela (2D).
+
+   **Aplicada e conferida em 2026-08-20.** DCRR1 SQL 43/43, baseline das
+   saídas intacto em 10 · 10 · 0, e as recusas medidas contra a corrida
+   aberta do `R-000014`: `vales_nao_conferem` (pelo lado do vale
+   sobrando), `outro_motoboy`, `saida_hash_nao_confere`, e `42501` na
+   autorização — que é o resultado mais forte, porque chegar lá exige
+   que todas as outras validações tenham passado.
+
+   O que ela deliberadamente **não** faz: estender `verificar_romaneio`
+   pro retorno. Até existir, `verificar_romaneios_selados()` conta **só
+   as saídas** e continua em 10 · 10 · 0 mesmo depois do primeiro retorno
+   selado — esperado, não regressão.
+
+4. **2B.4 — verificador de hashes do retorno.** Vem ANTES da 2C, e vira
+   invariante operacional em vez de teste: quando a 2D permitir o
+   caminho feliz, "selou" deixa de significar "a RPC devolveu sucesso" e
+   passa a significar que as quatro camadas recalculam. Diagnóstico por
+   camada, igual ao da saída, e **read-only** — divergiu, reporta
+   armazenado × calculado e para.
+
+   **UM ORQUESTRADOR PÚBLICO, FÓRMULAS INTERNAS SEPARADAS.** Decidido
+   com o usuário em 2026-08-20, e a distinção não é estilo:
+
+   ```
+   verificar_romaneio(id)
+     ├── lê `tipo_signatario` DA LINHA        (sempre, nos dois casos)
+     ├── tipo = 'saida'   → fórmula histórica da saída
+     ├── tipo = 'retorno' → fórmula DCRR1 do retorno
+     └── devolve diagnóstico uniforme
+   ```
+
+   As duas já são criptograficamente diferentes — a saída concatena
+   `selado_em::text`, o retorno usa `to_char` com máscara e ainda inclui
+   `papel_no_momento`. **Não "melhore" a fórmula da saída dentro do
+   verificador.** Ele existe pra reproduzir o documento como ele foi
+   criado, defeitos históricos da fórmula incluídos; o `to_char` do
+   retorno conserta a fórmula NOVA e não muda retroativamente o
+   significado de hash nenhum já assinado.
+
+   O que continua sendo comum é a leitura de `tipo_signatario` da linha.
+   Nunca `if saida then 'caixa' / if retorno then 'responsavel_loja'` —
+   isso é fixar o literal com passos extras.
+
+5. **2B.5 — decidir e congelar o bloco `d` do crediário**, antes da 2C.
+   Ver a seção do DCRR1: o prazo real não é "antes do primeiro selo", é
+   **antes de a 2C começar a persistir o payload em IndexedDB**. Item na
+   fila de um caixa é documento já assinado esperando subir; mudar o
+   formato depois disso quebra o que está guardado no navegador dele.
+
+6. **2B.6 — repetir os gates** (vetores, os dois gêmeos, o verificador)
+   depois do bloco `d`. Se o `d` entrar, ele muda o `document_hash`, e é
+   exatamente o hash que a fila da 2C vai carregar.
+7. **2C** — fila offline: `romaneio_retorno`, envelope, `sync-romaneio`.
+   **Não comece antes da 2B.6.** A fila persiste o payload que produz o
+   `document_hash`, então construí-la sobre um contrato com uma última
+   mudança gratuita pendente é garantir retrabalho — e não só de código:
+   de dado no navegador de quem já usou.
+8. **2D** — tela: Retorno de Corrida vira o fluxo do documento, e é onde
+   o caminho feliz finalmente roda (cartão → PIN → duas assinaturas →
+   selo). Fecha com o verificador confirmando o retorno recém-selado.
+9. Fluxo excepcional (online), depois PDF do retorno + Drive
 
 **A ordem não é burocracia.** A tela é a parte fácil; o contrato canônico
 entre navegador e Postgres é o que precisa estar fechado primeiro. E o
@@ -1665,6 +1730,66 @@ escaping num projeto cujo risco nº 1 é divergência de gêmeos.
 
 **4. `pagamento_id` é uuidv7 do cliente** (regra 5) — é o que permite ele
 entrar no canônico sem violar a regra 1.
+
+**5. O domínio de `forma` é o CHECK de `pagamentos.forma`, e nada mais.**
+Hoje: `dinheiro, credito, debito, pix, convenio, convcard, crediario,
+outro`. Ele vive em **quatro** cópias deliberadas — os golden vectors, o
+`FORMAS` do spec deles (que existe pra não concordar consigo mesmo),
+`src/lib/canonicoRetorno.ts` e o gêmeo SQL — e **as quatro mudam
+juntas**.
+
+Corrigido em 2026-08-20, e vale como aviso: o DCRR1 foi congelado em
+19/08 com a lista do **schema inicial**, que a migration
+`20260807123331` já tinha substituído doze dias antes. `vale` saiu do
+banco e ficou no contrato; `convcard` e `crediario` entraram no banco e
+não entraram nele. Os três lugares concordavam porque copiaram o mesmo
+engano — que é exatamente o que os golden vectors existem pra impedir, e
+não impediram porque o erro estava neles também. **Vetor trava a
+implementação contra a especificação; não trava a especificação estar
+certa sobre o banco.**
+
+Custou nada porque nenhum retorno real tinha sido selado. Depois do
+primeiro, custaria o histórico.
+
+**O crediário tem duas naturezas, e a linha `pr` carrega só uma.** Ela
+afirma o PAGAMENTO ("o realizado foi crediário, R$ 120,00"). O carnê que
+sai junto pra o cliente assinar é outro fato, e misturá-lo ali faria o
+documento confundir "o dinheiro foi combinado" com "o papel voltou
+assinado".
+
+Isso **revisa parcialmente** a decisão de manter toda custódia de papel
+fora do retorno. Aquela decisão continua certa para o papel cujo ciclo
+fica aberto depois da corrida — receita, convênio que volta dias depois.
+O papel do crediário é diferente: sai naquela corrida, é assinado durante
+aquela entrega, e deve voltar na mesma. Ele pertence ao ciclo do retorno.
+
+O desenho conversado (2026-08-20) é um bloco próprio, **não construído**:
+
+```
+d   <entrega_id>  crediario  <situacao>     situacao ∈ { retornado_assinado,
+                                                         nao_retornado, … }
+```
+
+`pr` = o que aconteceu com o dinheiro; `d` = o que aconteceu com o papel.
+Um vale pode dizer as duas coisas sem que uma finja pela outra.
+
+**Ele só entra depois de levantado o fluxo real** — quando o papel é
+impresso, quem leva, quem assina, se volta obrigatoriamente na mesma
+corrida, e o que acontece quando não volta. Congelar situações antes de
+observar o balcão repetiria, no bloco `d`, o erro que a lista de `forma`
+acabou de custar.
+
+**E o prazo é antes da 2C, não antes do primeiro selo** (corrigido pelo
+usuário em 2026-08-20). A leitura ingênua é "DCRR1 vira história quando
+o primeiro retorno real for selado". O prazo verdadeiro chega antes: a
+2C persiste em IndexedDB o payload que produz o `document_hash`, e um
+item na fila do caixa **é um documento já assinado** esperando subir.
+Mudar o formato depois disso não quebra só código — quebra o que está
+guardado no navegador de quem já usou, e que vai sincronizar contra um
+servidor que passou a esperar outra coisa.
+
+Ou seja: `verificador → fechar o d → repetir os gates → 2C`. Depois da
+2C, mudança estrutural é `DCRR2`.
 
 ##### A divergência deixa de ser um botão
 
