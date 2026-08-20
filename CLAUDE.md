@@ -1490,14 +1490,13 @@ código enfileira `fechamento_corrida`.**
    com `papel_no_momento = 'admin'`. O documento diz o slot estrutural (o
    lado da farmácia) e o cargo real de quem assinou, separados. Era pra
    isso que a coluna existia.
-3. **2B** — `selar_romaneio_retorno` transacional. **Escrita em
-   2026-08-20 (`20260820130000`), ainda NÃO aplicada no banco.** Junto
-   veio `20260820120000`, que corrige o domínio de `forma` do DCRR1 — e
-   ela tem que ser aplicada ANTES, senão a 2B recusaria `convcard` e
-   `crediario` depois de colhidas as duas assinaturas. As duas trazem no
-   rodapé as consultas de conferência; a de 2B exercita as recusas contra
-   dado real dentro de um `rollback`, porque o caminho feliz exige PIN e
-   é E2E de tela (2D).
+3. **2B** — `selar_romaneio_retorno` transacional. **Aplicada em
+   2026-08-20** (`20260820130000`). Junto veio `20260820120000`, que
+   corrige o domínio de `forma` do DCRR1 — e teve que ser aplicada
+   ANTES, senão a 2B recusaria `convcard` e `crediario` depois de
+   colhidas as duas assinaturas. As duas trazem no rodapé as consultas
+   de conferência; a de 2B exercita as recusas contra dado real, porque
+   o caminho feliz exige PIN e é E2E de tela (2D).
 
    **Aplicada e conferida em 2026-08-20.** DCRR1 SQL 43/43, baseline das
    saídas intacto em 10 · 10 · 0, e as recusas medidas contra a corrida
@@ -1507,16 +1506,38 @@ código enfileira `fechamento_corrida`.**
    que todas as outras validações tenham passado.
 
    O que ela deliberadamente **não** faz: estender `verificar_romaneio`
-   pro retorno. Até existir, `verificar_romaneios_selados()` conta **só
-   as saídas** e continua em 10 · 10 · 0 mesmo depois do primeiro retorno
-   selado — esperado, não regressão.
+   pro retorno. Isso é a 2B.4, logo abaixo — e não era opcional: o
+   verificador filtra por `status = 'selado'`, **não por tipo**, então um
+   retorno selado já entraria no placar aplicando a fórmula da saída e
+   reportando duas divergências que não existem.
 
-4. **2B.4 — verificador de hashes do retorno.** Vem ANTES da 2C, e vira
-   invariante operacional em vez de teste: quando a 2D permitir o
-   caminho feliz, "selou" deixa de significar "a RPC devolveu sucesso" e
-   passa a significar que as quatro camadas recalculam. Diagnóstico por
-   camada, igual ao da saída, e **read-only** — divergiu, reporta
-   armazenado × calculado e para.
+4. **2B.4 — verificador de hashes do retorno.** **Aplicado em
+   2026-08-20** (`20260820140000`). Vira invariante operacional em vez de
+   teste: quando a 2D permitir o caminho feliz, "selou" deixa de
+   significar "a RPC devolveu sucesso" e passa a significar que as
+   camadas recalculam. Diagnóstico por camada e **read-only** —
+   divergiu, reporta armazenado × calculado e para.
+
+   **O BASELINE NÃO É UM NÚMERO FIXO, E CONFUNDIR ISSO CUSTA UM SUSTO.**
+   Ele sobe a cada saída nova: era 9 antes do `R-000013`, 10 depois, e
+   deu **11 · 11 · 0** na aplicação da 2B.4, porque o `R-000014` foi
+   selado no meio pra a conferência da 2B ter corrida aberta.
+
+   O gate nunca foi "o número é 10". É **"as mesmas que verificavam
+   continuam verificando, e nenhuma sumiu"** — e a forma de checar isso
+   sem depender de memória é a contagem fechar contra a SEQUÊNCIA:
+
+   ```
+   selados   11   R-000001 03 05 06 07 08 10 11 12 13 14
+   ausentes   3   R-000002 04 09     ← e são exatamente os 3 conflitos
+   ------------------------------
+   11 + 3 = 14 = maior número emitido
+   ```
+
+   Todo número explicado, nenhum documento perdido. É por isso que o
+   resumo separa `conflito (fora do placar)` em linha própria: sem esse
+   número, os três buracos na sequência não teriam como ser explicados, e
+   `9 · 9 · 0` pareceria tão saudável quanto `11 · 11 · 0`.
 
    **UM ORQUESTRADOR PÚBLICO, FÓRMULAS INTERNAS SEPARADAS.** Decidido
    com o usuário em 2026-08-20, e a distinção não é estilo:

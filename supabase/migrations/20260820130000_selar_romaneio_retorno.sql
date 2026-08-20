@@ -777,12 +777,21 @@ grant execute on function public.selar_romaneio_retorno(
 --
 --   * não estende `verificar_romaneio` pro retorno. A fórmula acima é
 --     nova, então verificá-la exige um ramo próprio que leia
---     `tipo_signatario` da linha e use `to_char` em vez do cast. Enquanto
---     isso não existir, o baseline `verificar_romaneios_selados()`
---     continua contando só as SAÍDAS — e vai continuar em 10 · 10 · 0
---     mesmo depois do primeiro retorno selado. **Isso é esperado, não
---     regressão**, e é a primeira coisa a fazer depois de a 2B ser
---     testada.
+--     `tipo_signatario` da linha e use `to_char` em vez do cast.
+--
+--     **ESTE PARÁGRAFO DIZIA UMA COISA ERRADA, e a correção veio na
+--     migration `20260820140000` (etapa 2B.4).** Dizia que o baseline
+--     "continua contando só as SAÍDAS" e seguiria em 10 · 10 · 0 mesmo
+--     depois do primeiro retorno selado. Não seguiria:
+--     `verificar_romaneios_selados()` filtra por `status = 'selado'`,
+--     **não por tipo**. Um retorno selado entraria no placar aplicando a
+--     fórmula da SAÍDA e reportaria duas camadas de assinatura como
+--     divergentes — divergência nenhuma de integridade, só o instrumento
+--     medindo a coisa errada.
+--
+--     A 2B.4 resolveu isso ANTES de existir qualquer retorno, que era o
+--     prazo real. Se você está lendo esta migration sem ter aplicado
+--     aquela, aplique-a antes de selar o primeiro retorno.
 --   * não toca na fila offline. `fechamento_corrida` continua existindo e
 --     continua sendo drenado pelo handler legado — a janela de duas
 --     releases do CLAUDE.md. Converter um item legado em romaneio de

@@ -3676,8 +3676,8 @@ termina em UM resultado, e ela mesma tem que desfazer o que escreveu.**
 2B.2  DCRR1 no SQL                           ✓  43/43
 2B.3  baseline das saídas                    ✓  10 · 10 · 0
 
-2B.4  verificador de hashes do retorno       ← agora
-2B.5  decidir e congelar o bloco `d`
+2B.4  verificador de hashes do retorno       ✓  11 · 11 · 0
+2B.5  decidir e congelar o bloco `d`         ← agora
 2B.6  repetir vetores, gêmeos e verificador
 
 2C    fila offline + envelope + sync-romaneio
@@ -3718,6 +3718,56 @@ O que continua comum é ler `tipo_signatario` da linha. Nunca
 `if saida then 'caixa' / if retorno then 'responsavel_loja'`, que é fixar
 o literal com passos extras.
 
+### 2B.4 — e o baseline que não é um número fixo
+
+Aplicada em 2026-08-20 (`20260820140000`). Ela não era opcional, e o
+motivo eu tinha registrado ERRADO duas vezes: escrevi que
+`verificar_romaneios_selados()` "conta só as saídas" e continuaria em
+10 · 10 · 0 depois do primeiro retorno. Não conta — ela filtra por
+`status = 'selado'`, **não por tipo**. Um retorno selado já entraria no
+placar aplicando a fórmula da saída e reportando duas camadas de
+assinatura como divergentes. O baseline iria pra `11 · 10 · 2`, e a
+divergência não seria de integridade nenhuma: seria o instrumento
+medindo a coisa errada. Instrumento que acusa defeito onde não há custa
+uma investigação e a confiança no resto do placar.
+
+**O resultado da aplicação foi `11 · 11 · 0`, e o gate era 10.** Não é
+falha, e a diferença entre "não é falha" e "explicada" é justamente o que
+o projeto cobra. A explicação fecha por contagem contra a sequência:
+
+```
+selados   11   R-000001 03 05 06 07 08 10 11 12 13 14
+ausentes   3   R-000002 04 09        ← exatamente os 3 conflitos
+------------------------------------
+11 + 3 = 14 = maior número emitido
+```
+
+Todo número explicado, nenhum documento perdido. O 11º é o `R-000014`, a
+saída selada no meio da própria sessão pra a conferência da 2B ter
+corrida aberta.
+
+**O gate nunca foi "o número é 10"** — é "as mesmas que verificavam
+continuam verificando, e nenhuma sumiu". Eu enunciei mal ("qualquer coisa
+diferente de 10 · 10 · 0, para"), e enunciar mal um gate é quase tão ruim
+quanto não ter gate: da próxima vez que ele mover por um motivo legítimo,
+alguém para sem precisar, ou pior, aprende a ignorá-lo. A forma checável
+é a contagem acima, e é por isso que o resumo traz `conflito (fora do
+placar)` em linha própria: sem esse número, os três buracos na sequência
+não teriam como ser explicados, e `9 · 9 · 0` pareceria tão saudável
+quanto `11 · 11 · 0`.
+
+**Duas coisas que os dados provaram de graça**, e nenhuma delas eu teria
+como afirmar sem elas:
+
+- os três `offline_sincronizada` (`R-000001`, `06`, `10`) verificam, o
+  que prova que o último componente da fórmula continua saindo de
+  `romaneios.modo` e não virou literal na extração — é a regra 2
+  sobrevivendo ao drop e recreate;
+- o `R-000013` verifica, e ele é o ÚNICO com `papel_no_momento`
+  preenchido. Se a extração tivesse acidentalmente incluído o papel no
+  digest da saída, ele — e só ele — divergiria, com os outros dez
+  passando. Um teste discriminante que aconteceu sozinho.
+
 ### O que ainda falta
 
 - **O caminho feliz não tem como ser testado daqui**: exige cartão e PIN,
@@ -3726,6 +3776,9 @@ o literal com passos extras.
   corrida aberta tinha um vale. O ramo está coberto pelo outro lado
   (sobrando), e vale exercitar o lado que falta quando existir uma
   corrida de dois vales ou mais.
+- **O verificador do RETORNO nunca rodou contra um retorno**, porque não
+  existe nenhum. As cinco camadas dele (incluindo `saida_referenciada`)
+  são código não exercitado até a 2D.
 
 ## Commits desta sessão
 
