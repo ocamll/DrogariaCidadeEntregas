@@ -5,6 +5,7 @@ import {
   type CustodiaDoVale,
 } from '@/data/romaneios'
 import { textoGeo } from '@/lib/geolocalizacao'
+import { rotuloDoPapelNoMomento } from '@/lib/papeis'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -119,16 +120,6 @@ function Linha({ rotulo, valor }: { rotulo: string; valor: string | null }) {
   )
 }
 
-// O cargo, quando ele foi registrado. Nas assinaturas anteriores a
-// 2026-08-19 não existe, e aí a tela simplesmente não diz nada — inventar
-// a partir de `profiles.papel` seria mostrar o cargo de HOJE para um ato
-// de meses atrás.
-const PAPEL_LABEL: Record<string, string> = {
-  caixa: 'Caixa',
-  gerente: 'Gerente',
-  admin: 'Administrador',
-}
-
 export function BlocoAssinatura({ assinatura }: { assinatura: AssinaturaDoRomaneio }) {
   const ehMotoboy = assinatura.tipoSignatario === 'motoboy'
   return (
@@ -144,9 +135,13 @@ export function BlocoAssinatura({ assinatura }: { assinatura: AssinaturaDoRomane
       <AssinaturaDesenhada strokes={assinatura.strokes} />
       <div className="flex flex-col gap-0.5">
         <p className="text-sm font-medium">{assinatura.nome}</p>
+        {/* O cargo, quando ele foi registrado. Nas assinaturas anteriores
+            a 2026-08-19 não existe, e aí a tela simplesmente não diz nada
+            — inventar a partir de `profiles.papel` seria mostrar o cargo
+            de HOJE para um ato de meses atrás. */}
         {assinatura.papelNoMomento && (
           <p className="text-xs text-foreground/70">
-            {PAPEL_LABEL[assinatura.papelNoMomento] ?? assinatura.papelNoMomento}
+            {rotuloDoPapelNoMomento(assinatura.papelNoMomento)}
             <span className="text-foreground/50"> · no momento da assinatura</span>
           </p>
         )}

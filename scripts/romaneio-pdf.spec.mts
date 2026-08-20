@@ -91,6 +91,11 @@ const romaneio: RomaneioCompleto = {
       nome: 'Camilo',
       agenciaNome: null,
       authMethod: 'sessao_autenticada',
+      // A combinação do `R-000013`, e é ela que interessa: o SLOT é
+      // `caixa` (o lado da farmácia, e está dentro do hash), o cargo real
+      // de quem assinou é `admin`. Um documento que imprimisse "Caixa"
+      // aqui estaria afirmando o que não sabe.
+      papelNoMomento: 'admin',
       credencialPublicId: null,
       signatureHash: 'a'.repeat(64),
       assinadoEm: '2026-08-18T14:35:00.000Z',
@@ -183,6 +188,32 @@ checa('document hash impresso', daFarmacia.includes('d'.repeat(64)))
 checa('IP da selagem', daFarmacia.includes('187.10.20.30'))
 checa('avisa que o PDF não é a fonte da verdade', daFarmacia.includes('fonte da verdade'))
 checa('modo offline é dito', daFarmacia.includes('offline'))
+
+// O SLOT não é o CARGO. `tipo_signatario = 'caixa'` nomeia o lado da
+// farmácia e está dentro do `signature_hash`, então nunca muda — mas o
+// papel de quem de fato assinou pode ser gerente ou admin, e o sistema
+// não impõe papel na saída. O PDF e a PÁGINA já divergiram uma vez (o PDF
+// sabia mostrar os relógios da corrida e a página não), então as duas
+// asserções negativas ficam: sem elas, "tirei o rótulo errado" e "esqueci
+// de tirar" seriam indistinguíveis.
+console.log('\n--- o slot da farmácia não afirma cargo ---')
+checa('não chama de "Caixa"', !/\bCaixa\b/.test(daFarmacia) && !/\bCaixa\b/.test(daAgencia))
+checa('diz "Pela farmácia"', daFarmacia.includes('Pela farmácia'))
+checa('rotula a assinatura como Farmácia', daFarmacia.includes('Farmácia'))
+checa('imprime o cargo real de quem assinou', daFarmacia.includes('Administrador'))
+// Nulo nas assinaturas anteriores a 2026-08-19: aí sobra o slot sozinho,
+// e derivar de `profiles.papel` mostraria o cargo de HOJE.
+const semPapel = textoDoPdf(
+  await montarRomaneioPdf(
+    {
+      ...romaneio,
+      assinaturas: romaneio.assinaturas.map((a) => ({ ...a, papelNoMomento: null })),
+    },
+    'farmacia'
+  )
+)
+checa('assinatura legada não inventa cargo', !semPapel.includes('Administrador'))
+checa('e continua rotulada como Farmácia', semPapel.includes('Farmácia'))
 
 console.log('\n--- assinaturas em vetor ---')
 checa('nome do motoboy', daFarmacia.includes('Silva'))

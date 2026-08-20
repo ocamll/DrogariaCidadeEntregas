@@ -26,7 +26,9 @@ fechada** (item 59) — verificador de hash, golden vectors, os dois
 canônicos gêmeos e o teste de transporte. **Nada disso tem tela ainda**;
 o retorno continua sendo o `fecharCorrida` de sempre, e nada mudou pra
 quem opera. O item 60 traz quatro defeitos de tela que a 2A expôs de
-passagem.
+passagem, e o **item 61** fecha o rastro que ele deixou: o rótulo do
+signatário interno em mais quatro lugares (dois na página, dois no PDF) e
+os relógios do romaneio, que trocavam de coluna conforme o romaneio.
 
 **O que NÃO existe ainda, e é fácil supor errado:** não há deploy — nem
 conta na Cloudflare, nem site no ar. Tudo rodou em localhost, numa
@@ -3116,6 +3118,126 @@ REGRESSÃO: provar que nada mudou pra quem opera. O usuário foi procurar
 uma assinatura extra que nunca ia existir. Descrever teste de regressão
 com vocabulário de teste de funcionalidade manda a pessoa procurar o que
 não há.
+
+## 61. O item 60 tinha consertado um lugar de três, e as colunas dos relógios
+
+Sessão de 2026-08-20. O usuário voltou à página do romaneio e achou as
+duas coisas: *"ainda têm o signatário como caixa"* e *"o Retorno (balcão)
+tem que estar embaixo da Saída (balcão), lado do balcão com balcão,
+servidor com servidor"*.
+
+### O rótulo: consertei o bloco e esqueci a página em volta
+
+O item 60 trocou "Assinatura do caixa" por "Assinatura DA FARMÁCIA" —
+**dentro do `BlocoAssinatura`**. A mesma página dizia "caixa" em mais dois
+lugares que eu não olhei, e o PDF em mais dois:
+
+| onde | dizia | diz |
+|---|---|---|
+| `Romaneio.tsx`, campo do cabeçalho | `Caixa` | `Pela farmácia` |
+| `Romaneio.tsx`, bloco Integridade | `assin. caixa` | `assin. farmácia` |
+| `romaneioPdf.ts`, "quem e quando" | `Caixa` | `Pela farmácia` |
+| `romaneioPdf.ts`, bloco da assinatura | `Caixa` | `Farmácia · <cargo>` |
+
+**O PDF entrou porque o item 60 previu exatamente isto** — "o PDF e a
+tela evoluíram SEPARADOS, o mesmo documento contava duas histórias
+conforme onde se olhasse". Consertar só a tela repetiria o defeito com o
+usuário imprimindo o papel e lendo "Caixa" de novo.
+
+E o PDF perdia informação que a tela já tinha: ele não mostrava
+`papel_no_momento`. Trocar o rótulo sem isso deixaria o documento
+impresso sem dizer o cargo de ninguém. Agora sai `Farmácia ·
+Administrador`, e `Farmácia` sozinho quando a coluna é nula (assinatura
+anterior a 19/08) — derivar de `profiles.papel` mostraria o cargo de
+HOJE, que é o que a coluna existe pra evitar.
+
+`PAPEL_LABEL` virou **`src/lib/papeis.ts`**, importado pela tela e pelo
+PDF, porque duas cópias dele seriam o defeito do item 60 outra vez — com
+um rótulo no lugar de um relógio. Ele não importa nada, o que é o que
+permite o `romaneio-pdf.spec.mts` continuar rodando em `npx tsx`
+(importar de `data/` puxaria o cliente Supabase e `import.meta.env`, a
+armadilha do item 57).
+
+### As colunas: fluxo automático não pareia campo opcional
+
+A seção era **um** grid `sm:grid-cols-2` de fluxo automático com os onze
+campos soltos — e dois deles condicionais ("Recebido pelo servidor", só
+offline; "Retorno (balcão)", só com a corrida fechada). Com fluxo, quem
+decide a coluna é a contagem de itens anteriores: bastava o campo do
+offline aparecer pra "Retorno (servidor)" cair na esquerda e "Retorno
+(balcão)" na direita. **As colunas trocavam de lado conforme o
+romaneio.**
+
+A regra 8 só serve pra alguma coisa se der pra comparar os dois relógios
+de bater o olho. Agora são **duas colunas explícitas** — um `div` por
+coluna, balcão à esquerda, servidor à direita — e não ordem de fluxo. A
+Duração ficou embaixo das duas, com `col-span-2`: ela é derivada dos
+relógios de servidor dos dois lados, então não pertence a nenhuma
+coluna. Identificação e IP saíram pra um bloco próprio acima.
+
+### O terceiro estado que ninguém tinha visto
+
+Mexendo ali apareceu que a página dizia **"corrida ainda aberta" para
+romaneio em CONFLITO** — e conflito não tem corrida nenhuma
+(`corrida_id` é nulo por construção). São três estados que não podem se
+parecer, e um campo vazio diria a mesma coisa nos três:
+
+    conflito                          → "sem corrida vinculada"
+    corrida aberta                    → "corrida ainda aberta"
+    fechada antes de 2026-08-10       → "não registrado"   (só no balcão:
+                                         `retorno_em_local` não existia)
+
+O terceiro é o que o "Retorno (balcão)" precisava e não tinha: ele era
+condicional, sumia, e "o motoboy não voltou" ficava indistinguível de "a
+coluna não existia naquele dia".
+
+### Como testei sem logar
+
+Chegar nesta tela pelo app exige senha, e senha não se digita em nome do
+usuário. Então `scripts/conferir-romaneio-na-tela.js`, no formato dos
+`conferir-*-no-console.js`: renderiza o componente **real** com um
+QueryClient pré-semeado, três cenários (fechada online / offline com
+corrida aberta / conflito), e **mede a posição X de cada rótulo** — é
+isso que prova a coluna. Comparar texto não provaria nada: no grid antigo
+os dois "Retorno" trocavam de lado e o texto continuava idêntico.
+
+    Saída (balcão)    x=265 y=206  │  Selado (servidor)     x=645 y=206
+    Retorno (balcão)  x=265 y=230  │  Recebido (servidor)   x=645 y=230
+                                   │  Retorno (servidor)    x=645 y=254
+    Duração           x=265
+
+Sete asserções de rótulo e cinco de coluna, todas verdes, em aba limpa e
+console sem erro. O spec do PDF ganhou seis casos no mesmo espírito —
+inclusive os dois NEGATIVOS (`não chama de "Caixa"`, `assinatura legada
+não inventa cargo`), pelo mesmo motivo dos `v2 não é mais lido` do item
+53: sem eles, "tirei o rótulo errado" e "esqueci de tirar" ficam
+indistinguíveis. Total: 36 casos, todos passando. `tsc -b` e `npm run
+lint` limpos, chunk do `romaneioPdf` ainda separado (5,35 kB).
+
+### Três armadilhas do próprio instrumento, de novo
+
+É a oitava, nona e décima vez que o teste falha por causa do teste — e
+as três só apareceram porque o script renderiza componente de verdade:
+
+- **Tela em branco, console limpo.** Importar
+  `/node_modules/.vite/deps/react.js` **sem o `?v=<hash>`** carrega uma
+  SEGUNDA instância do React; os hooks rodam contra um dispatcher que não
+  é o do root e nada renderiza, sem erro nenhum. O hash é lido do módulo
+  transformado em tempo de execução, porque ele muda a cada re-otimização
+  do Vite (item 45).
+- **`import()` com expressão faz o Vite reescrever o arquivo**, injetando
+  um `import` estático no topo — e aí ele para de rodar dentro de um
+  `AsyncFunction` ("Cannot use import statement outside a module"). A
+  chamada ficou escondida num `new Function`.
+- **`innerText` devolve o texto RENDERIZADO**, com o `uppercase` do CSS
+  já aplicado, então procurar `'Assinatura da farmácia'` dava falso
+  negativo num título que a tela mostra em caixa alta.
+
+E uma quarta que não é do instrumento e sim de onde ele roda: o painel do
+navegador estava com **316px de viewport**, abaixo do breakpoint `sm:`,
+então as colunas legitimamente empilhavam e as asserções davam `false`. O
+script passou a devolver `viewport` e `duasColunas` junto do resultado —
+número de layout sem a largura ao lado não quer dizer nada.
 
 ## Commits desta sessão
 

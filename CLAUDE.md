@@ -1181,6 +1181,14 @@ endereço que ele nunca recebeu.
 - **O cabeçalho tem faixa, e ela não é decoração** — o letreiro da logo é
   branco e sem faixa o documento saía sem o nome da farmácia. Ver "A marca
   num lugar só".
+- **`tipo_signatario` NUNCA é impresso como cargo.** O lado interno se
+  chama **"farmácia"** na tela e no papel — `'caixa'` é o nome do slot e
+  está dentro do hash, mas quem sela pode ser gerente ou admin, e o
+  sistema não impõe papel na saída. O cargo real sai de
+  `papel_no_momento`, e some quando a coluna é nula em vez de ser
+  derivado de `profiles.papel`, que é o cargo de hoje. O mapa de rótulos
+  mora em `src/lib/papeis.ts` e é o MESMO nos dois — página e PDF já
+  divergiram uma vez, e uma segunda cópia do mapa seria o mesmo defeito.
 - **Os quatro relógios finalmente têm tela.** Retirada, retorno e duração
   saem de `corridas.saida_em`/`retorno_em`, existentes e sem uso desde
   2026-08-10. A duração usa o relógio do SERVIDOR nos dois lados: misturar

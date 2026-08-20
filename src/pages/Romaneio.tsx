@@ -148,8 +148,33 @@ export function Romaneio({
   const totalCompra = vales.reduce((s, v) => s + v.valor_compra_cents, 0)
   const totalVales = vales.reduce((s, v) => s + v.quantidade_vales, 0)
 
+  // `'caixa'` é o nome do SLOT — o lado da farmácia —, e está dentro do
+  // hash da assinatura, então nunca muda. O que a TELA diz é outra coisa:
+  // ver os rótulos abaixo.
   const caixa = data.assinaturas.find((a) => a.tipoSignatario === 'caixa')
   const motoboy = data.assinaturas.find((a) => a.tipoSignatario === 'motoboy')
+
+  // Os relógios do retorno têm TRÊS estados que não podem se parecer, e
+  // um campo vazio diria a mesma coisa nos três:
+  //   - romaneio em conflito não tem corrida nenhuma (a saída não selou);
+  //   - corrida aberta tem corrida e ainda não tem retorno;
+  //   - corrida fechada antes de 2026-08-10 tem o relógio do servidor e
+  //     nunca teve o do dispositivo, porque a coluna não existia.
+  // Antes daqui a tela dizia "corrida ainda aberta" também no primeiro
+  // caso, que é a tela afirmando o que não sabe.
+  const corrida = data.corrida
+  const retornoServidor = !corrida
+    ? 'sem corrida vinculada'
+    : corrida.retornoEm
+      ? new Date(corrida.retornoEm).toLocaleString('pt-BR')
+      : 'corrida ainda aberta'
+  const retornoBalcao = !corrida
+    ? 'sem corrida vinculada'
+    : !corrida.retornoEm
+      ? 'corrida ainda aberta'
+      : corrida.retornoEmLocal
+        ? new Date(corrida.retornoEmLocal).toLocaleString('pt-BR')
+        : 'não registrado'
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -200,51 +225,64 @@ export function Romaneio({
             <Campo rotulo="Filial" valor={data.lojaNome} />
             <Campo rotulo="Agência" valor={motoboy?.agenciaNome ?? null} />
             <Campo rotulo="Motoboy" valor={motoboy?.nome ?? null} />
-            <Campo rotulo="Caixa" valor={data.criadoPorNome} />
-            <Campo
-              rotulo="Saída (balcão)"
-              valor={
-                data.ocorridoEmLocal ? new Date(data.ocorridoEmLocal).toLocaleString('pt-BR') : null
-              }
-            />
-            <Campo
-              rotulo="Selado (servidor)"
-              valor={data.seladoEm ? new Date(data.seladoEm).toLocaleString('pt-BR') : null}
-            />
-            {/* Só faz diferença quando os dois horários divergem, que é
-                exatamente o caso da saída offline. */}
-            {data.modo === 'offline_sincronizada' && (
-              <Campo
-                rotulo="Recebido pelo servidor"
-                valor={new Date(data.recebidoEmServidor).toLocaleString('pt-BR')}
-              />
-            )}
-            {/* O RETORNO, que o PDF já mostrava e a página não. Corrida
-                ainda aberta é DITA, nunca omitida: campo ausente e
-                "o motoboy não voltou" não podem se parecer, e a diferença
-                é o que alguém procura ao abrir este documento.
-                A duração usa o relógio do SERVIDOR nos dois lados —
-                misturar com o do dispositivo daria um intervalo que não
-                aconteceu. */}
-            <Campo
-              rotulo="Retorno (servidor)"
-              valor={
-                data.corrida?.retornoEm
-                  ? new Date(data.corrida.retornoEm).toLocaleString('pt-BR')
-                  : 'corrida ainda aberta'
-              }
-            />
-            {data.corrida?.retornoEmLocal && (
-              <Campo
-                rotulo="Retorno (balcão)"
-                valor={new Date(data.corrida.retornoEmLocal).toLocaleString('pt-BR')}
-              />
-            )}
-            <Campo
-              rotulo="Duração"
-              valor={duracaoDaCorrida(data.corrida?.saidaEm ?? null, data.corrida?.retornoEm ?? null)}
-            />
+            {/* "Pela farmácia", não "Caixa": quem sela pode ser caixa,
+                gerente ou admin, e o sistema não impõe papel na saída. O
+                cargo real de quem assinou aparece na Custódia, vindo de
+                `papel_no_momento`. */}
+            <Campo rotulo="Pela farmácia" valor={data.criadoPorNome} />
             <Campo rotulo="IP" valor={data.ip} />
+          </section>
+
+          {/* OS RELÓGIOS, em duas colunas FIXAS: balcão à esquerda,
+              servidor à direita. Antes eram um grid de fluxo automático
+              com dois campos condicionais no meio, então "Retorno
+              (balcão)" caía do lado do servidor e vice-versa conforme o
+              romaneio. A regra 8 só serve pra alguma coisa se der pra
+              comparar os dois relógios de bater o olho, e coluna que troca
+              de lado desfaz isso. Colunas explícitas — e não ordem de
+              fluxo — é o que garante o pareamento mesmo com campo opcional
+              entre eles. */}
+          <section className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+            <div className="flex flex-col gap-1">
+              <Campo
+                rotulo="Saída (balcão)"
+                valor={
+                  data.ocorridoEmLocal
+                    ? new Date(data.ocorridoEmLocal).toLocaleString('pt-BR')
+                    : null
+                }
+              />
+              {/* Corrida ainda aberta é DITA, nunca omitida: campo ausente
+                  e "o motoboy não voltou" não podem se parecer, e a
+                  diferença é o que alguém procura ao abrir este
+                  documento. */}
+              <Campo rotulo="Retorno (balcão)" valor={retornoBalcao} />
+            </div>
+            <div className="flex flex-col gap-1">
+              <Campo
+                rotulo="Selado (servidor)"
+                valor={data.seladoEm ? new Date(data.seladoEm).toLocaleString('pt-BR') : null}
+              />
+              {/* Só faz diferença quando os dois horários divergem, que é
+                  exatamente o caso da saída offline. */}
+              {data.modo === 'offline_sincronizada' && (
+                <Campo
+                  rotulo="Recebido (servidor)"
+                  valor={new Date(data.recebidoEmServidor).toLocaleString('pt-BR')}
+                />
+              )}
+              <Campo rotulo="Retorno (servidor)" valor={retornoServidor} />
+            </div>
+            {/* A duração usa o relógio do SERVIDOR nos dois lados —
+                misturar com o do dispositivo daria um intervalo que não
+                aconteceu. Por ser derivada dos dois, fica embaixo das duas
+                colunas, não dentro de uma delas. */}
+            <div className="sm:col-span-2">
+              <Campo
+                rotulo="Duração"
+                valor={duracaoDaCorrida(corrida?.saidaEm ?? null, corrida?.retornoEm ?? null)}
+              />
+            </div>
           </section>
 
           <section>
@@ -337,7 +375,7 @@ export function Romaneio({
               </p>
               {caixa?.signatureHash && (
                 <p>
-                  <span className="text-foreground/60">assin. caixa </span>
+                  <span className="text-foreground/60">assin. farmácia </span>
                   {caixa.signatureHash}
                 </p>
               )}

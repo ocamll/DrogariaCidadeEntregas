@@ -34,6 +34,7 @@ import { formatBRL } from '@/lib/money'
 import { textoGeo } from '@/lib/geolocalizacao'
 import { carregarImagemDaMarca, LOGO_DOCUMENTO_URL, LOGO_PROPORCAO, COR_MARCA } from '@/lib/marca'
 import { duracaoDaCorrida } from '@/lib/datas'
+import { rotuloDoPapelNoMomento } from '@/lib/papeis'
 
 export type ViaDoRomaneio = 'farmacia' | 'agencia'
 
@@ -167,7 +168,12 @@ export async function montarRomaneioPdf(
   const linhas: [string, string | null][] = [
     ['Motoboy', motoboy?.nome ?? null],
     ['Agência', motoboy?.agenciaNome ?? null],
-    ['Caixa', caixa?.nome ?? romaneio.criadoPorNome],
+    // "Pela farmácia", não "Caixa": `tipo_signatario = 'caixa'` é o nome
+    // do SLOT (o lado da farmácia) e está dentro do hash — o sistema não
+    // impõe que quem sela a saída seja um caixa, e um admin selando
+    // aparecia aqui como "Caixa". O cargo real vai no bloco da
+    // assinatura, vindo de `papel_no_momento`.
+    ['Pela farmácia', caixa?.nome ?? romaneio.criadoPorNome],
     ['Retirada', dataHora(romaneio.corrida?.saidaEm) ?? dataHora(romaneio.ocorridoEmLocal)],
     ['Retorno', dataHora(romaneio.corrida?.retornoEm)],
     [
@@ -300,7 +306,16 @@ export async function montarRomaneioPdf(
     doc.setFontSize(7.5)
     doc.setTextColor(90)
     const detalhes = [
-      i === 0 ? 'Caixa' : 'Motoboy',
+      // O slot ("Farmácia") e o cargo de quem de fato assinou são coisas
+      // separadas — a tela já fazia essa distinção e o PDF não, então o
+      // mesmo documento contava duas histórias. `papel_no_momento` é nulo
+      // nas assinaturas anteriores a 2026-08-19, e aí sobra só o slot:
+      // derivar de `profiles.papel` mostraria o cargo de HOJE.
+      i === 0
+        ? ['Farmácia', rotuloDoPapelNoMomento(assinatura.papelNoMomento)]
+            .filter(Boolean)
+            .join(' · ')
+        : 'Motoboy',
       assinatura.agenciaNome,
       dataHora(assinatura.assinadoEm),
       assinatura.credencialPublicId ? `credencial ••••${assinatura.credencialPublicId.slice(-4)}` : null,
