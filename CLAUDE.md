@@ -1448,8 +1448,13 @@ código enfileira `fechamento_corrida`.**
       (`20260819140000_canonico_retorno.sql`): **36 de 36**, ou seja os 8
       vetores válidos batendo em texto, bytes e hash, e os 12 inválidos
       recusados pelo mesmo motivo do lado TypeScript
-   6. `canonico-retorno.spec.mts` e
-      `conferir-canonico-retorno-no-console.js` (TS × SQL, dado real)
+   6. ~~`canonico-retorno.spec.mts`~~ (feito no item 4) e
+      **`conferir-canonico-retorno-no-console.js`** — escrito, falta
+      RODAR. Ele deixou de ser "TS × SQL concordam?" (os vetores já
+      provaram, com mais força) e virou **teste de TRANSPORTE**: o
+      caminho `supabase-js → PostgREST → jsonb` preserva o input que o
+      navegador assinou? Precisa da migration
+      `20260819150000_conferir_canonico_retorno.sql`
    7. `papel_no_momento` no INSERT da saída
    8. rodar o verificador **de novo**
    9. provar que nenhum hash existente mudou nem deixou de verificar

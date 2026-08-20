@@ -364,3 +364,38 @@ export function montarCanonicoRetorno(entrada: EntradaRetorno): string {
   if (motivo) throw new RetornoInvalido(motivo)
   return serializarRetorno(normalizarRetorno(entrada))
 }
+
+/**
+ * O `p_retorno` que vai pro servidor, a partir do MESMO objeto de
+ * domínio que gerou o canônico local.
+ *
+ * **Existe pra que o canônico e o payload não possam divergir.** Se a
+ * tela montasse o JSON por conta própria, ela poderia assinar uma coisa
+ * e mandar outra — e o servidor recalcularia um hash diferente do
+ * assinado, o que só apareceria na sincronização. Quem monta o
+ * `EntradaRetorno` monta os dois, daqui.
+ *
+ * **Não normaliza nada**, e isso é deliberado: é renomeação de chave e
+ * mais nada. Normalizar aqui esconderia do lado SQL a normalização que
+ * ele tem que fazer sozinho — o V004 deixaria de ser testado de verdade
+ * no servidor.
+ *
+ * `undefined` some no `JSON.stringify` e o campo chega ausente ao
+ * Postgres, virando NULL; `null` chega como NULL. Os dois lados tratam
+ * ausente e nulo igual, então isso é seguro — e é justamente uma das
+ * coisas que o teste de transporte exercita.
+ */
+export function paraJsonbRetorno(entrada: EntradaRetorno): unknown[] {
+  return entrada.vales.map((vale) => ({
+    entrega_id: vale.entregaId,
+    desfecho: vale.desfecho,
+    motivo: vale.motivo,
+    detalhe: vale.detalhe,
+    pagamentos_realizados: (vale.pagamentosRealizados ?? []).map((pagamento) => ({
+      pagamento_id: pagamento.pagamentoId,
+      forma: pagamento.forma,
+      valor_cents: pagamento.valorCents,
+      troco_cents: pagamento.trocoCents,
+    })),
+  }))
+}
