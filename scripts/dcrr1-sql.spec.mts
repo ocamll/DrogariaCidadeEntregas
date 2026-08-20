@@ -85,18 +85,24 @@ function chamada(entrada: unknown): string {
 // separados fazia 19 conferências rodarem e desaparecerem — quem rodasse
 // via só a última e não teria como saber das outras. Um `union all`
 // devolve as 36 linhas de uma vez.
-const linhas: string[] = []
+// Cada conferência é um RAMO sem a palavra-chave da frente. Quem junta
+// decide o que vai antes de cada um — só assim o primeiro é `select` e
+// todos os outros são `union all select`.
+//
+// A primeira versão colocava `select` dentro do laço, então o segundo
+// vetor abria um `select` novo no meio do CTE e o Postgres reclamava
+// exatamente ali. Montar o texto por concatenação cega é como esse tipo
+// de erro nasce; separar "o que é o ramo" de "como os ramos se ligam"
+// é o que impede.
+const ramos: string[] = []
 
 for (const vetor of VETORES) {
   const r = literal(vetor.nome.split(' —')[0])
-  linhas.push(`  select ${r} as vetor, 'texto' as criterio,`)
-  linhas.push(`${chamada(vetor.entrada)} = ${literal(vetor.canonico)} as ok`)
-  linhas.push(`  union all select ${r}, 'bytes', octet_length(`)
-  linhas.push(`${chamada(vetor.entrada)}`)
-  linhas.push(`  ) = ${vetor.bytes}`)
-  linhas.push(`  union all select ${r}, 'hash', encode(digest(`)
-  linhas.push(`${chamada(vetor.entrada)}`)
-  linhas.push(`  , 'sha256'), 'hex') = ${literal(vetor.sha256)}`)
+  ramos.push(`${r} as vetor, 'texto' as criterio,\n${chamada(vetor.entrada)} = ${literal(vetor.canonico)} as ok`)
+  ramos.push(`${r}, 'bytes', octet_length(\n${chamada(vetor.entrada)}\n  ) = ${vetor.bytes}`)
+  ramos.push(
+    `${r}, 'hash', encode(digest(\n${chamada(vetor.entrada)}\n  , 'sha256'), 'hex') = ${literal(vetor.sha256)}`
+  )
 }
 
 for (const vetor of VETORES_INVALIDOS) {
@@ -106,11 +112,12 @@ for (const vetor of VETORES_INVALIDOS) {
   // `romaneio_retorno_validar` devolve NULL, e `NULL = 'motivo'` é NULL —
   // a linha apareceria vazia em vez de `false`, que é o pior jeito de uma
   // falha se apresentar.
-  linhas.push(`  union all select ${r}, 'motivo', public.romaneio_retorno_validar(`)
-  linhas.push(`    ${literal(e.saidaDocumentHash)},`)
-  linhas.push(`    ${comoJsonb(vetor.entrada)}`)
-  linhas.push(`  ) is not distinct from ${literal(vetor.motivo)}`)
+  ramos.push(
+    `${r}, 'motivo', public.romaneio_retorno_validar(\n    ${literal(e.saidaDocumentHash)},\n    ${comoJsonb(vetor.entrada)}\n  ) is not distinct from ${literal(vetor.motivo)}`
+  )
 }
+
+const linhas = ramos.map((ramo, i) => `  ${i === 0 ? 'select' : 'union all select'} ${ramo}`)
 
 console.log('-- =====================================================================')
 console.log('-- DCRR1 — o gêmeo SQL contra os golden vectors')
