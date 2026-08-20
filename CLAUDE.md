@@ -2310,6 +2310,30 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   entre o render e o clique a rede muda, e ali vale o instante da ação,
   não o do último render. Os dois usos convivem no mesmo arquivo de
   propósito.
+- **Aviso de operação enfileirada sai da FILA, nunca de string estática —
+  use `<StatusDeGravacao>`.** As três telas de lançamento montavam
+  `"… salva — sincronizando…"` à mão num estado que ninguém limpava: a
+  frase ficava no ar depois de a operação ter subido, e ficava
+  **idêntica** se ela tivesse falhado, travado por dependência ou virado
+  conflito. `enfileirarOperacao` devolve a chave da fila e
+  `useSituacaoDaOperacao` traduz o estado real; o texto da tela afirma só
+  o fato consumado ("Entrega de José salva") e a cláusula de
+  sincronização é escrita por quem olha a fila. **Só o caso feliz se
+  apaga sozinho** — aviso de problema que some enquanto ninguém olha é o
+  mesmo defeito invertido. Duas armadilhas medidas e que voltam se alguém
+  reescrever: o `onLimpar` inline **não pode entrar nas dependências** do
+  efeito do timer (função nova a cada render reinicia a contagem, e o
+  aviso volta a não sumir enquanto o caixa digita), e a situação tem que
+  ser consultada **pelo id** com carimbo de qual id é — ler a fila
+  inteira e procurar na lista conclui "sincronizada" no instante entre o
+  `put` e a liveQuery reconsultar.
+- **`prefers-reduced-motion` tira o deslocamento, não o sinal.** As
+  reticências de "sincronizando" pulsam porque o movimento é a
+  informação: parado, o aviso volta a ser indistinguível de frase
+  esquecida na tela. Com movimento reduzido some o `translateY` e fica o
+  esmaecer. Não é teórico — **o navegador desta máquina responde
+  `reduce`**, então um `animation: none` ali deixaria o usuário sem ver
+  nada se mexer.
 - **Sem router.** Não está na stack. Navegação é troca de estado local (`useState<View>`)
   dentro de `Painel.tsx`, com `onVoltar` como prop pra cada tela voltar pra lista. Isso
   aguenta bem o tanto de telas que o MVP tem hoje — se crescer muito mais, reconsiderar

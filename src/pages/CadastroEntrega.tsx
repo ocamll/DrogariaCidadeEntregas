@@ -12,8 +12,11 @@ import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-
-type Status = { kind: 'ok'; texto: string } | { kind: 'error'; texto: string } | null
+import {
+  StatusDeGravacao,
+  gravacaoEnfileirada,
+  type Gravacao,
+} from '@/components/StatusDeGravacao'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -59,7 +62,7 @@ function CadastroEntregaForm({
   const [convenioId, setConvenioId] = useState('')
   const [temReceita, setTemReceita] = useState(false)
   const [erroValidacao, setErroValidacao] = useState<string | null>(null)
-  const [status, setStatus] = useState<Status>(null)
+  const [gravacao, setGravacao] = useState<Gravacao | null>(null)
 
   const { data: convenios } = useConveniosCadastro()
   const conveniosAtivos = (convenios ?? []).filter((c) => c.ativo)
@@ -148,8 +151,15 @@ function CadastroEntregaForm({
     // libera a tela pro próximo cliente — sincroniza em segundo plano. O
     // número do vale só existe depois de sincronizar (é o banco que gera),
     // por isso não aparece aqui; confere na lista "Hoje" depois.
-    void enfileirarOperacao('entrega', donoDaFila(profile), payload, { chave: payload.id })
-    setStatus({ kind: 'ok', texto: `Entrega de ${payload.clienteNome} salva — sincronizando…` })
+    // A cláusula de sincronização NÃO entra no texto: quem a escreve é o
+    // `StatusDeGravacao`, olhando a fila de verdade. Aqui só se afirma o
+    // fato que já aconteceu — a gravação local.
+    setGravacao(
+      gravacaoEnfileirada(
+        `Entrega de ${payload.clienteNome} salva`,
+        enfileirarOperacao('entrega', donoDaFila(profile), payload, { chave: payload.id })
+      )
+    )
 
     resetForm()
   }
@@ -302,11 +312,7 @@ function CadastroEntregaForm({
               Salvar (Enter)
             </Button>
 
-            {status && (
-              <p className={status.kind === 'error' ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}>
-                {status.texto}
-              </p>
-            )}
+            <StatusDeGravacao gravacao={gravacao} onLimpar={() => setGravacao(null)} />
           </div>
         </CardContent>
       </Card>

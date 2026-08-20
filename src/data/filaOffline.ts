@@ -126,9 +126,10 @@ export async function enfileirarOperacao<T extends TipoOperacaoFila>(
   dono: { userId: string; tenantId: string; lojaId: string | null },
   payload: PayloadPorTipo[T],
   opcoes: OpcoesEnfileiramento = {}
-) {
+): Promise<string> {
+  const idFila = uuidv7()
   await db.filaOperacoes.put({
-    id: uuidv7(),
+    id: idFila,
     tipo,
     payload,
     chave: opcoes.chave,
@@ -143,6 +144,16 @@ export async function enfileirarOperacao<T extends TipoOperacaoFila>(
   } as ItemFilaOperacao)
 
   void processarFilaOperacoes()
+
+  // Devolve a chave da FILA (não a do negócio) pra quem chamou poder
+  // acompanhar esta operação específica — é o que permite o aviso da tela
+  // dizer "sincronizando" só enquanto ela está mesmo na fila, e parar de
+  // dizer quando ela sai. Quem não se importa continua ignorando o
+  // retorno. Repare que a resolução acontece DEPOIS do `put`: quando o
+  // chamador tem o id em mãos, a linha já existe no IndexedDB, então
+  // "não está mais na fila" passa a significar mesmo "já sincronizou", e
+  // não "ainda não chegou".
+  return idFila
 }
 
 let processando = false
@@ -286,6 +297,68 @@ export async function tentarAgora() {
 
 export function useFilaOperacoesPendentes(): ItemFilaOperacao[] {
   return useLiveQuery(() => db.filaOperacoes.toArray(), [], [])
+}
+
+/**
+ * O que aconteceu com UMA operação, pela chave de fila que
+ * `enfileirarOperacao` devolveu.
+ *
+ * Existe porque as telas de lançamento afirmavam "sincronizando…" num
+ * texto parado, que nunca era apagado: a frase continuava lá depois de a
+ * operação ter subido, e continuaria lá se ela tivesse falhado. Duas
+ * situações opostas com a mesma aparência — o defeito que este projeto
+ * persegue desde o §39, a tela afirmando o que não sabe.
+ *
+ * `sincronizada` vem da AUSÊNCIA na fila, e isso só é confiável porque
+ * `processarFilaOperacoes` deleta o item ao ter sucesso e o marca (nunca
+ * remove) quando falha. Item que sumiu, subiu.
+ */
+export type SituacaoDaOperacao =
+  /** ainda na fila; sai sozinha */
+  | 'sincronizando'
+  /** saiu da fila com sucesso */
+  | 'sincronizada'
+  /** falhou; o backoff vai tentar de novo */
+  | 'erro'
+  /** recusa definitiva; não resolve sozinha */
+  | 'atencao'
+  /** é de outro usuário; espera aquela conta entrar */
+  | 'bloqueada'
+
+const SITUACAO_POR_STATUS: Record<ItemFilaOperacao['status'], SituacaoDaOperacao> = {
+  pendente: 'sincronizando',
+  erro: 'erro',
+  terminal: 'atencao',
+  bloqueado: 'bloqueada',
+}
+
+export function useSituacaoDaOperacao(idFila: string | null): SituacaoDaOperacao | null {
+  // Consulta PELO ID, e o resultado carrega de qual id ele é.
+  //
+  // A primeira versão lia a fila inteira e procurava o item na lista. Dá
+  // no mesmo em regime, mas abre uma corrida na largada: entre `idFila`
+  // aparecer e a liveQuery reconsultar, o array em mãos ainda é o de
+  // antes do `put` — o item "não está lá", e o aviso concluía
+  // **sincronizada** por um instante. Pior que o piscar: o timer de
+  // sumiço já partia, e a mensagem podia se apagar antes de a operação
+  // ter subido.
+  //
+  // Carimbar o id consultado dentro do resultado resolve sem timer nem
+  // heurística: enquanto o carimbo não for o id atual, a resposta honesta
+  // é "ainda não sei", e "ainda não sei" aqui se diz **sincronizando** —
+  // que é o que de fato está acontecendo.
+  const resultado = useLiveQuery(
+    async () => ({
+      para: idFila,
+      item: idFila ? ((await db.filaOperacoes.get(idFila)) ?? null) : null,
+    }),
+    [idFila],
+    undefined
+  )
+
+  if (!idFila) return null
+  if (!resultado || resultado.para !== idFila) return 'sincronizando'
+  return resultado.item ? SITUACAO_POR_STATUS[resultado.item.status] : 'sincronizada'
 }
 
 // Quantas operações ficariam paradas se este usuário saísse agora. É o

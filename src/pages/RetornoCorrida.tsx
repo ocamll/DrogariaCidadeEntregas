@@ -13,8 +13,11 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
-
-type Status = { kind: 'ok'; texto: string } | { kind: 'error'; texto: string } | null
+import {
+  StatusDeGravacao,
+  gravacaoEnfileirada,
+  type Gravacao,
+} from '@/components/StatusDeGravacao'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -22,7 +25,7 @@ const SELECT_CLASSNAME =
 export function RetornoCorrida({ profile, onVoltar }: { profile: AuthProfile; onVoltar: () => void }) {
   const { data: corridas, isLoading, isError, error } = useCorridasAbertas()
   const [corridaId, setCorridaId] = useState<string | null>(null)
-  const [status, setStatus] = useState<Status>(null)
+  const [gravacao, setGravacao] = useState<Gravacao | null>(null)
 
   const corridaSelecionada = corridas?.find((c) => c.id === corridaId) ?? null
 
@@ -32,9 +35,9 @@ export function RetornoCorrida({ profile, onVoltar }: { profile: AuthProfile; on
         corrida={corridaSelecionada}
         profile={profile}
         onVoltar={() => setCorridaId(null)}
-        onFechada={(texto) => {
+        onFechada={(g) => {
           setCorridaId(null)
-          setStatus({ kind: 'ok', texto })
+          setGravacao(g)
         }}
       />
     )
@@ -58,11 +61,7 @@ export function RetornoCorrida({ profile, onVoltar }: { profile: AuthProfile; on
             {!isLoading && !isError && corridas?.length === 0 && (
               <p className="text-sm text-muted-foreground">Nenhuma corrida em aberto agora.</p>
             )}
-            {status && (
-              <p className={status.kind === 'error' ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}>
-                {status.texto}
-              </p>
-            )}
+            <StatusDeGravacao gravacao={gravacao} onLimpar={() => setGravacao(null)} />
             {corridas?.map((corrida) => (
               <button
                 key={corrida.id}
@@ -122,7 +121,7 @@ function FecharCorridaForm({
   corrida: CorridaAberta
   profile: AuthProfile
   onVoltar: () => void
-  onFechada: (texto: string) => void
+  onFechada: (gravacao: Gravacao) => void
 }) {
   const [resultados, setResultados] = useState<Record<string, ResultadoEntrega>>(() =>
     Object.fromEntries(
@@ -189,8 +188,17 @@ function FecharCorridaForm({
 
     // grava local e volta pra lista na hora (mesmo padrão do cadastro de
     // entrega) — sincroniza em segundo plano.
-    void enfileirarOperacao('fechamento_corrida', donoDaFila(profile), payload, { dependeDeChave: payload.corridaId })
-    onFechada(`Corrida de ${corrida.mototaxistaNome} fechada — sincronizando…`)
+    // A cláusula de sincronização sai do `StatusDeGravacao`, que lê a
+    // fila — este item pode ficar parado bem mais que os outros, porque
+    // `dependeDeChave` o segura enquanto a criação da corrida não subir.
+    onFechada(
+      gravacaoEnfileirada(
+        `Corrida de ${corrida.mototaxistaNome} fechada`,
+        enfileirarOperacao('fechamento_corrida', donoDaFila(profile), payload, {
+          dependeDeChave: payload.corridaId,
+        })
+      )
+    )
   }
 
   return (

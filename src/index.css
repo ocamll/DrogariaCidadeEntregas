@@ -128,6 +128,63 @@
     @apply font-sans;
     }
 }
+/* Reticências que se mexem enquanto a fila está de fato trabalhando.
+   O aviso "sincronizando…" já foi texto parado, e parado ele não
+   distinguia "está sincronizando agora" de "sincronizou faz meia hora e
+   ninguém apagou a frase" — que é como ele acabava sendo lido. O
+   movimento só existe enquanto o item está na fila; quando sai, o aviso
+   troca de texto e some. Ver `Reticencias.tsx` e `StatusDeGravacao.tsx`.
+
+   `translateY` e não `top`: transform não participa do layout, então o
+   pulo não empurra a linha de texto nem muda a altura da caixa. */
+@keyframes reticencia-pulsa {
+  0%,
+  70%,
+  100% {
+    opacity: 0.3;
+    transform: translateY(0);
+  }
+  35% {
+    opacity: 1;
+    transform: translateY(-2px);
+  }
+}
+.reticencia {
+  display: inline-block;
+  animation: reticencia-pulsa 1.2s ease-in-out infinite;
+}
+.reticencia:nth-child(2) {
+  animation-delay: 0.16s;
+}
+.reticencia:nth-child(3) {
+  animation-delay: 0.32s;
+}
+/* Com `prefers-reduced-motion` some o DESLOCAMENTO, não o sinal.
+   A regra é sobre movimento — deslizar, saltar, parallax —, e aqui o que
+   informa "a fila está trabalhando agora" é o pulso. Matar a animação
+   inteira devolveria exatamente o estado que ela veio corrigir: três
+   pontos parados, indistinguíveis de uma frase esquecida na tela. Então
+   fica o esmaecer, mais lento e sem sair do lugar.
+
+   Não é hipótese: o navegador desta máquina responde `reduce`, e um
+   `animation: none` aqui teria "passado" no teste sem nada se mexer. */
+@media (prefers-reduced-motion: reduce) {
+  .reticencia {
+    animation-name: reticencia-esmaece;
+    animation-duration: 1.6s;
+  }
+}
+@keyframes reticencia-esmaece {
+  0%,
+  70%,
+  100% {
+    opacity: 0.3;
+  }
+  35% {
+    opacity: 1;
+  }
+}
+
 /* Impressão do cartão de credencial do motoboy.
    Só existe um alvo imprimível no app inteiro (#print-cartao, dentro do
    dialog de credencial emitida), então a regra é: esconde tudo, mostra

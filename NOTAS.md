@@ -28,7 +28,10 @@ o retorno continua sendo o `fecharCorrida` de sempre, e nada mudou pra
 quem opera. O item 60 traz quatro defeitos de tela que a 2A expôs de
 passagem, e o **item 61** fecha o rastro que ele deixou: o rótulo do
 signatário interno em mais quatro lugares (dois na página, dois no PDF) e
-os relógios do romaneio, que trocavam de coluna conforme o romaneio.
+os relógios do romaneio, que trocavam de coluna conforme o romaneio. O
+**item 62** conserta o aviso "— sincronizando…" das telas de lançamento,
+que nunca era apagado e dizia a mesma coisa tendo a operação subido ou
+falhado.
 
 **O que NÃO existe ainda, e é fácil supor errado:** não há deploy — nem
 conta na Cloudflare, nem site no ar. Tudo rodou em localhost, numa
@@ -3238,6 +3241,141 @@ navegador estava com **316px de viewport**, abaixo do breakpoint `sm:`,
 então as colunas legitimamente empilhavam e as asserções davam `false`. O
 script passou a devolver `viewport` e `duasColunas` junto do resultado —
 número de layout sem a largura ao lado não quer dizer nada.
+
+## 62. O "sincronizando…" que nunca terminava
+
+Sessão de 2026-08-20, logo depois do item 61. Relato do usuário: *"'—
+sincronizando…' às vezes não some, em alguns casos fica o texto lá"*,
+mais um pedido — *"adicionar movimento às reticências"*.
+
+### Não era "às vezes": era sempre, e o texto era uma afirmação falsa
+
+As três telas de lançamento montavam a frase inteira à mão e a punham num
+`useState` que **nada limpava**:
+
+```ts
+setStatus({ kind: 'ok', texto: `Entrega de ${nome} salva — sincronizando…` })
+```
+
+Ela só saía do ar quando outra gravação a substituía ou quando a tela era
+desmontada. Ou seja: continuava dizendo que havia sincronização em curso
+muito depois de a operação ter subido — e continuava **exatamente igual**
+se a operação tivesse falhado, ficado presa por dependência, ou virado
+conflito. Três desfechos opostos com a mesma aparência.
+
+É o §39/§49/§51 de novo: a tela afirmando o que não sabe. Aqui com o
+agravante de que a frase citava um processo em andamento que já tinha
+acabado — e o que o usuário leu como "não some" era, na verdade, "nunca
+teve fim".
+
+Estavam assim `CadastroEntrega`, `CadastroTransferencia` e
+`RetornoCorrida`. Os dois dialogs que também enfileiram
+(`NotificarOcorrenciaDialog`) não têm o problema: eles fecham na hora.
+
+### A frase passou a ser derivada da fila
+
+`enfileirarOperacao` agora **devolve a chave da fila**, e
+`useSituacaoDaOperacao(idFila)` traduz o estado real:
+
+| fila | tela |
+|---|---|
+| item presente, `pendente` | "… salva — sincronizando" + reticências animadas |
+| item some | "… salva — sincronizada", e o aviso se apaga sozinho em 2,5s |
+| `erro` | "…, mas ainda não subiu — vou tentar de novo sozinho" |
+| `terminal` | "…, mas a sincronização parou. Abre 'Precisa de atenção' no topo" |
+| `bloqueado` | "…, está registrada por outra conta" |
+| o `put` rejeitou | "Não consegui salvar neste computador: …" |
+
+Só o caso feliz se apaga sozinho. **Aviso de problema que desaparece
+enquanto ninguém olha seria o mesmo defeito de cabeça pra baixo.** E
+offline a frase fica em "sincronizando" indefinidamente — porque é
+verdade, e o indicador do cabeçalho conta quantas estão paradas.
+
+O último caso é novo: `void enfileirarOperacao(...)` engolia uma falha de
+`put` e o caixa via "salva" com nada salvo.
+
+Tudo num componente só (`StatusDeGravacao.tsx`), e isso é parte do
+conserto: com a lógica em cada tela, foram três telas esquecendo de
+limpar. A cláusula de sincronização saiu das strings — as telas afirmam
+só o fato consumado ("Entrega de José salva"), e quem escreve o resto é
+quem olha a fila.
+
+### Três defeitos que eu mesmo introduzi, e como cada um apareceu
+
+Vale registrar porque nenhum apareceu por leitura — os três só existiram
+porque o teste roda contra o IndexedDB de verdade e o React de verdade.
+
+**1. O timer que nunca disparava (e reproduziria o bug relatado).** O
+sumiço era um `setTimeout` num `useEffect` com `onLimpar` nas
+dependências. As três telas passam uma arrow inline — **função nova a
+cada render** —, então qualquer re-render do pai recriava o timer. O
+caixa digitando a próxima entrega seguraria o aviso na tela pra sempre.
+O defeito de origem, reintroduzido pela porta dos fundos. `onLimpar`
+virou ref; o caso 9 do script força o pai a redesenhar durante a janela
+inteira e **mede o maior intervalo entre redesenhos** (1.010ms < 2.500ms)
+— sem essa medida o teste passaria por sorte.
+
+**2. Uma corrida na largada.** A primeira versão do hook lia a fila
+inteira e procurava o item na lista. Entre `idFila` aparecer e a
+liveQuery reconsultar, o array em mãos ainda é o de ANTES do `put`: o
+item "não está lá" e o aviso concluía **sincronizada** por um instante —
+com o timer de sumiço já partindo, ou seja, a mensagem podia se apagar
+antes de a operação subir. Apareceu como uma falha intermitente do
+próprio script (`pontos[0] is undefined`, porque as reticências nem
+chegaram a existir). A saída não foi timer nem heurística: consultar
+**pelo id** e carimbar no resultado de qual id ele é. Enquanto o carimbo
+não bate, a resposta honesta é "ainda não sei" — e "ainda não sei" aqui
+se diz *sincronizando*, que é o que de fato está acontecendo.
+
+**3. Rejeição não tratada no console.** Quem trata é o efeito, e efeito
+roda num tick posterior: até lá o navegador já classificou a promessa
+como `Uncaught (in promise)`. A tela mostrava a mensagem certa e o
+console acusava erro ao lado. `gravacaoEnfileirada()` anexa um `.catch`
+vazio no mesmo tick da criação — `.catch` registra uma reação sobre a
+original, não a consome, então quem trata depois continua recebendo.
+
+### O movimento, e a armadilha do `prefers-reduced-motion`
+
+Três `<span>` pulsando em onda (opacidade + `translateY(-2px)`, atrasos
+de 0 / 0,16 / 0,32s), em `Reticencias.tsx`, com a animação no
+`index.css`. São três elementos e não um `…` animado por causa do
+layout: eles ocupam sempre o mesmo espaço, enquanto animar `.` → `..` →
+`...` mudaria a largura da frase três vezes por segundo. `translateY` e
+não `top` pelo mesmo motivo — transform não participa do layout.
+
+**E aí a medição pegou uma coisa que eu teria entregado quebrada.** Eu
+tinha escrito o `@media (prefers-reduced-motion: reduce)` do jeito
+padrão, `animation: none`. O navegador desta máquina **responde
+`reduce`** — e o teste voltou `animacoes: 0` com `rodando: true`, porque
+`every()` de lista vazia é `true`. Duas coisas de uma vez: o instrumento
+concordando com o defeito (oitava vez no projeto), e a possibilidade real
+de o PC do balcão estar igual e o usuário nunca ver movimento nenhum.
+
+A correção mudou a regra em vez de burlá-la: com movimento reduzido some
+o **deslocamento**, não o sinal. Fica o esmaecer, mais lento e sem sair
+do lugar. `prefers-reduced-motion` é sobre movimento — deslizar, saltar,
+parallax —, e o que informa aqui é o pulso; matar a animação inteira
+devolveria exatamente o estado anterior, três pontos parados,
+indistinguíveis de uma frase esquecida na tela.
+
+O ramo cheio não dá pra exercitar (não se alterna media query pelo JS),
+então o script força o keyframe inline e **amostra o `transform` ao
+vivo**: `matrix(…, -1.88774)` no pico contra `matrix(…, 0)` no repouso.
+Se `reticencia-pulsa` não existisse ou não mexesse em nada, as duas
+leituras seriam iguais.
+
+### O teste
+
+`scripts/conferir-aviso-de-sincronizacao.js`, no formato dos outros
+`conferir-*-no-console.js`. Dez casos contra o **IndexedDB real** e o
+React real — a liveQuery da Dexie é metade do mecanismo, e um dublê
+provaria o componente e não o acoplamento, que é onde os defeitos 1 e 2
+moravam. Ele escreve um item na fila de verdade, exercita os cinco
+desfechos, e o caso 10 confere que a fila voltou exatamente ao que era.
+
+Dez de dez em três execuções seguidas, aba limpa, console sem erro.
+`tsc -b`, lint e build limpos; o CSS sai no bundle de produção com os
+dois keyframes.
 
 ## Commits desta sessão
 

@@ -8,8 +8,11 @@ import { uuidv7 } from '@/lib/uuid'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
-
-type Status = { kind: 'ok'; texto: string } | { kind: 'error'; texto: string } | null
+import {
+  StatusDeGravacao,
+  gravacaoEnfileirada,
+  type Gravacao,
+} from '@/components/StatusDeGravacao'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -53,7 +56,7 @@ function CadastroTransferenciaForm({
   // filial que TEM o produto. Quem opera esta tela é a filial que está sem
   // ele e está pedindo — o motoboy passa na escolhida, pega, e entrega aqui.
   const [lojaOrigemId, setLojaOrigemId] = useState('')
-  const [status, setStatus] = useState<Status>(null)
+  const [gravacao, setGravacao] = useState<Gravacao | null>(null)
   const [erroValidacao, setErroValidacao] = useState<string | null>(null)
 
   const selectRef = useRef<HTMLSelectElement>(null)
@@ -94,11 +97,14 @@ function CadastroTransferenciaForm({
 
     // grava local e libera a tela na hora (mesmo padrão do cadastro de
     // entrega) — o número do vale só existe depois de sincronizar.
-    void enfileirarOperacao('transferencia', donoDaFila(profile), payload, { chave: payload.id })
-    setStatus({
-      kind: 'ok',
-      texto: `Transferência de ${payload.lojaOrigemNome} para ${payload.lojaSolicitanteNome} salva — sincronizando…`,
-    })
+    // A cláusula de sincronização quem escreve é o `StatusDeGravacao`,
+    // lendo a fila — aqui só o fato já consumado.
+    setGravacao(
+      gravacaoEnfileirada(
+        `Transferência de ${payload.lojaOrigemNome} para ${payload.lojaSolicitanteNome} salva`,
+        enfileirarOperacao('transferencia', donoDaFila(profile), payload, { chave: payload.id })
+      )
+    )
 
     resetForm()
   }
@@ -173,11 +179,7 @@ function CadastroTransferenciaForm({
               Salvar (Enter)
             </Button>
 
-            {status && (
-              <p className={status.kind === 'error' ? 'text-sm text-destructive' : 'text-sm text-muted-foreground'}>
-                {status.texto}
-              </p>
-            )}
+            <StatusDeGravacao gravacao={gravacao} onLimpar={() => setGravacao(null)} />
           </div>
         </CardContent>
       </Card>
