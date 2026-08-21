@@ -45,10 +45,15 @@
 --   2. no meio tempo a credencial do motoboy foi bloqueada por outra
 --      pessoa errando o PIN;
 --   3. autenticando ANTES do guard, este reenvio falha a autenticação e
---      cai em `registrar_conflito_retorno` — que insere `romaneios` com
---      o MESMO `p_romaneio_id` que já existe;
---   4. violação de chave primária → exceção → o item da fila entra em
---      `erro` e reentra no backoff PRA SEMPRE.
+--      cai em `registrar_conflito_retorno`.
+--
+-- O que acontece então NÃO é violação de chave primária — o insert de lá
+-- é `on conflict (id) do nothing`, e isso está certo. É pior de ler e
+-- mais silencioso: a linha selada fica intacta, mas a função devolve
+-- `ok:false, motivo:'conflito'` com o NÚMERO DO ROMANEIO SELADO, e grava
+-- um evento `conflito_retorno` contra um documento que está perfeitamente
+-- selado. O cliente marca o item como terminal "em conflito", e o
+-- Registro de Auditoria passa a mostrar um conflito que nunca houve.
 --
 -- Com o guard aqui em cima, reenvio nunca chega a encostar na credencial:
 -- devolve o que já aconteceu e sai. De quebra, deixa de gastar um bcrypt

@@ -4155,11 +4155,23 @@ de selagem, logo nenhuma segunda fórmula de hash pra divergir.
 **1. O guard de reenvio subiu pra porta.** No interno ele já existe (é a
 primeira coisa do corpo), e pro caminho online isso basta. Aqui não: a
 fila reenvia; se no meio tempo a credencial tiver sido bloqueada por
-outra pessoa errando o PIN, o reenvio de um retorno JÁ SELADO falharia a
-autenticação, cairia em `registrar_conflito_retorno` com o MESMO
-`p_romaneio_id` que já existe, violaria a chave primária, levantaria
-exceção — e o item da fila entraria em `erro` e no backoff **pra
-sempre**, que é o pior sintoma conhecido daqui (§50.4).
+outra pessoa errando o PIN, o reenvio de um retorno JÁ SELADO falha a
+autenticação e cai em `registrar_conflito_retorno`.
+
+**Eu escrevi primeiro que isso violaria a chave primária e travaria o
+item da fila pra sempre. Está errado, e a correção é do próprio código:**
+o insert de lá é `on conflict (id) do nothing`. O que acontece é pior de
+ler e mais silencioso — a linha selada fica intacta, mas a função devolve
+`ok:false, motivo:'conflito'` **com o número do romaneio selado**, e
+grava um evento `conflito_retorno` contra um documento perfeitamente
+selado. O item vira terminal "em conflito" e o Registro de Auditoria
+passa a mostrar um conflito que nunca houve.
+
+A conclusão não muda — o guard sobe —, mas o motivo é outro, e o motivo
+certo é mais forte: não é uma trava de fila, é o sistema **relatando um
+conflito falso** sobre um documento válido. Corrigido no cabeçalho da
+migration depois de eu ir ler `registrar_conflito_retorno` inteiro em vez
+de deduzir pelo `insert`.
 
 Com o guard em cima, reenvio nem encosta na credencial. De quebra, deixa
 de gastar um bcrypt por reenvio. O interno continua sendo a autoridade:
