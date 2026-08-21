@@ -24,11 +24,26 @@
 -- =====================================================================
 -- BLOCO 1 — SEM NENHUMA ESCRITA
 --
--- ESPERADO:
+-- ESPERADO (medido em 2026-08-20, e passou):
 --   (a) instalada=t  anon=f  authenticated=f  service_role=t
---   (b) ja_existia=true
+--   (b) ja_existia=true  ok=true
 --   (c) 42501 | Responsável inexistente ou inativo.
---   (d) 02000 | Romaneio de saída ... não existe.
+--   (d) P0002 | Romaneio de saída ... não existe.
+--
+-- **`P0002`, NÃO `02000`.** Eu tinha escrito `02000` aqui e o banco
+-- devolveu `P0002` — a expectativa é que estava errada, não o código.
+-- `no_data_found` é nome de condição do PL/pgSQL, que o mapeia para
+-- `P0002`; `02000` é o `no_data` do padrão SQL, outra coisa. A 2B levanta
+-- a mesma exceção com o mesmo `errcode`, então os dois lados concordam.
+--
+-- Isso não é cosmético: a 2C.6 vai classificar erro por SQLSTATE pra
+-- decidir o que é TERMINAL na fila. Handler escrito esperando `02000`
+-- não casaria nunca, e o item ficaria retentando uma recusa definitiva.
+-- Os três que importam até aqui:
+--
+--     P0001  raise_exception          o relatório desta conferência
+--     P0002  no_data_found            saída inexistente
+--     42501  insufficient_privilege   responsável inválido, autorização inválida
 --
 -- A LINHA (b) É A MAIS INTERESSANTE. Ela passa um TOKEN LIXO junto de um
 -- romaneio que já existe. Se o guard de reenvio estivesse DEPOIS da

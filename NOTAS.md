@@ -4225,6 +4225,34 @@ Toda linha existente é ou selada ou conflito, nenhuma some. Os buracos na
 sequência passam a ser explicáveis por rollback em vez de terem que ser
 zero.
 
+### Aplicada e conferida em 2026-08-20
+
+Bloco 1 da conferência, sem escrever nada:
+
+```
+(a) instalada=t  anon=f  authenticated=f  service_role=t
+(b) reenvio          ja_existia=true  ok=true
+(c) responsavel      42501 | Responsável inexistente ou inativo.
+(d) saida            P0002 | Romaneio de saída … não existe.
+```
+
+A **(b)** é a que prova o desenho: token lixo junto de um romaneio que já
+existe, e mesmo assim responde. Se o guard de reenvio estivesse depois da
+autenticação — como está na porta da saída —, ela teria morrido na
+credencial.
+
+**E a (d) corrigiu uma expectativa minha: veio `P0002`, não `02000`.**
+`no_data_found` é nome de condição do PL/pgSQL, mapeado para `P0002`;
+`02000` é o `no_data` do padrão SQL, outra coisa. O código está certo e
+consistente com a 2B, que levanta a mesma exceção com o mesmo `errcode`.
+
+Isso importa pra frente e não é detalhe: **a 2C.6 vai classificar erro
+por SQLSTATE** pra decidir o que é terminal na fila, e um handler
+esperando `02000` não casaria nunca — o item ficaria retentando uma
+recusa definitiva, que é o modo de falha que a fila já pagou uma vez.
+Os três de agora: `P0001` raise_exception, `P0002` no_data_found,
+`42501` insufficient_privilege.
+
 ### O que não foi feito, e é decisão do usuário
 
 Nada de Dexie, fila ou envelope neste commit. A porta nasce e é provada
@@ -4599,11 +4627,11 @@ DCRR1 selado, venha ele de onde vier. Ler a seção "A 2C" do CLAUDE.md
 inteira antes da primeira linha — ela tem três armadilhas medidas, e uma
 delas é o item 34 de volta.
 
-**PENDENTE DE APLICAÇÃO:**
-`20260820170000_selar_romaneio_retorno_sincronizado.sql` (a 2C.1 —
-item 68). Escrita e não aplicada. O rodapé traz duas conferências: a 1
-não escreve nada e prova o perímetro; a 2 é opcional e **queima número
-de romaneio**, com a consequência explicada lá.
+**2C.1 APLICADA E CONFERIDA em 2026-08-20** —
+`20260820170000_selar_romaneio_retorno_sincronizado.sql` (item 68).
+Bloco 1 de `scripts/conferir-2c1-no-sql-editor.sql` passou nas quatro
+linhas, sem escrever nada. O bloco 2 continua opcional e **queima número
+de romaneio** — não foi rodado.
 
 Depois dela: **2C.2**, o trigger. Nada de Dexie, fila ou envelope antes
 de a porta nascer e ser provada isoladamente — decisão do usuário.
