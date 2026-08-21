@@ -1586,7 +1586,10 @@ código enfileira `fechamento_corrida`.**
    **Não comece antes da 2B.6.** A fila persiste o payload que produz o
    `document_hash`, então construí-la sobre um contrato com uma última
    mudança gratuita pendente é garantir retrabalho — e não só de código:
-   de dado no navegador de quem já usou.
+   de dado no navegador de quem já usou. **Desenho fechado em 2026-08-20,
+   antes do código — seção própria abaixo ("A 2C").** Leia-a inteira
+   antes da primeira linha: ela tem uma etapa que não é fila nem crypto,
+   e sim um gate de segurança da regra 7.
 8. **2D** — tela: Retorno de Corrida vira o fluxo do documento, e é onde
    o caminho feliz finalmente roda (cartão → PIN → duas assinaturas →
    selo). Fecha com o verificador confirmando o retorno recém-selado.
@@ -1598,6 +1601,189 @@ verificador vem antes de `papel_no_momento` porque sem ele "nada moveu"
 é uma afirmação, não uma medição — o mesmo método do §22 e do §49, onde
 medir o "antes" no mesmo instrumento foi o que impediu concluir certo por
 sorte.
+
+#### A 2C — desenho fechado em 2026-08-20, código não começado
+
+Mesmo método do item 58: fechar antes de escrever. A conversa mudou duas
+decisões e achou uma etapa que não estava no plano — e essa etapa **não é
+fila nem criptografia, é um gate de segurança da regra 7.**
+
+```
+2C.1  selar_romaneio_retorno_sincronizado          (migration)
+2C.2  trigger de obsolescência do fechamento legado (migration)
+2C.3  Dexie v5: backfill de `chave` + self-dependency no scheduler
+2C.4  `romaneio_retorno` na fila, com payload congelado
+2C.5  envelope com `tipo`
+2C.6  sync-romaneio: despacho por tipo
+2C.7  proteção local: não oferecer corrida com fechamento pendente
+2C.8  regressões e janela de compatibilidade
+```
+
+**A porta offline do retorno não existe, e a 2B sabia disso.**
+`selar_romaneio_retorno_interno` recebe `p_autorizacao_id` — uma
+autorização já emitida, de uso único, amarrada ao `document_hash`.
+Offline não existe autorização: o PIN só pode ser conferido na
+sincronização, a partir do envelope. A 2B construiu só a porta online e
+deixou a offline anotada num comentário. O espelho é literal —
+`selar_romaneio_sincronizado` resolve o tenant pelo perfil do caixa,
+chama `autenticar_credencial_interno`, confere que **o cartão é do
+motoboy que o documento nomeia**, e então *cunha* a autorização
+(1 minuto, amarrada ao hash) só pra o caminho do selo ser um só. Faça
+igual, trocando `registrar_conflito_romaneio` por
+`registrar_conflito_retorno`.
+
+O que essa forma compra, e é o motivo de não improvisar outra: **online e
+offline convergem no MESMO selo interno.** Não há segunda implementação
+de selagem, logo não há segunda fórmula de hash pra divergir.
+
+##### 2C.2 — o fechamento legado pode violar um DCRR1 já selado
+
+```
+retorno sela → corrida fecha → fechamento_corrida legado chega depois
+→ reescreve desfecho → o banco passa a dizer algo diferente
+   do documento assinado
+```
+
+Só **uma** das duas ordens é destrutiva. Fechamento antes do retorno dá
+`corrida_ja_fechada` → conflito, prova preservada, caro mas seguro
+(a 2B já previu isso num comentário). Retorno antes do fechamento é a
+regra 7 violada por escrita tardia, **sem erro nenhum**.
+
+**A dependência da fila NÃO pode ser a única proteção.** Pode haver fila
+antiga em outro computador, outra sessão, um navegador dias offline, ou
+uma chamada de cliente antigo. A ordenação local é otimização e UX; a
+última linha de defesa tem que estar no banco.
+
+**E não pode ser um guard em RPC, porque `fecharCorrida` não é RPC** — é
+um laço de UPDATEs diretos em `entregas` mais um UPDATE em `corridas`,
+pelo PostgREST. Não existe função onde pôr o guard. Isso não enfraquece o
+argumento, fortalece: guard em RPC jamais cobriria "cliente antigo". Quem
+cobre é **trigger**, e o precedente é `fn_entrega_protege_conferencia` —
+existe pelo mesmo motivo, a escrita precisa ficar aberta e RLS não
+restringe coluna.
+
+Três coisas que o trigger precisa acertar:
+
+- **O selo do retorno tem que se identificar como escritor autorizado.**
+  O interno insere o romaneio `'selado'` **antes** de gravar os desfechos
+  vale a vale. Um trigger ingênuo ("existe retorno selado pra esta
+  corrida? recuse") dispara durante o PRÓPRIO selo e bloqueia todo
+  retorno — é o item 34 repetido: *toda saída falharia, com o erro
+  apontando pro lugar errado*.
+- **Congelar exatamente o que o DCRR1 afirma: desfecho, motivo e
+  detalhe.** Nada além. Congelar demais quebra `status_documental` (o
+  convênio volta dias depois, pela aba Documentos) e `status_financeiro`
+  (o `marcarDivergencia`, que este arquivo mantém de propósito para o que
+  se descobre DEPOIS do retorno selado).
+- **O erro tem que ser classificável como terminal.** Só levantar
+  exceção põe o item legado em `erro` e no backoff pra sempre — o pior
+  sintoma conhecido do projeto. SQLSTATE distinguível → o handler legado
+  marca terminal (o mecanismo `ErroTerminalDeSaida` já existe) e grava
+  auditoria `fechamento_legado_obsoleto`.
+
+**Isto não contradiz a regra 7, e alguém vai achar que sim.** A regra 7
+lista status, observações e motivo de insucesso como MUTÁVEIS depois da
+saída — e está certa, porque a saída não afirma desfecho. **O retorno
+afirma.** É a mesma regra aplicada ao segundo documento.
+
+##### 2C.3 — a fila tem duas correções, e uma é latente
+
+**`fechamento_corrida` não tem `chave` própria**, só
+`dependeDeChave: corridaId`. Nada pode depender dele. E não adianta
+passar a setar daqui pra frente: os itens que importam são os que já
+estão gravados no IndexedDB de alguém. Precisa de **Dexie v5 com backfill
+`chave = payload.corridaId`** nos existentes.
+
+Feito isso, `dependeDeChave: corridaId` no retorno cobre os dois de uma
+vez — espera a `romaneio_saida` (que já usa `chave: corridaId`) **e** o
+fechamento legado. Uma regra, o mecanismo que já existe, nada inventado.
+
+**E `chave` igual a `dependeDeChave` é deadlock silencioso.** O guard é
+`todos.some((outro) => outro.chave === item.dependeDeChave)` e **não
+exclui o próprio item**. Uma operação que declarasse as duas com o mesmo
+valor dependeria de si mesma e nunca rodaria: `pendente`, `tentativas` em
+0, sem mensagem — o sintoma do §50.4, que já custou uma sessão.
+
+Por isso **`romaneio_retorno` declara só `dependeDeChave`, nunca
+`chave`** — e, mesmo assim, o guard genérico ganha `outro.id !== item.id`,
+pra não deixar a armadilha armada pro próximo tipo de fila. Dois testes,
+e o segundo não é redundante: *item com chave X e dependeDeChave X não se
+bloqueia por si próprio*, e *outro item com chave X bloqueia
+corretamente*. Sem o segundo, uma correção que desligasse o bloqueio
+inteiro passaria.
+
+##### 2C.4 e 2C.5 — congelado, e sem mentir no protocolo novo
+
+**A fila guarda o jsonb já convertido, não o objeto de domínio.** É a
+lição do item 65 aplicada antes de doer: guardando `EntradaRetorno` e
+chamando `paraJsonbRetorno` na hora de enviar, uma mudança de código
+entre enfileirar e sincronizar converte diferente, o servidor reconstrói
+outro DCRR1 e recusa `documento_alterado` com o documento já assinado.
+Congelado significa **estrutura convertida e persistida**, não bytes
+serializados: ordem de propriedade do JSON não é contrato, o contrato é o
+DCRR1 que o SQL reconstrói.
+
+**Os traços ganham nome novo no protocolo novo, e nenhum fallback:**
+
+```
+romaneio_saida legado →  caixaStrokes        ┐
+romaneio_retorno novo →  responsavelStrokes  ┴→ assinaturaInternaStrokes
+                         motoboyStrokes       → assinaturaMotoboyStrokes
+```
+
+A normalização acontece antes de `calcularOfflineEventHash`, e **a
+fórmula não muda um byte** porque ela concatena valores, não chaves.
+Renomear no fio é que seria quebra — corpos já gravados dizem
+`caixaStrokes`. Mas o retorno é rígido: **exige `responsavelStrokes`**.
+Não existe `romaneio_retorno` antigo em IndexedDB nenhum, então aceitar
+`caixaStrokes` ali seria criar hoje compatibilidade com um formato que
+nunca existiu — e perpetuar um nome que mente sobre quem assinou, que é a
+armadilha do `tipo_signatario` de novo.
+
+**O `tipo` tem a mesma assimetria, e ela é deliberada:**
+
+```
+body sem tipo                    → legado, interpretar como `saida`
+body tipo = saida                → saída nova
+body tipo = retorno              → retorno novo
+body tipo = retorno + envelope sem tipo   → RECUSA
+body.tipo ≠ envelope.tipo                 → RECUSA
+```
+
+**Ausência de `tipo` é compatibilidade histórica exclusiva do protocolo
+de saída anterior à 2C.** Ela existe só pra preservar fila antiga, e não
+deve virar permissividade para operação nova. O `tipo` vai **dentro do
+envelope** ao lado de `operationId` e `documentHash`: sem isso ele é
+campo não verificado, e o servidor acreditaria em vez de comparar.
+
+Sem discriminador nenhum, a `sync-romaneio` de hoje lê `corpo.entregaIds`
+e chama `selar_romaneio_sincronizado` direto — por isso a ausência
+PRECISA significar saída, senão todo `romaneio_saida` parado numa fila
+deixa de sincronizar no dia do deploy.
+
+##### O particionamento da fila, medido em 2026-08-20
+
+Perguntado explicitamente, então fica a resposta e não a impressão:
+
+- **O caso "A captura, B loga depois" está coberto duas vezes** — o gate
+  do cliente e o da Edge Function contra o JWT.
+- Mas está coberto por **`user_id` sozinho**. `tenantId` e `lojaId` são
+  gravados no item da fila e **nunca comparados**, em lugar nenhum.
+- **Tenant não é problema**: o servidor o deriva do perfil de quem chama,
+  nunca do payload.
+- **Loja é o ponto fraco, e só na saída.** `p_loja_id` vem do payload e é
+  conferida só contra os vales (`e.loja_id <> p_loja_id`), o que prova
+  consistência interna, não competência. `SECURITY DEFINER` ignora RLS,
+  então a proteção efetiva é "o caixa não consegue ler os ids de outra
+  filial", não "a função recusa".
+- **O retorno já nasce imune**, e é um acerto da 2B que vale preservar:
+  ele **não tem `p_loja_id`** — a loja sai de `v_saida.loja_id`, do
+  romaneio de saída selado. Payload nenhum opina.
+
+Por isso o buraco da saída **não entra na 2C** (não é alcançável pelo
+caminho normal, e a frente do retorno não o herda). O que entra é uma
+linha: a porta offline nova confere que o responsável tem competência
+sobre a loja da saída, pra não repetir o padrão em código novo.
 
 #### DCRR1 — o canônico do retorno, CONGELADO em 2026-08-19
 

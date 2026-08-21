@@ -43,6 +43,14 @@ bloco `d` da custódia física de papel, e as três cópias do conversor
 domínio → jsonb que ele expôs). Cinco migrations, todas aplicadas e
 conferidas no banco.
 
+Fecham a frente o **item 66** — o teste de transporte passando a
+perguntar sobre o bloco `d`, que ele nunca exercitou — e o **item 67**,
+o **desenho da 2C fechado contra o código antes da primeira linha**. O 67
+é o que ler antes de retomar: ele achou que a porta offline do retorno
+não existe, que o fechamento legado não é RPC (logo o guard é trigger), e
+transformou a proteção da regra 7 contra escrita tardia de ordenação de
+fila em **gate de segurança**. Nada dele está construído.
+
 **O que NÃO existe ainda, e é fácil supor errado:** não há deploy — nem
 conta na Cloudflare, nem site no ar. Tudo rodou em localhost, numa
 máquina só. A premissa de dois dispositivos (PC do caixa + tablet do
@@ -3937,6 +3945,284 @@ de volta (um convênio). É a única onde o bloco `d` importa hoje, e a
 levantamento voltou zero linhas, então a migration nasceu sem backfill, e
 aquele caminho inteiro segue sem exercício até alguém vender um.
 
+## 66. O teste de transporte passa a perguntar sobre o bloco `d`
+
+Sessão de 2026-08-20, fechando o que a 2B.5 deixou aberto. O
+`conferir-canonico-retorno-no-console.js` tinha cinco cenários e **zero
+ocorrências de `documentos`**: respondia "o fio preserva o que os gêmeos
+concordam?" sem nunca ter perguntado sobre a metade do contrato que
+acabara de entrar.
+
+**Não é um cenário faltando — é o defeito do item 65 sobrevivendo ao
+próprio conserto.** O `paraJsonbRetorno` sem `documentos` foi pego pela
+conferência dos vetores contra o banco; este script não pegou, e não
+tinha como: a cobertura dele morava no comentário e não no código, que é
+o mesmo defeito que as três revisões de 19/08 corrigiram, de volta por
+outra porta no dia seguinte.
+
+### Quatro cenários, e o que cada um alcança que os outros não
+
+| cenário | a propriedade |
+|---|---|
+| `pr` e `d` no MESMO vale (crediário) | os TRÊS blocos cheios ao mesmo tempo — e `crediario` como forma só passa com a `20260820120000` aplicada |
+| insucesso com papel em branco (V014) | `pr` É filtrado por desfecho, `d` não é. Bloco `pr` vazio com `d` cheio só sai daqui |
+| convênio + crediário no mesmo vale, **fora de ordem no input** | a identidade é o PAR (entrega_id, tipo); com um documento por vale a ordenação seria indistinguível. Leva também o único `faltante` |
+| `d` em DOIS de três vales, **vales invertidos no input** | vale sem papel não gera linha — bloco vazio é ausência, nunca placeholder — e a ordenação do bloco `d` **entre vales** |
+
+Os dois últimos cobrem **eixos diferentes de ordenação**, e um achatamento
+errado pode acertar um e errar o outro: tipo dentro do vale, e vale
+dentro do bloco.
+
+Os quatro primeiros cenários **continuam sem declarar `documentos`, e
+isso fica**: é o formato de um item PARADO NA FILA, gravado no IndexedDB
+antes de o campo existir. `paraJsonbRetorno` resolve `undefined` pra `[]`
+e o canônico faz `?? []` — quem prova que os dois concordam em "nenhuma
+linha `d`" é o fio, não a leitura do código.
+
+### A cobertura saiu do comentário e foi pro resultado
+
+A tabela ganhou `v`/`pr`/`d` por cenário e o rodapé diz em quantos deles
+o bloco `d` apareceu. Sem isso, um conjunto que perdesse os documentos
+voltaria `TRANSPORTE PRESERVA` com a mesma cara de sempre — que foi
+exatamente a assinatura do defeito de 20/08: tudo verde, nada
+exercitado.
+
+E entrou um quarto critério, `payload`: a contagem de blocos do canônico
+**assinado** contra a do payload **enviado**. Os três antigos já pegariam
+o defeito (o servidor reconstrói de menos e o hash muda); o que este
+acrescenta é o NOME — transforma "os bytes divergiram" em "o payload não
+levou o campo", que é a diferença entre uma investigação e uma linha.
+
+### A guarda foi medida contra o defeito que a motivou
+
+Senão é decoração. Reintroduzi a remoção de `documentos` no
+`paraJsonbRetorno` e rodei os cenários pelo gêmeo TypeScript real, lidos
+DO ARQUIVO e não de uma cópia (mesmo princípio do §57): os **4 cenários
+com `d` acusaram enquanto os 5 sem ficaram verdes** — a mesma assinatura
+limpa demais do item 65, agora visível de dentro do script de transporte
+em vez de só pela conferência contra o banco. Restaurado por
+`git checkout` logo depois.
+
+### Rodou contra o banco: 9 · 4 critérios · 0 divergências
+
+O usuário colou no console. Todos os nove cenários verdes nos quatro
+critérios, `bloco d: 4 de 9 cenários`, e os bytes locais batendo com os
+do servidor um a um (929, 572, 392, 395, 833, 569, 998, 616, 692).
+
+### E o canônico impresso pegou o que os booleanos escondiam
+
+**Pela terceira vez nesta frente, o texto disse o que os `true` não
+diziam.** O cenário multi-vale saiu com **uma linha `d` só** — e uma
+linha não discrimina ordenação nenhuma: ela é a mesma em qualquer ordem.
+O comentário dele afirmava que provava o reordenamento por `entrega_id`
+antes do achatamento; o dado provava metade disso (vale sem papel não
+gera linha, e o documento fica grudado no `entrega_id` certo), e o
+eixo da ordenação entre vales ficava sem discriminação.
+
+Repare que o argumento **não depende** de os `ids` terem voltado
+ordenados do banco: com uma linha só, não há ordem a errar.
+
+Corrigido pra DOIS documentos em vales diferentes, com situações
+diferentes de propósito — trocá-los de lugar muda o TEXTO, não só a
+posição. Agora o par sai no canônico na ordem INVERSA à que entrou.
+
+E o instrumento passou a medir isso em vez de eu afirmar: o conferidor
+offline compara a ordem de entrada com a de saída e conta quantos
+cenários **discriminam**. Resultado: `14 linhas d · 2 discriminando`,
+um por eixo (tipo dentro do vale, vale dentro do bloco). Cenário que não
+discrimina não vira falha — os dois primeiros não existem pra isso —,
+mas agora aparece rotulado, em vez de passar parecendo que prova.
+
+**O que isso custa:** o script mudou depois do run verde, então a última
+linha da tabela vai ter `d: 2` no lugar de `d: 1` e o rodapé vai dizer
+14 linhas em vez de 13. **Precisa rodar de novo** — o run que está
+registrado acima é do script anterior.
+
+### Um risco descartado antes de dar por pronto
+
+`conferir_canonico_retorno` é da migration `20260819150000`, **anterior
+ao bloco `d`**. Se ela tivesse cópia própria da serialização, o script
+passaria verde ignorando os documentos — a quarta cópia, no mesmo lugar
+onde as outras três moravam. Não tem: ela delega a
+`romaneio_retorno_canonico` pelo nome, e a `20260820150000` faz
+`create or replace` com **assinatura idêntica** `(uuid, text, uuid, uuid,
+jsonb)`, ou seja trocou o corpo em vez de criar sobrecarga. Se as
+assinaturas diferissem, o `conferir_` continuaria chamando a versão
+velha e nada acusaria.
+
+## 67. O desenho da 2C, fechado contra o código antes da primeira linha
+
+Sessão de 2026-08-20, com os gates A e B ainda abertos. Mesmo método do
+item 58: o usuário trouxe um plano em quatro blocos e mandou ler a 2C
+inteira em modo de desenho. A leitura mudou dois blocos, achou uma etapa
+que não estava no plano, e o usuário barrou o plano num ponto — que era o
+ponto certo. O desenho final está no CLAUDE.md, seção "A 2C". Aqui fica o
+que a conversa **achou**.
+
+### Duas coisas que só o código responde
+
+**A porta offline do retorno não existe, e a 2B sabia.**
+`selar_romaneio_retorno_interno` recebe `p_autorizacao_id`, não token e
+PIN — e offline não há autorização, porque o PIN só se confere na
+sincronização, a partir do envelope. A 2B construiu só a porta online e
+deixou a outra anotada num comentário. Sem essa leitura, a 2C começaria
+pela fila e descobriria o buraco na hora de chamar a transação.
+
+**`fecharCorrida` não é RPC.** É um laço de UPDATEs diretos em `entregas`
+mais um UPDATE em `corridas`, pelo PostgREST. Isso decidiu a forma do
+gate de segurança abaixo: não há função onde pôr guard, então é trigger.
+
+### O ponto em que o usuário barrou o plano, e ele estava certo
+
+Eu tinha achado o cenário destrutivo — retorno sela, corrida fecha,
+`fechamento_corrida` legado chega depois e reescreve o desfecho, e o
+banco passa a dizer coisa diferente do documento assinado — e propus
+resolvê-lo com a dependência da fila (`dependeDeChave`).
+
+Ele recusou isso como proteção suficiente, com o argumento que fecha:
+**pode existir fila antiga em outro computador, outra sessão, um
+navegador dias offline, ou uma chamada de cliente antigo.** Ordenação em
+IndexedDB não alcança nada disso. A dependência local continua valendo
+como otimização e UX; a última linha de defesa da regra 7 tem que estar
+no banco.
+
+E aí o código endossou por outro caminho: como `fecharCorrida` não é RPC,
+**guard em RPC jamais cobriria "cliente antigo"** — que era exatamente o
+caso dele. O que cobre é trigger. Virou a **2C.2**, e o enquadramento
+dele é o que vale registrar: *gate de segurança, não ordenação de fila*.
+
+**A armadilha do trigger, que é o item 34 de volta:** o interno insere o
+romaneio `'selado'` ANTES de gravar os desfechos vale a vale. Um trigger
+ingênuo dispararia durante o próprio selo e bloquearia todo retorno —
+*toda saída falharia, com o erro apontando pro lugar errado*.
+
+### Duas coisas que eu errei lendo, e uma que quase virou nota errada
+
+**Achei que faltava o guard de reenvio no retorno.** Li as checagens de
+`corrida_ja_fechada` e `retorno_ja_existe` no meio da função e concluí
+que um reenvio bem-sucedido viraria conflito — o que quebraria o modelo
+inteiro da fila. Está lá: é a PRIMEIRA coisa do corpo, mesmo formato da
+saída (`selado` → `ok/ja_existia`; `conflito` → devolve o conflito em vez
+de escondê-lo). Ler o meio de uma função de 400 linhas e concluir sobre o
+começo dela é o mesmo defeito do gerador do DCRR1 em 19/08: **ponta de
+arquivo não prova estrutura de arquivo**, e meio de função não prova
+ausência no topo.
+
+**E `conferir_canonico_retorno` quase virou uma quarta cópia na minha
+cabeça.** Ela é de `20260819150000`, anterior ao bloco `d` — se tivesse
+serialização própria, o teste de transporte passaria verde ignorando
+documentos. Não tem: delega pelo nome, e a `20260820150000` faz
+`create or replace` com assinatura idêntica. Risco descartado por
+medição, não por suposição.
+
+### O particionamento, medido porque foi perguntado
+
+O usuário mandou conferir, sem assumir pendência. A resposta é parcial e
+muda por camada — está inteira no CLAUDE.md. O resumo: o caso que ele
+nomeou (A captura, B loga depois) está coberto duas vezes, mas por
+`user_id` sozinho; `tenantId` e `lojaId` são gravados no item e nunca
+comparados; tenant não é problema porque o servidor o deriva do perfil;
+**loja é o ponto fraco e só na saída**, porque `SECURITY DEFINER` ignora
+RLS e a conferência prova consistência interna, não competência.
+
+**O retorno já nasce imune** — não tem `p_loja_id`, a loja sai do
+romaneio de saída selado. Por isso o buraco da saída ficou como gap
+anotado em vez de entrar na 2C: não é alcançável pelo caminho normal, e a
+frente nova não o herda.
+
+### Nada construído
+
+Os gates A e B seguem abertos. Foi leitura e desenho; o único arquivo de
+código tocado nesta frente continua sendo o script de transporte do item
+66.
+
+## 68. Etapa 2C.1 — a porta offline do retorno
+
+Sessão de 2026-08-20, com os gates A e B fechados e a 2C declarada
+liberada. `20260820170000_selar_romaneio_retorno_sincronizado.sql`,
+**escrita e ainda não aplicada**. Espelho literal de
+`selar_romaneio_sincronizado`: autentica cartão e PIN vindos do envelope,
+confere que o cartão é do motoboy que o documento nomeia, **cunha** a
+autorização efêmera amarrada ao `document_hash` do retorno, e entrega ao
+`selar_romaneio_retorno_interno` com `p_modo = 'offline_sincronizada'`.
+
+O que essa forma compra e é o motivo de não improvisar outra: **online e
+offline convergem no mesmo selo interno.** Nenhuma segunda implementação
+de selagem, logo nenhuma segunda fórmula de hash pra divergir.
+
+### Duas coisas que o código impôs e que não estavam no plano
+
+**1. O guard de reenvio subiu pra porta.** No interno ele já existe (é a
+primeira coisa do corpo), e pro caminho online isso basta. Aqui não: a
+fila reenvia; se no meio tempo a credencial tiver sido bloqueada por
+outra pessoa errando o PIN, o reenvio de um retorno JÁ SELADO falharia a
+autenticação, cairia em `registrar_conflito_retorno` com o MESMO
+`p_romaneio_id` que já existe, violaria a chave primária, levantaria
+exceção — e o item da fila entraria em `erro` e no backoff **pra
+sempre**, que é o pior sintoma conhecido daqui (§50.4).
+
+Com o guard em cima, reenvio nem encosta na credencial. De quebra, deixa
+de gastar um bcrypt por reenvio. O interno continua sendo a autoridade:
+divergindo os dois, o pior caso é o atalho não disparar.
+
+A porta da SAÍDA tem a mesma forma latente. Não mexi nela — é código em
+produção, o caso é estreito, e a 2C não é lugar de reescrever a saída.
+Fica anotado.
+
+**2. A competência sobre a loja virou CONFLITO, não exceção.** Eu tinha
+proposto como "uma linha" e a linha estava errada. O caso alcançável é
+legítimo: um caixa registra o retorno offline e tem o perfil movido de
+filial antes de a fila drenar. **O retorno aconteceu**; o que mudou foi o
+cadastro de quem o fez. Levantar exceção deixaria as duas assinaturas só
+no IndexedDB dele.
+
+E ela vem ANTES da autenticação de propósito: quem não tem competência
+sobre aquela filial não deve conseguir queimar o contador de tentativas
+de um motoboy.
+
+Detalhe que quase virou defeito: o literal é `v_papel <> 'admin'`, e é
+o certo porque `is_admin()` é **estritamente** `papel = 'admin'` —
+`superadmin` existe no CHECK de `profiles.papel` desde o schema inicial e
+não entra em `is_admin()`, logo não atravessa filial em policy nenhuma.
+Acrescentá-lo ali abriria um escopo que a RLS fecha.
+
+### O achado que atinge o GATE A, e é melhor saber antes
+
+**`romaneios_numero_seq` não volta atrás com rollback.** As conferências
+que exercitam caminhos de conflito inserem em `romaneios`; o `raise` do
+fim desfaz as LINHAS, mas os números gastos ficam gastos.
+
+Consequência direta na checagem de fechamento do gate A: 
+`selados + conflitos = maior R- emitido` **só fecha enquanto nada tiver
+sido selado DEPOIS de números queimados.** Ela fechou em 20/08 (14 = 14)
+porque as conferências da 2B queimaram números e nenhum romaneio real
+nasceu depois. **No primeiro selo real seguinte ela vai acusar
+`selados + conflitos < maior`** — e isso não é documento perdido, é
+rollback de conferência.
+
+É o mesmo defeito de enunciado que o §64 já registrou uma vez ("o gate
+nunca foi 'o número é 10'"), noutra roupa. A forma robusta da mesma
+pergunta, que não depende de sequência contígua:
+
+```sql
+select count(*) = count(*) filter (where status in ('selado','conflito'))
+  from public.romaneios;
+```
+
+Toda linha existente é ou selada ou conflito, nenhuma some. Os buracos na
+sequência passam a ser explicáveis por rollback em vez de terem que ser
+zero.
+
+### O que não foi feito, e é decisão do usuário
+
+Nada de Dexie, fila ou envelope neste commit. A porta nasce e é provada
+isoladamente; a 2C.2 (o trigger) vem depois dela.
+
+E o caminho feliz continua sem como ser testado daqui: exige cartão
+físico e PIN. A conferência 1 do rodapé prova o perímetro — grants, o
+guard de reenvio disparando com token lixo, e as duas exceções — sem
+escrever nada.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -4263,20 +4549,79 @@ formalidade:
 
 ```
 2B.5  bloco `d`                              ✓  65/65 e 8/8 no banco
-      ├─ teste de TRANSPORTE com documentos  ← falta
-      └─ (a spec já está no CLAUDE.md)
+      └─ teste de TRANSPORTE com documentos  ✓ rodou 9/9 — RERODAR (*)
+
+(*) o cenário multi-vale foi reforçado DEPOIS do run verde (uma linha
+    `d` não discriminava ordenação — item 66). Espere `d: 2` na última
+    linha e `14 linhas no total` no rodapé.
 
 2B.6  repetir os gates                       ← formalidade: já verdes
-2C    fila offline + envelope + sync-romaneio
+2C    desenho FECHADO (item 67) — código não começado
 2D    tela + caminho feliz real
 ```
 
-**O teste de transporte é o que falta de verdade.** O
-`scripts/conferir-canonico-retorno-no-console.js` ainda monta cenários
-sem bloco `d` — ele responde "o fio preserva o que os gêmeos concordam?"
-e precisa passar a fazer essa pergunta com documento no payload. Depois
-do defeito do `paraJsonbRetorno` (item 65), é o teste mais relevante que
-existe nesta frente: foi exatamente essa camada que escondeu o problema.
+**Os dois gates FECHARAM em 2026-08-20**, rodados pelo usuário no
+instrumento certo, depois das migrations do bloco `d`:
+
+```
+GATE A   verificar_integridade_resumo(), como ADMIN
+         saida     11 · 11 · 0
+         retorno    0 ·  0 · 0
+         TOTAL     11 · 11 · 0
+         conflito   3 · NULL · NULL   (não se aplica, não é zero)
+         sequência  11 + 3 = 14 = maior R- emitido   → FECHA
+
+GATE B   transporte, recolado depois do reforço do cenário 8
+         9 cenários · 4 critérios · bytesLocal == bytesServidor 9/9
+         cenário 8 com d: 2 · rodapé "4 de 9 cenários, 14 linhas"
+         692 → 749 = +57 bytes, explicados campo a campo
+```
+
+**2B.6 fechada. 2C liberada** — declarado explicitamente pelo usuário.
+
+**A 2C começa por MIGRATION, não por fila** — `selar_romaneio_retorno_sincronizado`,
+a porta offline que a 2B deixou anotada num comentário e não construiu.
+E a **2C.2 é gate de segurança, não ordenação de fila**: um trigger que
+impede o `fechamento_corrida` legado de reescrever desfecho depois de um
+DCRR1 selado, venha ele de onde vier. Ler a seção "A 2C" do CLAUDE.md
+inteira antes da primeira linha — ela tem três armadilhas medidas, e uma
+delas é o item 34 de volta.
+
+**PENDENTE DE APLICAÇÃO:**
+`20260820170000_selar_romaneio_retorno_sincronizado.sql` (a 2C.1 —
+item 68). Escrita e não aplicada. O rodapé traz duas conferências: a 1
+não escreve nada e prova o perímetro; a 2 é opcional e **queima número
+de romaneio**, com a consequência explicada lá.
+
+Depois dela: **2C.2**, o trigger. Nada de Dexie, fila ou envelope antes
+de a porta nascer e ser provada isoladamente — decisão do usuário.
+
+**O teste de transporte está escrito e não foi rodado** — ele exige
+login, então é clique seu. Item 66: nove cenários, quatro com bloco `d`,
+mais um quarto critério (`payload`) e as contagens `v`/`pr`/`d` na
+tabela, pra "rodei e passou" não poder mais esconder "não exercitou".
+
+**Como rodar:** app aberto e logado, F12 → Console, colar
+`scripts/conferir-canonico-retorno-no-console.js` inteiro. Não sela nada
+(`conferir_canonico_retorno` é read-only), pode rodar sobre produção, e
+pode ser colado quantas vezes quiser — está tudo dentro de um bloco.
+
+O que esperar: `TRANSPORTE PRESERVA — 9 cenários, quatro critérios cada`
+e a linha `bloco \`d\`: 4 de 9 cenários, 14 linhas no total`. Se a
+segunda linha disser `SEM COBERTURA`, alguém perdeu os documentos no
+caminho e os quatro critérios não afirmam nada sobre eles. Se `payload`
+vier `false` em alguma linha, comece por ela: quer dizer que o canônico
+assinado e o payload enviado têm contagens diferentes, e o resto é
+consequência.
+
+**E leia o canônico impresso no fim, não só a tabela.** Foi ele que
+achou o defeito do próprio cenário 8 no primeiro run — a tabela estava
+inteira verde.
+
+Já provado daqui, sem rede: os nove cenários são válidos, saem na ordem
+`v → pr → d`, o `d` sai ordenado por (entrega_id, tipo), dois deles
+discriminam ordenação (um por eixo), e a guarda foi medida contra o
+defeito do item 65 (4 acusam, 5 ficam verdes).
 
 **Dois ramos continuam sem exercício, e não bloqueiam:**
 
