@@ -4337,11 +4337,46 @@ romaneio de retorno `'selado'` sobre uma corrida aberta de verdade, mede
 as três coisas e desfaz. Ele **queima um número de romaneio**, porque a
 sequência não volta atrás com rollback.
 
-E o SQLSTATE (`DCRR1`) está escrito na migration mas **precisa ser
-medido**, não copiado: na 2C.1 eu previ `02000` e o banco devolveu
-`P0002`. É esse valor que o handler da 2C.8 vai reconhecer pra marcar o
-item como terminal, e errá-lo faz o item retentar uma recusa definitiva
-pra sempre.
+### Aplicada e conferida em 2026-08-20
+
+```
+(a) funcao instalada     t
+(b) trigger              antes=t update=t por_linha=t
+(c) antes do retorno     PASSOU
+(d) depois do retorno    RECUSOU  SQLSTATE=DCRR1
+    "Desfecho já selado no romaneio de retorno R-000018: …"
+(e) status_financeiro    LIVRE
+```
+
+Os três do bloco 2 juntos são o que fecha: `(c)` sozinho não prova que o
+guard morde, `(d)` sozinho esconderia um trigger que trava todo
+fechamento, e `(e)` é o que prova que congelei três colunas e não a
+tabela.
+
+**`DCRR1` é agora MEDIDO, não previsto.** Postgres aceita SQLSTATE
+customizado de cinco caracteres, e é este valor que o handler legado da
+2C.8 tem que reconhecer pra marcar o item TERMINAL. Errá-lo faz o item
+retentar uma recusa definitiva pra sempre. Depois do `P0002` da 2C.1 eu
+não trato mais SQLSTATE escrito por mim como conhecido.
+
+### E o `R-000018` provou a nota da sequência sem eu pedir
+
+O romaneio sintético recebeu **R-000018**, enquanto o gate A mediu
+`maior R- emitido = 14` horas antes. Ou seja: 15, 16 e 17 já estavam
+gastos — são as três recusas que a conferência da 2B exercitou
+(`vales_nao_conferem`, `outro_motoboy`, `saida_hash_nao_confere`), cada
+uma um `registrar_conflito_retorno` desfeito por rollback.
+
+Isso deixa de ser previsão e vira medição: a sequência está em 18 e o
+maior número EXISTENTE é 14. A aritmética `selados + conflitos = maior
+emitido` fecha hoje só porque nenhuma linha nasceu depois das queimas.
+**A próxima saída real será R-000019, e aí `12 + 3 = 15 ≠ 19`** — sem
+nenhum documento ter sumido. Use a forma robusta:
+
+```sql
+select count(*) = count(*) filter (where status in ('selado','conflito'))
+  from public.romaneios;
+```
 
 ## Commits desta sessão
 
@@ -4713,12 +4748,10 @@ Bloco 1 de `scripts/conferir-2c1-no-sql-editor.sql` passou nas quatro
 linhas, sem escrever nada. O bloco 2 continua opcional e **queima número
 de romaneio** — não foi rodado.
 
-**2C.2 PENDENTE DE APLICAÇÃO** —
+**2C.2 APLICADA E CONFERIDA em 2026-08-20** —
 `20260820180000_fechamento_legado_obsoleto.sql` (item 69), com
-`scripts/conferir-2c2-no-sql-editor.sql`. O bloco 1 é instalação e não
-escreve; **o bloco 2 é o que fecha a etapa** (guarda que não se prova
-contra o defeito que a motivou é decoração) e queima um número de
-romaneio. Anotar o SQLSTATE que ele devolver — é o que a 2C.8 vai usar.
+`scripts/conferir-2c2-no-sql-editor.sql`. Os dois blocos passaram. O SQLSTATE medido é **`DCRR1`** — é ele que
+o handler legado da 2C.8 tem que reconhecer.
 
 Depois: **2C.3**, Dexie v5. Nada de fila ou envelope antes de as duas
 migrations estarem provadas — decisão do usuário.
