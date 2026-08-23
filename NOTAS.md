@@ -4263,6 +4263,86 @@ físico e PIN. A conferência 1 do rodapé prova o perímetro — grants, o
 guard de reenvio disparando com token lixo, e as duas exceções — sem
 escrever nada.
 
+## 69. Etapa 2C.2 — o gate de segurança da regra 7
+
+`20260820180000_fechamento_legado_obsoleto.sql`, **escrita e ainda não
+aplicada**. Trigger `BEFORE UPDATE` em `entregas` que impede o
+`fechamento_corrida` legado de reescrever desfecho depois de um DCRR1
+selado — venha ele da fila deste computador, de outra sessão, de um
+navegador dias offline ou de um cliente antigo.
+
+### O discriminador, e por que ele dispensa mexer no interno
+
+A armadilha era o item 34 de volta: `selar_romaneio_retorno_interno`
+insere o romaneio `'selado'` **antes** de gravar os desfechos, então um
+trigger que perguntasse "existe retorno selado pra esta corrida?"
+bloquearia o próprio selo — *toda saída falharia, com o erro apontando
+pro lugar errado*.
+
+Fui ler a ordem exata dos statements dentro do interno, e ela resolve:
+
+```
+insert romaneios (tipo=retorno, status=selado)   linha 423
+insert romaneio_entregas
+update entregas  (desfecho, motivo, observações) linhas 449 e 522
+update corridas  status = 'fechada'              linha 598   ← só no fim
+```
+
+O par **"existe retorno selado E a corrida está fechada"** só é verdade
+depois do selo inteiro. Durante ele a corrida ainda está aberta, então o
+trigger não vê nada e o selo passa.
+
+E isso não é truque: é a definição de *o documento está pronto*. Vale
+mais que um `set local` ou um flag de sessão porque **não exige reabrir
+`selar_romaneio_retorno_interno`**, que já tem duas definições no
+repositório e é a função mais delicada desta frente.
+
+Fica um acoplamento, e está escrito nos dois lugares: mover o
+`update public.corridas` do fim do interno pra antes do laço faz o
+trigger bloquear o próprio selo. É o mesmo tipo de amarração que a saída
+carrega desde o item 34.
+
+### A auditoria não pode ser gravada pelo trigger
+
+O desenho dizia "o handler legado marca terminal e grava auditoria
+`fechamento_legado_obsoleto`". Escrevendo, ficou claro por que a segunda
+metade **tem** que ser do cliente: um `insert into eventos` antes do
+`raise` seria desfeito pelo rollback que o próprio `raise` provoca. O
+evento nunca existiria, e quem lesse o código concluiria que existe.
+
+### Dois defeitos no meu próprio instrumento, achados antes de mandar
+
+O trigger sai na primeira linha quando nenhuma das três colunas do DCRR1
+muda — é o que o torna barato. E foi isso que quase invalidou a
+conferência inteira:
+
+1. `(c)` e `(d)` atualizavam `status_entrega` para **o mesmo valor**.
+   Os dois passariam por curto-circuito, sem o guard ser exercitado uma
+   única vez, e eu leria `(d) PASSOU <-- ERRADO` como se o trigger
+   estivesse quebrado.
+2. Corrigido o primeiro, sobrou o segundo: `(c)` deixa a coluna no valor
+   novo, então `(d)` mandando o mesmo valor novo voltaria a ser no-op.
+   `(d)` passou a **reverter** pro original — a mudança tem que ser real
+   nas duas tentativas, não só na primeira.
+
+É a décima segunda vez que o instrumento concordaria com o defeito. A
+diferença é que desta vez os dois foram pegos antes de rodar, lendo o
+que eu tinha acabado de escrever — o mesmo método do item 34.
+
+### O que a conferência não alcança
+
+**Não existe retorno selado real** (o placar diz `retorno 0 · 0 · 0`),
+então o caminho positivo só existe sintético até a 2D: o bloco 2 monta um
+romaneio de retorno `'selado'` sobre uma corrida aberta de verdade, mede
+as três coisas e desfaz. Ele **queima um número de romaneio**, porque a
+sequência não volta atrás com rollback.
+
+E o SQLSTATE (`DCRR1`) está escrito na migration mas **precisa ser
+medido**, não copiado: na 2C.1 eu previ `02000` e o banco devolveu
+`P0002`. É esse valor que o handler da 2C.8 vai reconhecer pra marcar o
+item como terminal, e errá-lo faz o item retentar uma recusa definitiva
+pra sempre.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -4633,8 +4713,15 @@ Bloco 1 de `scripts/conferir-2c1-no-sql-editor.sql` passou nas quatro
 linhas, sem escrever nada. O bloco 2 continua opcional e **queima número
 de romaneio** — não foi rodado.
 
-Depois dela: **2C.2**, o trigger. Nada de Dexie, fila ou envelope antes
-de a porta nascer e ser provada isoladamente — decisão do usuário.
+**2C.2 PENDENTE DE APLICAÇÃO** —
+`20260820180000_fechamento_legado_obsoleto.sql` (item 69), com
+`scripts/conferir-2c2-no-sql-editor.sql`. O bloco 1 é instalação e não
+escreve; **o bloco 2 é o que fecha a etapa** (guarda que não se prova
+contra o defeito que a motivou é decoração) e queima um número de
+romaneio. Anotar o SQLSTATE que ele devolver — é o que a 2C.8 vai usar.
+
+Depois: **2C.3**, Dexie v5. Nada de fila ou envelope antes de as duas
+migrations estarem provadas — decisão do usuário.
 
 **O teste de transporte está escrito e não foi rodado** — ele exige
 login, então é clique seu. Item 66: nove cenários, quatro com bloco `d`,
