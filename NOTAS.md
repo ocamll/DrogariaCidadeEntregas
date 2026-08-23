@@ -4447,6 +4447,20 @@ E o construtor da Dexie sai de `db.constructor`, não de
 `?v=<hash>` e carrega uma SEGUNDA instância quando o hash muda (§61).
 Assim não há hash pra acertar.
 
+### Conferido no navegador em 2026-08-20: 11 de 11
+
+```
+verno=5 · chave backfillada · payload intacto byte a byte
+status/tentativas/erro/relógios intactos · malformado preservado sem chave
+item que já tinha chave intocado · outro tipo não reinterpretado
+nenhum item apagado (4 de 4) · banco de conferência apagado no fim
+```
+
+Os casos 8 e 9 juntos são os que mais valem: rodar o backfill de novo
+**não corrige nada E continua denunciando o malformado**. Um upgrade que
+esquecesse o item torto na segunda passada pareceria idempotente e teria
+perdido a única evidência de estado antigo que existe.
+
 ### Uma armadilha do próprio processo, de novo
 
 Ao medir a guarda contra o defeito, o `git checkout --` **não restaurou**
@@ -4833,12 +4847,11 @@ de romaneio** — não foi rodado.
 `scripts/conferir-2c2-no-sql-editor.sql`. Os dois blocos passaram. O SQLSTATE medido é **`DCRR1`** — é ele que
 o handler legado da 2C.8 tem que reconhecer.
 
-**2C.3 FEITA (item 70), pendente de conferência no navegador** — Dexie
+**2C.3 FEITA E CONFERIDA (item 70)** — Dexie
 v5 com backfill de `chave` e a self-dependency desarmada. Os testes A e
 B rodaram aqui (`npx tsx scripts/dependencia-da-fila.spec.mts`, 9/9, e a
 guarda medida contra o predicado antigo: 3 falham, 6 continuam
-passando). Falta o C, que precisa de IndexedDB real:
-`scripts/conferir-dexie-v5-no-console.js`, colado no console do app.
+passando). E o C rodou no navegador: **11 de 11**.
 
 Depois: **2C.4**, `romaneio_retorno` na fila com payload congelado.
 
