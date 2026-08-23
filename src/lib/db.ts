@@ -3,13 +3,14 @@ import type { NovaEntrega, NovaTransferencia } from '@/data/entregas'
 import type { NovaCorridaComAssinatura, FecharCorridaInput } from '@/data/corridas'
 import type { MarcarDivergenciaInput } from '@/data/pagamentos'
 import type { NotificarFaltaReceitaInput } from '@/data/documentos'
-import type { SaidaOfflineInput } from '@/data/romaneios'
+import type { SaidaOfflineInput, RetornoOfflineInput } from '@/data/romaneios'
 
 export type TipoOperacaoFila =
   | 'entrega'
   | 'transferencia'
   | 'corrida'
   | 'romaneio_saida'
+  | 'romaneio_retorno'
   | 'divergencia'
   | 'fechamento_corrida'
   | 'falta_receita'
@@ -25,6 +26,9 @@ export type PayloadPorTipo = {
   // nenhum na base instalada.
   corrida: NovaCorridaComAssinatura
   romaneio_saida: SaidaOfflineInput
+  // Tipo PRÓPRIO, não uma variação da saída — ver RetornoOfflineInput.
+  // Nada o enfileira ainda: quem vai é a tela, na 2D.
+  romaneio_retorno: RetornoOfflineInput
   divergencia: MarcarDivergenciaInput
   fechamento_corrida: FecharCorridaInput
   falta_receita: NotificarFaltaReceitaInput

@@ -4472,6 +4472,90 @@ Fica a regra: **medir guarda contra defeito em arquivo não rastreado
 exige desfazer à mão**, e o segundo `raise` verde é parte da medição, não
 formalidade.
 
+## 71. Etapa 2C.4 — o artefato offline do retorno
+
+`romaneio_retorno` entrou na fila. Nada o enfileira ainda — quem vai é a
+tela, na 2D —, então ele nasce e é medido isolado, como as anteriores.
+
+O objetivo, na frase do usuário: **fazer nascer um artefato offline de
+retorno imutável o bastante pra sobreviver a uma atualização do
+aplicativo sem mudar o documento que já foi assinado.**
+
+### O objeto de domínio NÃO vai junto, nem por conveniência
+
+Depois de enfileirado o artefato é `retornoJsonb + documentHash + os
+dois traços`, e mais nada. `EntradaRetorno` fica de fora **de
+propósito**: com ele no payload, alguém em algum momento chamaria
+`paraJsonbRetorno` de novo no sync, e uma atualização do app entre
+enfileirar e sincronizar converteria diferente — servidor reconstrói
+outro DCRR1, chega a outro hash, recusa `documento_alterado` com as duas
+assinaturas colhidas e o motoboy no balcão.
+
+É o defeito do item 65 impedido **por construção**: tirando do payload
+aquilo de que a reconversão precisaria. O teste afirma a ausência
+(`entradaRetorno === undefined && vales === undefined`), senão "não
+guardamos o domínio" seria uma intenção, não uma propriedade.
+
+`versaoDocumento: 'DCRR1'` entrou a pedido do usuário. Hoje é redundante
+porque só existe um contrato; existe pelo dia do `DCRR2`, quando um item
+parado na fila de alguém precisar dizer sob qual contrato foi assinado —
+e essa resposta não pode depender da versão do app que drenar a fila.
+**Não confundir com o `tipo` do envelope (2C.5)**: aquele é
+`saida | retorno` e é criptograficamente amarrado; este é a versão do
+canônico e é metadado.
+
+### O buraco que o `switch` tinha, e que eu quase repeti
+
+`executarOperacao` é um `switch` sobre `item.tipo` sem `default`.
+`noFallthroughCasesInSwitch` está ligado no tsconfig — **e ele pega
+fallthrough ENTRE cases, não case FALTANDO.**
+
+Ou seja: acrescentar um tipo à `TipoOperacaoFila` e esquecer o `case`
+fazia a função cair pro fim, resolver, e `processarFilaOperacoes`
+**deletar o item como se tivesse sincronizado**. Um retorno com duas
+assinaturas colhidas sumiria sem nunca ter subido — a perda silenciosa
+que a chave própria da fila veio corrigir em 16/08, por outra porta.
+
+Fechado com `const naoTratado: never = item` no `default`. Esquecer
+passa a ser erro de compilação.
+
+O `case 'romaneio_retorno'` existe e **levanta exceção de propósito**: o
+transporte é da 2C.6, o ramo é inalcançável hoje, e falhar alto é melhor
+que suceder em silêncio.
+
+### O compilador cobrou o segundo lugar sozinho
+
+Ao acrescentar o tipo, o `tsc` acusou `FilaOfflineIndicador.tsx`: o
+rótulo por tipo também é um `Record<TipoOperacaoFila, string>`. Isso é a
+prova de que a invariante "invalidações declaradas" **não precisa de
+asserção em teste** — ela é exigida em tempo de compilação pelos Records
+exaustivos, e esquecer não compila. É a melhor forma dessa garantia.
+
+### Um achado de passagem, NÃO corrigido
+
+`QUERY_KEYS_POR_TIPO.romaneio_saida` invalida `'romaneios'`, e **nenhuma
+query usa essa chave** — as reais são `'romaneio'` e `'romaneios-do-dia'`.
+O TanStack casa por elemento do array, não por prefixo de string, então
+aquela invalidação não alcança nada hoje: depois de uma saída offline
+sincronizar, a lista da sangria não é invalidada (na prática ela
+revalida ao montar, então o efeito é pequeno).
+
+Não corrigi junto porque é fora do escopo da 2C.4 e mexe no caminho da
+saída, que está em uso. Fica anotado, com o comentário no próprio
+arquivo.
+
+### O teste força o navegador a ficar offline, e é temático
+
+`enfileirarOperacao` dispara `processarFilaOperacoes` no fim, e o handler
+de `romaneio_retorno` levanta exceção. Sem neutralizar, o item de teste
+terminaria em `erro` na fila de verdade e o indicador acusaria "precisa
+de atenção".
+
+`scripts/conferir-fila-retorno-no-console.js` usa a técnica do §49
+(sobrescrever `navigator.onLine` + `dispatchEvent`), devolve a rede num
+`finally` aconteça o que acontecer, e apaga o item no fim. Uma operação
+que só existe offline, criada offline.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -4853,7 +4937,13 @@ B rodaram aqui (`npx tsx scripts/dependencia-da-fila.spec.mts`, 9/9, e a
 guarda medida contra o predicado antigo: 3 falham, 6 continuam
 passando). E o C rodou no navegador: **11 de 11**.
 
-Depois: **2C.4**, `romaneio_retorno` na fila com payload congelado.
+**2C.4 FEITA (item 71), pendente de conferência no navegador** —
+`romaneio_retorno` na fila, com payload congelado e sem o objeto de
+domínio junto. `tsc`, lint e build limpos. Falta rodar
+`scripts/conferir-fila-retorno-no-console.js` (força offline sozinho,
+apaga o item de teste no fim).
+
+Depois: **2C.5**, o envelope com `tipo` dentro.
 
 **O teste de transporte está escrito e não foi rodado** — ele exige
 login, então é clique seu. Item 66: nove cenários, quatro com bloco `d`,

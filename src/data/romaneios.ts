@@ -237,6 +237,88 @@ export type SaidaOfflineInput = {
   userId: string
 }
 
+/**
+ * O QUE UM ROMANEIO DE RETORNO OFFLINE GUARDA ATÉ A REDE VOLTAR.
+ *
+ * Tipo PRÓPRIO, e não uma variação de `SaidaOfflineInput`. Os dois
+ * documentos afirmam coisas diferentes e são assinados por slots
+ * diferentes; reaproveitar a forma faria alguém, meses depois, mandar um
+ * campo da saída num retorno e só descobrir na sincronização.
+ *
+ * ---------------------------------------------------------------------
+ * CONGELADO SIGNIFICA: NADA AQUI PRECISA SER RECALCULADO PRA SINCRONIZAR
+ *
+ * Depois de enfileirado, o artefato é
+ *
+ *     retornoJsonb  +  documentHash  +  os dois traços
+ *
+ * e mais nada. A fila **não chama `paraJsonbRetorno` nem
+ * `montarCanonicoRetorno` de novo** — é por isso que o objeto de domínio
+ * (`EntradaRetorno`) NÃO está aqui, nem por conveniência.
+ *
+ * Se ele estivesse, uma atualização do app entre enfileirar e
+ * sincronizar poderia converter diferente: o servidor reconstruiria
+ * outro DCRR1, chegaria a outro hash e recusaria `documento_alterado` —
+ * com as duas assinaturas já colhidas e o motoboy no balcão. Foi
+ * exatamente esse defeito (o `paraJsonbRetorno` sem `documentos`) que a
+ * conferência dos vetores pegou em 2026-08-20; aqui ele é impedido por
+ * construção, tirando do payload aquilo de que a reconversão precisaria.
+ *
+ * `retornoJsonb` é `unknown[]` de propósito: opaco depois de convertido.
+ * Quem precisar ler o que aconteceu lê o romaneio selado no servidor.
+ */
+export type RetornoOfflineInput = {
+  romaneioId: string
+  /**
+   * Só o cliente usa: é a chave de que a fila depende (`dependeDeChave`)
+   * e o que as telas mostram. O servidor NÃO recebe corrida — ele a
+   * deriva do romaneio de saída selado, e é isso que torna o retorno
+   * imune ao buraco de `p_loja_id` que a porta da saída ainda tem.
+   */
+  corridaId: string
+  saidaRomaneioId: string
+  saidaDocumentHash: string
+  motoboyId: string
+
+  /**
+   * Qual contrato canônico produziu o `documentHash` abaixo.
+   *
+   * Hoje parece redundante porque só existe `DCRR1`. Existe pelo dia em
+   * que houver um `DCRR2`: um item offline antigo, parado na fila de
+   * alguém, precisa conseguir dizer sob qual contrato foi assinado — e
+   * essa resposta não pode depender da versão do app que for drenar a
+   * fila.
+   *
+   * **Não confundir com o `tipo` do envelope (2C.5).** Aquele é
+   * `saida | retorno` e é criptograficamente amarrado; este é a versão
+   * do canônico e é metadado. Conceitos diferentes.
+   */
+  versaoDocumento: 'DCRR1'
+  /** Já convertido por `paraJsonbRetorno`. Nunca reconverter. */
+  retornoJsonb: unknown[]
+  /** O que as duas partes assinaram. */
+  documentHash: string
+
+  /**
+   * `responsavelStrokes`, NUNCA `caixaStrokes`.
+   *
+   * O protocolo da saída chama o lado interno de `caixaStrokes` e assim
+   * fica — corpos já gravados dizem isso, e renomear no fio quebraria
+   * fila antiga. Mas não existe `romaneio_retorno` antigo em IndexedDB
+   * nenhum, então aceitar o nome velho aqui seria criar hoje
+   * compatibilidade com um formato que nunca existiu, e perpetuar um
+   * nome que mente sobre quem assinou — a armadilha do `tipo_signatario`
+   * outra vez.
+   */
+  responsavelStrokes: unknown
+  motoboyStrokes: unknown
+
+  ocorridoEmLocal: string
+  geolocalizacao: unknown | null
+  /** Conferido contra o JWT na Edge Function. Mesma regra da saída. */
+  userId: string
+}
+
 // Recusa que não melhora com repetição: conflito de vale, PIN que não
 // confere, envelope de outra operação, payload alterado depois de
 // assinado. Retentar só gastaria tentativa — e no caso do PIN,

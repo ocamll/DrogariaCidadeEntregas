@@ -47,6 +47,28 @@ const QUERY_KEYS_POR_TIPO: Record<TipoOperacaoFila, string[]> = {
     'romaneios',
     'eventos-auditoria',
   ],
+  // O retorno é a operação que mais mexe em coisa de uma vez: fecha a
+  // corrida, grava o desfecho de cada vale, cria os pagamentos
+  // realizados, deriva a divergência, recomputa `status_documental` e
+  // gera um romaneio novo.
+  //
+  // ATENÇÃO ao `'romaneios'` da linha do `romaneio_saida` acima: NENHUMA
+  // query usa essa chave. As reais são `'romaneio'` e
+  // `'romaneios-do-dia'`, e o TanStack casa por elemento do array, não
+  // por prefixo de string — então aquela invalidação não alcança nada
+  // hoje. Não corrigi junto porque é fora do escopo da 2C.4 e mexe no
+  // caminho da saída, que está em uso; fica anotado.
+  romaneio_retorno: [
+    'entregas-hoje',
+    'transferencias',
+    'entregas-historico',
+    'corridas-abertas',
+    'romaneios-do-dia',
+    'documentos-convenio-pendentes',
+    'notificacoes-hoje',
+    'notificacoes-todas',
+    'eventos-auditoria',
+  ],
   divergencia: [
     'entregas-hoje',
     'entregas-historico',
@@ -87,9 +109,37 @@ async function executarOperacao(item: ItemFilaOperacao): Promise<void> {
     case 'fechamento_corrida':
       await fecharCorrida(item.payload)
       return
+    case 'romaneio_retorno':
+      // O TRANSPORTE É DA 2C.6. Até lá nada enfileira este tipo — quem
+      // vai é a tela, na 2D —, então este ramo é inalcançável.
+      //
+      // Ele existe assim mesmo, e falhando alto, porque a alternativa
+      // silenciosa é pior: sem `case`, o `switch` cai pro fim da função,
+      // ela resolve, e `processarFilaOperacoes` DELETA o item como se
+      // tivesse sincronizado. Um retorno com duas assinaturas colhidas
+      // desapareceria sem nunca ter subido.
+      throw new Error(
+        'romaneio_retorno ainda não tem transporte: a Edge Function passa a ' +
+          'despachar por tipo na 2C.6. Este item continua na fila.'
+      )
     case 'falta_receita':
       await notificarFaltaReceita(item.payload)
       return
+    default: {
+      // A MESMA ARMADILHA, FECHADA PRA O PRÓXIMO TIPO.
+      //
+      // `noFallthroughCasesInSwitch` pega fallthrough ENTRE cases; não
+      // pega case FALTANDO. Sem esta cláusula, acrescentar um tipo à
+      // `TipoOperacaoFila` e esquecer o `case` faz a operação ser tratada
+      // como sucesso e apagada da fila — perda silenciosa, a classe de
+      // defeito que este arquivo já pagou duas vezes.
+      //
+      // Com o `never`, esquecer passa a ser erro de compilação.
+      const naoTratado: never = item
+      throw new Error(
+        `Tipo de operação sem handler na fila: ${(naoTratado as ItemFilaOperacao).tipo}`
+      )
+    }
   }
 }
 
