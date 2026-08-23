@@ -4544,6 +4544,17 @@ Não corrigi junto porque é fora do escopo da 2C.4 e mexe no caminho da
 saída, que está em uso. Fica anotado, com o comentário no próprio
 arquivo.
 
+### Conferido no navegador em 2026-08-20: 19 de 19
+
+Payload congelado sobrevivendo ao IndexedDB, os dois traços intactos com
+o vocabulário novo e sem `caixaStrokes`, `dependeDeChave` sem `chave`,
+dono gravado na criação, item de teste apagado e rede devolvida.
+
+O caso 5 é o que mais vale — **`o objeto de DOMÍNIO não foi junto`** é
+uma asserção sobre uma AUSÊNCIA. Sem ela, "não guardamos o domínio"
+continuaria sendo intenção escrita em comentário, e o dia em que alguém
+acrescentasse `entradaRetorno` "só pra depurar" não teria quem acusasse.
+
 ### O teste força o navegador a ficar offline, e é temático
 
 `enfileirarOperacao` dispara `processarFilaOperacoes` no fim, e o handler
@@ -4937,11 +4948,9 @@ B rodaram aqui (`npx tsx scripts/dependencia-da-fila.spec.mts`, 9/9, e a
 guarda medida contra o predicado antigo: 3 falham, 6 continuam
 passando). E o C rodou no navegador: **11 de 11**.
 
-**2C.4 FEITA (item 71), pendente de conferência no navegador** —
+**2C.4 FEITA E CONFERIDA (item 71)** — 19 de 19 no navegador. —
 `romaneio_retorno` na fila, com payload congelado e sem o objeto de
-domínio junto. `tsc`, lint e build limpos. Falta rodar
-`scripts/conferir-fila-retorno-no-console.js` (força offline sozinho,
-apaga o item de teste no fim).
+domínio junto. `tsc`, lint e build limpos.
 
 Depois: **2C.5**, o envelope com `tipo` dentro.
 
