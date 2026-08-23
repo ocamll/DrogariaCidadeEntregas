@@ -345,7 +345,27 @@ export class ErroTerminalDeSaida extends Error {
   }
 }
 
-const MOTIVOS_TERMINAIS = ['conflito', 'envelope', 'envelope_trocado', 'payload_alterado']
+// Recusas que NÃO melhoram com repetição.
+//
+// `tipo_divergente`, `tipo_desconhecido` e `vocabulario_invalido`
+// entraram na 2C.6: são defeitos de forma do que já foi assinado, e
+// retentar só repetiria o mesmo resultado.
+//
+// **`retorno_nao_suportado` NÃO entra aqui**, e a ausência é deliberada:
+// ele significa "a função publicada é anterior à 2C.6", e isso se
+// conserta com um deploy. Marcá-lo terminal descartaria um retorno
+// legítimo, com duas assinaturas colhidas, por causa de uma janela de
+// rollout — o item tem que ficar esperando e subir quando a função nova
+// estiver no ar.
+const MOTIVOS_TERMINAIS = [
+  'conflito',
+  'envelope',
+  'envelope_trocado',
+  'payload_alterado',
+  'tipo_divergente',
+  'tipo_desconhecido',
+  'vocabulario_invalido',
+]
 
 export async function sincronizarSaidaOffline(input: SaidaOfflineInput): Promise<void> {
   const { data: sessao } = await supabase.auth.getSession()
@@ -359,6 +379,9 @@ export async function sincronizarSaidaOffline(input: SaidaOfflineInput): Promise
   const { data, error } = await supabase.functions.invoke('sync-romaneio', {
     headers: { Authorization: `Bearer ${token}` },
     body: {
+      // Declarado desde a 2C.6. O envelope é quem manda; isto aqui é a
+      // metade em claro que a função CONCILIA com ele.
+      tipo: "saida",
       userId: input.userId,
       romaneioId: input.romaneioId,
       corridaId: input.corridaId,
@@ -390,6 +413,62 @@ export async function sincronizarSaidaOffline(input: SaidaOfflineInput): Promise
   if (r && r.ok === false) {
     throw new ErroTerminalDeSaida(
       `Romaneio ${r.numero ?? ''} não pôde ser selado: conflito de sincronização.`.trim(),
+      r
+    )
+  }
+}
+
+/**
+ * O retorno offline subindo. Espelho de `sincronizarSaidaOffline`, e as
+ * diferenças são todas de contrato, não de estilo:
+ *
+ *   - `tipo: retorno` no corpo, EXPLÍCITO. A ausência significa saída,
+ *     e isso é compatibilidade histórica — não vale pro retorno, que
+ *     nunca teve fila antiga.
+ *   - `responsavelStrokes`, nunca `caixaStrokes`.
+ *   - manda `retornoJsonb` CONGELADO, sem reconverter nada. É o ponto
+ *     inteiro da 2C.4: o que sobe é o que foi assinado.
+ *   - não manda `corridaId` nem `lojaId` — o servidor deriva os dois do
+ *     romaneio de saída selado, e payload nenhum opina sobre filial.
+ */
+export async function sincronizarRetornoOffline(input: RetornoOfflineInput): Promise<void> {
+  const { data: sessao } = await supabase.auth.getSession()
+  const token = sessao.session?.access_token
+  if (!token) throw new Error("Sem sessão para sincronizar.")
+
+  // Header explícito: `functions.invoke` manda a anon key, não o JWT.
+  const { data, error } = await supabase.functions.invoke("sync-romaneio", {
+    headers: { Authorization: `Bearer ${token}` },
+    body: {
+      tipo: "retorno",
+      userId: input.userId,
+      romaneioId: input.romaneioId,
+      saidaRomaneioId: input.saidaRomaneioId,
+      saidaDocumentHash: input.saidaDocumentHash,
+      motoboyId: input.motoboyId,
+      retornoJsonb: input.retornoJsonb,
+      documentHash: input.documentHash,
+      responsavelStrokes: input.responsavelStrokes,
+      motoboyStrokes: input.motoboyStrokes,
+      ocorridoEmLocal: input.ocorridoEmLocal,
+      geolocalizacao: input.geolocalizacao,
+      envelope: input.envelope,
+    },
+  })
+
+  if (error) {
+    const corpo = await lerCorpoDoErro(error)
+    if (corpo?.motivo && MOTIVOS_TERMINAIS.includes(corpo.motivo)) {
+      throw new ErroTerminalDeSaida(corpo.error ?? error.message, corpo)
+    }
+    throw new Error(corpo?.error ?? error.message)
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const r = data as any
+  if (r && r.ok === false) {
+    throw new ErroTerminalDeSaida(
+      `Romaneio de retorno ${r.numero ?? ""} não pôde ser selado: conflito de sincronização.`.trim(),
       r
     )
   }

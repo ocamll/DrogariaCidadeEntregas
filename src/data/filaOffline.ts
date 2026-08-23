@@ -14,7 +14,11 @@ import { criarEntrega, criarTransferencia } from '@/data/entregas'
 import { criarCorridaComAssinatura, fecharCorrida } from '@/data/corridas'
 import { marcarDivergencia } from '@/data/pagamentos'
 import { notificarFaltaReceita } from '@/data/documentos'
-import { sincronizarSaidaOffline, ErroTerminalDeSaida } from '@/data/romaneios'
+import {
+  sincronizarSaidaOffline,
+  sincronizarRetornoOffline,
+  ErroTerminalDeSaida,
+} from '@/data/romaneios'
 
 // Query keys invalidadas por tipo de operação, depois de sincronizar com
 // sucesso — mesmas listas que cada tela já invalidava quando escrevia
@@ -110,18 +114,8 @@ async function executarOperacao(item: ItemFilaOperacao): Promise<void> {
       await fecharCorrida(item.payload)
       return
     case 'romaneio_retorno':
-      // O TRANSPORTE É DA 2C.6. Até lá nada enfileira este tipo — quem
-      // vai é a tela, na 2D —, então este ramo é inalcançável.
-      //
-      // Ele existe assim mesmo, e falhando alto, porque a alternativa
-      // silenciosa é pior: sem `case`, o `switch` cai pro fim da função,
-      // ela resolve, e `processarFilaOperacoes` DELETA o item como se
-      // tivesse sincronizado. Um retorno com duas assinaturas colhidas
-      // desapareceria sem nunca ter subido.
-      throw new Error(
-        'romaneio_retorno ainda não tem transporte: a Edge Function passa a ' +
-          'despachar por tipo na 2C.6. Este item continua na fila.'
-      )
+      await sincronizarRetornoOffline(item.payload)
+      return
     case 'falta_receita':
       await notificarFaltaReceita(item.payload)
       return

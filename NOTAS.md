@@ -4675,6 +4675,88 @@ Só apareceu porque fui reler o arquivo depois de escrever. Fica a regra:
 **crase em string de shell é código**, e comentário mutilado não é pego
 por nenhuma das três verificações.
 
+## 73. Etapa 2C.6 — o despacho, e a matriz que cabe numa igualdade
+
+`sync-romaneio` passou a discriminar tipo, conciliar corpo × envelope e
+despachar pras duas portas. Do lado do cliente,
+`sincronizarRetornoOffline` e o `case` da fila que antes levantava
+exceção.
+
+### A pergunta que precisava ser respondida contra a realidade
+
+O usuário perguntou se `body = saida` com `envelope sem tipo` pode
+existir, e mandou não inventar compatibilidade sem estado histórico que
+precise dela. **Pode, e por construção:** o envelope é selado na CAPTURA
+e guardado na fila; o corpo é montado na hora de DRENAR, pelo código do
+dia. Um item capturado antes da 2C.5 carrega envelope sem tipo e vai ser
+drenado por um cliente que já manda `tipo: 'saida'`. Recusar travaria
+saídas reais, já assinadas.
+
+### A matriz inteira é uma igualdade
+
+Os dois lados resolvem ausência como `saida` (compatibilidade histórica)
+e depois **têm que concordar**. Disso decorrem as nove linhas da tabela,
+inclusive as quatro de recusa.
+
+**"Retorno exige explícito nos dois lados" não é um `if` separado** — é
+consequência da igualdade, porque ausência nunca resolve `retorno`. Quem
+ler procurando a checagem explícita não vai achar, e não está faltando.
+Por isso o spec tem um caso que afirma a propriedade diretamente:
+*nenhuma combinação sem os dois explícitos produz retorno*, varrendo as
+oito combinações — a tabela prova linha a linha, este prova a regra.
+
+### A ordem é a invariante, e ela é testável no texto
+
+O usuário exigiu que uma operação recusada por tipo divergente **não
+chegue a nenhuma RPC de selagem** — a diferença entre condição de entrada
+e diagnóstico posterior. Não dá pra rodar Deno aqui, então o spec faz
+asserção de ORDEM sobre o texto do handler: dono, envelope aberto, tipo
+conciliado, `operationId`, `documentHash` e `offlineEventHash` todos
+antes do primeiro `.rpc(`, e exatamente duas RPCs.
+
+Grosseiro de propósito. A invariante é sobre ONDE as coisas acontecem,
+não sobre o que devolvem.
+
+### Ignorar não é recusar
+
+Eu tinha implementado a rigidez do vocabulário pela metade: lia
+`responsavelStrokes` no retorno e simplesmente não olhava `caixaStrokes`.
+O usuário escreveu `tipo=retorno + caixaStrokes → inválido`, e ignorar
+não é isso.
+
+Agora recusa nos DOIS sentidos — retorno com `caixaStrokes` e saída com
+`responsavelStrokes`. Um campo do protocolo errado aceito em silêncio
+vira a pista falsa de quem for depurar por que o hash não fechou.
+
+### `retorno_nao_suportado` NÃO é terminal, e a ausência é deliberada
+
+`tipo_divergente`, `tipo_desconhecido` e `vocabulario_invalido` entraram
+em `MOTIVOS_TERMINAIS`: são defeitos de forma do que já foi assinado, e
+retentar repete o resultado.
+
+`retorno_nao_suportado` ficou de fora. Ele significa "a função publicada
+é anterior à 2C.6", e isso se conserta com um deploy — marcá-lo terminal
+descartaria um retorno legítimo, com duas assinaturas colhidas, por causa
+de uma janela de rollout.
+
+### O que só o teste integrado pode provar
+
+`despacho-sync-romaneio.spec.mts` roda contra o TEXTO da função e prova a
+lógica. **Ele não prova que a função publicada é esta** — só o teste real
+prova, e é ele que fecha a 2C.6:
+
+```
+saída legado (envelope sem tipo) ainda sincroniza   ← o mais importante
+saída nova sincroniza
+retorno novo chega até selar_romaneio_retorno_sincronizado
+body retorno + envelope saída → recusa
+body saída + envelope retorno → recusa
+retorno + envelope sem tipo   → recusa
+```
+
+E o retorno só roda de verdade na 2D, que é quem coleta cartão e PIN.
+Até lá o que dá pra exercitar é a metade de validação.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -5070,7 +5152,17 @@ refactor intactos. tsc, lint e build limpos.
 Sem isso o servidor segue na versão anterior, que trataria um envelope
 de retorno como saída.
 
-Depois: **2C.6**, o despacho por tipo.
+**2C.6 FEITA (item 73), pendente do teste integrado** — despacho por
+tipo, conciliação corpo × envelope, e o cliente mandando retorno.
+`despacho-sync-romaneio.spec.mts` 33/33, envelope 18/18, offline-hash
+com os gêmeos concordando. tsc, lint e build limpos.
+
+**A Edge Function precisa ser republicada DE NOVO** — a versão no ar é a
+da 2C.5, que recusa retorno com 501. E o teste que fecha a etapa é o
+integrado, porque o spec roda contra o TEXTO da função e não prova qual
+versão está publicada.
+
+Depois: **2C.7**, a proteção local.
 
 **O teste de transporte está escrito e não foi rodado** — ele exige
 login, então é clique seu. Item 66: nove cenários, quatro com bloco `d`,
