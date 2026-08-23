@@ -4378,6 +4378,86 @@ select count(*) = count(*) filter (where status in ('selado','conflito'))
   from public.romaneios;
 ```
 
+## 70. Etapa 2C.3 — Dexie v5, e a armadilha desarmada
+
+Duas mudanças, estritamente, como o usuário delimitou: o backfill de
+`chave` nos `fechamento_corrida` que já estão no IndexedDB de alguém, e a
+exclusão do próprio item no guard de dependência do scheduler.
+
+**O risco saiu do banco e passou pra estado persistido no cliente** — é
+por isso que esta etapa não tem migration e mesmo assim é delicada.
+
+### Por que o backfill não podia ser "passar a setar daqui pra frente"
+
+Nenhum código novo enfileira `fechamento_corrida`. Os itens que importam
+são exatamente os que já estão gravados, esperando drenar. Daí ser
+upgrade da Dexie, e não um argumento a mais no `enfileirarOperacao`.
+
+Feito ele, `dependeDeChave: corridaId` no `romaneio_retorno` da 2C.4
+cobre os dois de uma vez: espera a `romaneio_saida` (que já usa
+`chave: corridaId`) **e** o fechamento legado.
+
+**Malformado é preservado e denunciado, nunca consertado por
+aproximação.** Um `fechamento_corrida` sem `payload.corridaId` não ganha
+chave inventada nem é apagado: fica como está e o `console.warn` diz
+quais são. Chave inventada faria outro item esperar por uma corrida que
+não existe — trocaria um item preso por dois.
+
+### O predicado saiu do laço, e não foi organização
+
+`bloqueadoPorDependencia` virou `src/lib/dependenciaDaFila.ts`, que **não
+importa nada**. Medir a regra de dentro de `processarFilaOperacoes`
+exigiria deixar a fila rodar de verdade e observar qual operação foi
+pulada — ou seja, mandar operações reais pro servidor pra testar um `if`.
+Mesma disciplina de `canonico.ts` e `caminhosNoDrive.ts`.
+
+### Os dois testes medem coisas diferentes, e a medição provou
+
+`scripts/dependencia-da-fila.spec.mts`, 9 casos. Reintroduzi o predicado
+antigo (sem o `outro.id !== item.id`) e medi:
+
+```
+3 FALHAS   as de self-dependency
+6 ok       as de dependência entre itens DIFERENTES continuam passando
+```
+
+**É isso que justifica o usuário ter exigido os dois separados.** Uma
+"correção" que desligasse o bloqueio inteiro (`return false` sempre)
+passaria no A com louvor e a fila voltaria a deixar o fechamento
+ultrapassar a criação da corrida — o bug de 16/08. O B é quem pega isso.
+
+Uma borda que não estava no pedido e vale: `item sem chave não bloqueia
+item sem dependência`. Sem o early return, `undefined === undefined` daria
+`true` num `some` ingênuo, e todo item sem dependência ficaria preso por
+qualquer item sem chave.
+
+### O teste do upgrade roda contra IndexedDB de verdade
+
+`scripts/conferir-dexie-v5-no-console.js`, 10 casos, **em banco
+separado** (`tele-entregas-conferencia-2c3`, apagado no fim). Semear a
+fila do app com `fechamento_corrida` falso seria pedir pra ele tentar
+fechar uma corrida inexistente no próximo sync.
+
+O que ele NÃO isola é a função de backfill: essa é a de produção,
+importada de `/src/lib/db.ts`. Uma cópia aqui provaria a cópia — a lição
+das três cópias do conversor (item 65) aplicada de véspera.
+
+E o construtor da Dexie sai de `db.constructor`, não de
+`import('/node_modules/.vite/deps/dexie.js')`: aquele caminho precisa do
+`?v=<hash>` e carrega uma SEGUNDA instância quando o hash muda (§61).
+Assim não há hash pra acertar.
+
+### Uma armadilha do próprio processo, de novo
+
+Ao medir a guarda contra o defeito, o `git checkout --` **não restaurou**
+o arquivo: ele é novo, ainda não estava no git. Rodei o spec de novo e vi
+`3 FALHA(S)` — desta vez porque o código continuava defeituoso, não
+porque o teste discrimina. Restaurado à mão e reconferido em 9/9.
+
+Fica a regra: **medir guarda contra defeito em arquivo não rastreado
+exige desfazer à mão**, e o segundo `raise` verde é parte da medição, não
+formalidade.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -4753,8 +4833,14 @@ de romaneio** — não foi rodado.
 `scripts/conferir-2c2-no-sql-editor.sql`. Os dois blocos passaram. O SQLSTATE medido é **`DCRR1`** — é ele que
 o handler legado da 2C.8 tem que reconhecer.
 
-Depois: **2C.3**, Dexie v5. Nada de fila ou envelope antes de as duas
-migrations estarem provadas — decisão do usuário.
+**2C.3 FEITA (item 70), pendente de conferência no navegador** — Dexie
+v5 com backfill de `chave` e a self-dependency desarmada. Os testes A e
+B rodaram aqui (`npx tsx scripts/dependencia-da-fila.spec.mts`, 9/9, e a
+guarda medida contra o predicado antigo: 3 falham, 6 continuam
+passando). Falta o C, que precisa de IndexedDB real:
+`scripts/conferir-dexie-v5-no-console.js`, colado no console do app.
+
+Depois: **2C.4**, `romaneio_retorno` na fila com payload congelado.
 
 **O teste de transporte está escrito e não foi rodado** — ele exige
 login, então é clique seu. Item 66: nove cenários, quatro com bloco `d`,

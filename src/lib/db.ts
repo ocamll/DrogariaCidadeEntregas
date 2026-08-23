@@ -165,4 +165,75 @@ db.version(4).stores({
   credenciaisCache: 'publicId, motoboyId',
 })
 
+/**
+ * O backfill da v5, exportado pra ter UMA cópia só.
+ *
+ * O `romaneio_retorno` da 2C.4 vai declarar `dependeDeChave: corridaId`
+ * pra não ultrapassar nem a `romaneio_saida` daquela corrida nem um
+ * `fechamento_corrida` legado. A saída já usa `chave: corridaId`; o
+ * fechamento **nunca teve `chave` nenhuma**, só `dependeDeChave` — então
+ * nada podia depender dele.
+ *
+ * E não adianta passar a setar daqui pra frente: **nenhum código novo
+ * enfileira `fechamento_corrida`.** Os itens que importam são exatamente
+ * os que já estão gravados no IndexedDB de alguém, esperando drenar. Por
+ * isso é upgrade, e não um valor a mais no `enfileirarOperacao`.
+ *
+ * O que ele deliberadamente NÃO faz: não reinterpreta outros tipos, não
+ * recalcula payload, não mexe em `status`, `tentativas` nem `erro`. Item
+ * legado é evidência de estado antigo, não rascunho pra modernizar.
+ *
+ * **Item malformado é preservado e denunciado, nunca consertado por
+ * aproximação.** Um `fechamento_corrida` sem `payload.corridaId` não
+ * ganha chave inventada e não é apagado: fica como está, e o
+ * `console.warn` diz quais são. Chave inventada faria outro item esperar
+ * por uma corrida que não existe — trocaria um item preso por dois.
+ */
+export async function backfillChaveDoFechamentoLegado(tabela: {
+  toArray: () => Promise<ItemFilaOperacao[]>
+  update: (id: string, mudancas: Partial<ItemFilaOperacao>) => Promise<number>
+}): Promise<{ corrigidos: number; malformados: string[] }> {
+  const todos = await tabela.toArray()
+  const malformados: string[] = []
+  let corrigidos = 0
+
+  for (const item of todos) {
+    if (item.tipo !== 'fechamento_corrida' || item.chave) continue
+
+    const corridaId = (item.payload as { corridaId?: unknown } | undefined)?.corridaId
+    if (typeof corridaId !== 'string' || corridaId.length === 0) {
+      malformados.push(item.id)
+      continue
+    }
+
+    await tabela.update(item.id, { chave: corridaId } as Partial<ItemFilaOperacao>)
+    corrigidos++
+  }
+
+  if (malformados.length > 0) {
+    console.warn(
+      `[fila offline] ${malformados.length} item(ns) 'fechamento_corrida' sem ` +
+        `payload.corridaId — preservados sem chave, e nada pode depender deles: `,
+      malformados
+    )
+  }
+
+  return { corrigidos, malformados }
+}
+
+// v5 não muda a FORMA da fila — `chave` já era índice desde a v3. Ela
+// existe só pelo backfill acima.
+db.version(5)
+  .stores({
+    filaOperacoes: 'id, status, tipo, userId, chave, proximaTentativaEm',
+    credenciaisCache: 'publicId, motoboyId',
+  })
+  .upgrade(async (tx) => {
+    await backfillChaveDoFechamentoLegado(
+      tx.table('filaOperacoes') as unknown as Parameters<
+        typeof backfillChaveDoFechamentoLegado
+      >[0]
+    )
+  })
+
 export { db }

@@ -8,6 +8,7 @@ import {
 } from '@/lib/db'
 import { queryClient } from '@/lib/queryClient'
 import { uuidv7 } from '@/lib/uuid'
+import { bloqueadoPorDependencia } from '@/lib/dependenciaDaFila'
 import { supabase } from '@/lib/supabase'
 import { criarEntrega, criarTransferencia } from '@/data/entregas'
 import { criarCorridaComAssinatura, fecharCorrida } from '@/data/corridas'
@@ -219,7 +220,16 @@ export async function processarFilaOperacoes(): Promise<void> {
       }
 
       // Dependência: não adianta fechar uma corrida que ainda não subiu.
-      if (item.dependeDeChave && todos.some((outro) => outro.chave === item.dependeDeChave)) {
+      //
+      // O predicado saiu daqui pra `lib/dependenciaDaFila.ts` na 2C.3,
+      // por duas razões. A primeira é que ele ganhou uma exclusão que
+      // precisa de teste (`outro.id !== item.id`, contra a
+      // self-dependency que deixava um item `pendente` pra sempre sem
+      // erro nenhum). A segunda é que medir isto aqui dentro exigiria
+      // deixar `processarFilaOperacoes` rodar de verdade — ou seja,
+      // mandar operações reais pro servidor só pra observar qual delas
+      // foi pulada.
+      if (bloqueadoPorDependencia(item, todos)) {
         continue
       }
 
