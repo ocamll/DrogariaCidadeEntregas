@@ -48,19 +48,33 @@ function deBase64(texto: string): Uint8Array {
 // são TypeScript, então o risco de divergência é bem menor que o do
 // canônico do romaneio (TypeScript contra SQL) — mas mexeu numa, mexe na
 // outra. Ordem dos campos e separador fazem parte do contrato.
+// OS NOMES DOS PARÂMETROS SÃO NEUTROS DESDE A 2C.5, e a fórmula NÃO
+// mudou um byte — ela concatena VALORES, não chaves.
+//
+//     saída:   caixaStrokes       ┐
+//     retorno: responsavelStrokes ┴→ assinaturaInternaStrokes
+//
+// Renomear no FIO seria quebra (corpos já gravados dizem caixaStrokes);
+// renomear aqui dentro não é. E o nome antigo mentiria no retorno, onde
+// quem assina é o responsável da loja e pode ser gerente ou admin — a
+// armadilha do tipo_signatario outra vez.
+//
+// O spec do envelope congela três hashes calculados ANTES deste
+// refactor e exige que continuem idênticos. A intenção era "só renomeei
+// parâmetro"; a asserção é quem prova.
 async function calcularOfflineEventHash(entrada: {
   documentHash: string
   romaneioId: string
-  caixaStrokes: unknown
-  motoboyStrokes: unknown
+  assinaturaInternaStrokes: unknown
+  assinaturaMotoboyStrokes: unknown
   ocorridoEmLocal: string
   geolocalizacao: unknown | null
 }): Promise<string> {
   const partes = [
     entrada.documentHash,
     entrada.romaneioId.toLowerCase(),
-    JSON.stringify(entrada.caixaStrokes),
-    JSON.stringify(entrada.motoboyStrokes),
+    JSON.stringify(entrada.assinaturaInternaStrokes),
+    JSON.stringify(entrada.assinaturaMotoboyStrokes),
     entrada.ocorridoEmLocal,
     entrada.geolocalizacao === null ? '-' : JSON.stringify(entrada.geolocalizacao),
   ]
@@ -77,6 +91,29 @@ type Segredos = {
   operationId: string
   documentHash: string
   offlineEventHash: string
+  // Entrou na 2C.5, DENTRO do envelope. Ver `resolverTipoDoRomaneio`.
+  tipo?: string
+}
+
+/**
+ * Qual documento o envelope autoriza — lido de DENTRO dele, depois de
+ * decifrado, e por isso não falsificável pelo cliente.
+ *
+ * **Ausente = `saida`, e isso é compatibilidade histórica exclusiva.**
+ * Todo envelope selado antes da 2C.5 é de saída por construção: o
+ * retorno não existia. Sem essa regra, toda saída offline parada numa
+ * fila deixaria de sincronizar no dia do deploy.
+ *
+ * Ela NÃO é permissividade pra operação nova: o retorno exige o valor
+ * explícito. Valor desconhecido é recusado em vez de virar saída por
+ * omissão — "não reconheço" e "é uma saída" são coisas diferentes, e
+ * tratá-las igual é como uma versão futura passaria despercebida por
+ * esta aqui.
+ */
+function resolverTipoDoRomaneio(segredos: Segredos): 'saida' | 'retorno' | null {
+  if (segredos.tipo === undefined || segredos.tipo === 'saida') return 'saida'
+  if (segredos.tipo === 'retorno') return 'retorno'
+  return null
 }
 
 async function abrirEnvelope(envelope: Envelope): Promise<Segredos> {
@@ -170,6 +207,33 @@ Deno.serve(async (req) => {
     return responder({ error: `Não consegui abrir o envelope: ${e.message}`, motivo: 'envelope' }, 400)
   }
 
+  // 3b. QUAL DOCUMENTO ESTE ENVELOPE AUTORIZA
+  //
+  // Esta versão só sabe executar SAÍDA. Um envelope que diga `retorno` é
+  // RECONHECIDO e recusado explicitamente — nunca tratado como saída.
+  //
+  // Tratá-lo como saída seria o pior desfecho possível: `corpo.entregaIds`
+  // viria vazio ou de outro documento, e `selar_romaneio_sincronizado`
+  // criaria uma corrida errada ou um conflito, a partir de um envelope
+  // que dizia outra coisa. Recusar é o temporário seguro até a 2C.6, que
+  // é quem passa a despachar por tipo.
+  const tipoDoEnvelope = resolverTipoDoRomaneio(segredos)
+  if (tipoDoEnvelope === null) {
+    return responder(
+      { error: 'Envelope de um tipo de documento que esta versão não conhece.',
+        motivo: 'tipo_desconhecido' },
+      400
+    )
+  }
+  if (tipoDoEnvelope === 'retorno') {
+    return responder(
+      { error: 'Romaneio de retorno ainda não é sincronizado por esta versão da função. ' +
+          'A operação continua na fila.',
+        motivo: 'retorno_nao_suportado' },
+      501
+    )
+  }
+
   const romaneioId = String(corpo.romaneioId ?? '')
   const documentHash = String(corpo.documentHash ?? '')
 
@@ -189,8 +253,12 @@ Deno.serve(async (req) => {
   const hashRecalculado = await calcularOfflineEventHash({
     documentHash,
     romaneioId,
-    caixaStrokes: corpo.caixaStrokes,
-    motoboyStrokes: corpo.motoboyStrokes,
+    // O FIO continua dizendo caixaStrokes — corpos já gravados dizem
+    // isso, e renomear no fio seria quebra. O nome NEUTRO é só do
+    // parâmetro. Na 2C.6, o retorno manda responsavelStrokes e é aqui
+    // que os dois convergem.
+    assinaturaInternaStrokes: corpo.caixaStrokes,
+    assinaturaMotoboyStrokes: corpo.motoboyStrokes,
     ocorridoEmLocal: String(corpo.ocorridoEmLocal ?? ''),
     geolocalizacao: corpo.geolocalizacao ?? null,
   })

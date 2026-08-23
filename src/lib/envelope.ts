@@ -42,7 +42,11 @@ export type EnvelopeSelado = {
   ct: string
 }
 
-export type SegredosDaSaida = {
+/**
+ * O que vai selado. Chamava-se `SegredosDaSaida` até a 2C.5; o retorno
+ * usa o MESMO envelope, então o nome deixou de dizer a verdade.
+ */
+export type SegredosDoRomaneio = {
   // o que é de fato secreto
   pin: string
   credentialToken: string
@@ -50,6 +54,29 @@ export type SegredosDaSaida = {
   operationId: string
   documentHash: string
   offlineEventHash: string
+  /**
+   * QUAL DOCUMENTO ESTE ENVELOPE AUTORIZA. Entrou na 2C.5.
+   *
+   * Ele vai AQUI DENTRO e não no corpo do request, e a diferença é a
+   * única que importa: o cliente não consegue reabrir nem reescrever o
+   * envelope, então o servidor **compara** em vez de acreditar. Fora
+   * dele seria só um campo que alguém pode trocar no caminho.
+   *
+   * Sem isto, um corpo poderia dizer `saida` carregando o envelope de um
+   * retorno. As amarrações que já existiam (`operationId`,
+   * `documentHash`) impedem reaproveitar um envelope em OUTRA operação
+   * concreta, mas não impediriam trocar de CAMINHO com o envelope certo.
+   *
+   * **Ausente = saída**, e isso é compatibilidade histórica exclusiva:
+   * todo envelope selado antes da 2C.5 é de saída, por construção — o
+   * retorno não existia. Não é permissividade pra operação nova; o
+   * retorno exige o valor explícito, aqui e no corpo.
+   *
+   * NÃO confundir com `versaoDocumento` (`DCRR1`), que é a versão do
+   * canônico e vive no payload da fila, em claro. Este aqui é o tipo de
+   * documento, é selado, e é verificado.
+   */
+  tipo?: 'saida' | 'retorno'
 }
 
 function paraBase64(buffer: ArrayBuffer): string {
@@ -81,21 +108,28 @@ export function envelopeDisponivel(): boolean {
   return chavePublicaConfigurada() !== null
 }
 
-let chaveImportada: CryptoKey | null = null
+// Cache POR CHAVE, e não uma única global. A global bastava enquanto só
+// existia a do ambiente; com `selarSegredosCom` recebendo a chave, ela
+// devolveria a primeira importada para qualquer spki seguinte — o teste
+// selaria com uma chave e acharia que selou com outra, e o sintoma seria
+// "a privada não abre" apontando pro lugar errado.
+const chavesImportadas = new Map<string, CryptoKey>()
 
 async function carregarChavePublica(spki: string): Promise<CryptoKey> {
-  if (chaveImportada) return chaveImportada
-  chaveImportada = await crypto.subtle.importKey(
+  const jaImportada = chavesImportadas.get(spki)
+  if (jaImportada) return jaImportada
+  const chaveImportada = await crypto.subtle.importKey(
     'spki',
     deBase64(spki) as unknown as ArrayBuffer,
     ALGORITMO_RSA,
     false,
     ['encrypt']
   )
+  chavesImportadas.set(spki, chaveImportada)
   return chaveImportada
 }
 
-export async function selarSegredos(segredos: SegredosDaSaida): Promise<EnvelopeSelado> {
+export async function selarSegredos(segredos: SegredosDoRomaneio): Promise<EnvelopeSelado> {
   const configurada = chavePublicaConfigurada()
   if (!configurada) {
     // Erro explícito, nunca um envelope vazio ou um PIN em claro. Quem
@@ -105,7 +139,25 @@ export async function selarSegredos(segredos: SegredosDaSaida): Promise<Envelope
       'Chave pública do romaneio não configurada (VITE_ROMANEIO_KEY_ID / VITE_ROMANEIO_PUBKEY).'
     )
   }
+  return selarSegredosCom(configurada, segredos)
+}
 
+/**
+ * O selo em si, com a chave RECEBIDA em vez de lida do ambiente.
+ *
+ * Separado de `selarSegredos` na 2C.5 pelo mesmo motivo que
+ * `caminhosNoDrive.ts` foi separado de `googleDrive.ts`: quem lê
+ * `import.meta.env` não roda em `npx tsx`, e o formato do envelope — que
+ * é contrato criptográfico com a Edge Function — precisa ser testável
+ * sem navegador e sem build.
+ *
+ * `selarSegredos` continua sendo o caminho do app; ninguém mais deveria
+ * chamar esta com chave própria fora de teste.
+ */
+export async function selarSegredosCom(
+  configurada: { keyId: string; spki: string },
+  segredos: SegredosDoRomaneio
+): Promise<EnvelopeSelado> {
   const publica = await carregarChavePublica(configurada.spki)
 
   const chaveAes = await crypto.subtle.generateKey({ name: 'AES-GCM', length: 256 }, true, [
@@ -138,19 +190,33 @@ export async function selarSegredos(segredos: SegredosDaSaida): Promise<Envelope
 // Este é TypeScript dos dois lados (aqui e na Edge Function), então o
 // risco de divergência é bem menor que o do canônico do romaneio, que é
 // TypeScript contra SQL. Ainda assim: mexeu aqui, mexe lá.
-export async function calcularOfflineEventHash(entrada: {
+export // OS NOMES DOS PARÂMETROS SÃO NEUTROS DESDE A 2C.5, e a fórmula NÃO
+// mudou um byte — ela concatena VALORES, não chaves.
+//
+//     saída:   caixaStrokes       ┐
+//     retorno: responsavelStrokes ┴→ assinaturaInternaStrokes
+//
+// Renomear no FIO seria quebra (corpos já gravados dizem caixaStrokes);
+// renomear aqui dentro não é. E o nome antigo mentiria no retorno, onde
+// quem assina é o responsável da loja e pode ser gerente ou admin — a
+// armadilha do tipo_signatario outra vez.
+//
+// O spec do envelope congela três hashes calculados ANTES deste
+// refactor e exige que continuem idênticos. A intenção era "só renomeei
+// parâmetro"; a asserção é quem prova.
+async function calcularOfflineEventHash(entrada: {
   documentHash: string
   romaneioId: string
-  caixaStrokes: unknown
-  motoboyStrokes: unknown
+  assinaturaInternaStrokes: unknown
+  assinaturaMotoboyStrokes: unknown
   ocorridoEmLocal: string
   geolocalizacao: unknown | null
 }): Promise<string> {
   const partes = [
     entrada.documentHash,
     entrada.romaneioId.toLowerCase(),
-    JSON.stringify(entrada.caixaStrokes),
-    JSON.stringify(entrada.motoboyStrokes),
+    JSON.stringify(entrada.assinaturaInternaStrokes),
+    JSON.stringify(entrada.assinaturaMotoboyStrokes),
     entrada.ocorridoEmLocal,
     entrada.geolocalizacao === null ? '-' : JSON.stringify(entrada.geolocalizacao),
   ]

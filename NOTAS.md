@@ -4567,6 +4567,114 @@ de atenção".
 `finally` aconteça o que acontecer, e apaga o item no fim. Uma operação
 que só existe offline, criada offline.
 
+## 72. Etapa 2C.5 — o contrato criptográfico do envelope, nos dois lados
+
+A fronteira foi corrigida pelo usuário, e o argumento decide: **`tipo`
+selado no cliente e não lido no servidor não é propriedade de segurança,
+é um campo criptografado.** Eu tinha proposto deixar a Edge Function
+inteira pra 2C.6, o que deixaria um meio-estado entre commits justamente
+na parte de criptografia.
+
+Ficou assim:
+
+```
+2C.5 = contrato criptográfico   cliente ↔ envelope ↔ servidor
+2C.6 = comportamento do endpoint  body.tipo → despacho → RPC
+```
+
+### O que mudou
+
+`SegredosDaSaida` → **`SegredosDoRomaneio`** (o retorno usa o mesmo
+envelope; o nome tinha deixado de dizer a verdade), com `tipo?:
+'saida' | 'retorno'` **dentro** dele. Fora seria um campo que alguém
+troca no caminho; dentro, o servidor compara em vez de acreditar.
+
+As amarrações que já existiam (`operationId`, `documentHash`) impedem
+reaproveitar um envelope em outra operação CONCRETA — mas não impediriam
+trocar de CAMINHO com o envelope certo. É esse buraco que o `tipo` fecha.
+
+`RetornoOfflineInput` ganhou `envelope`. E a Edge Function ganhou
+`resolverTipoDoRomaneio`, que **reconhece** `retorno` e recusa com 501 em
+vez de tratá-lo como saída. Tratar como saída seria o pior desfecho:
+`corpo.entregaIds` viria de outro documento e `selar_romaneio_sincronizado`
+criaria corrida errada ou conflito a partir de um envelope que dizia
+outra coisa.
+
+**Valor desconhecido é recusado, não vira saída por omissão.** "Não
+reconheço" e "é uma saída" são fatos diferentes, e tratá-los igual é como
+uma versão futura passaria despercebida por esta.
+
+### O rename ao lado de uma fórmula criptográfica, medido
+
+`calcularOfflineEventHash` passou a receber `assinaturaInternaStrokes` /
+`assinaturaMotoboyStrokes` nos DOIS gêmeos. No fio nada mudou: corpos já
+gravados dizem `caixaStrokes`, e o retorno dirá `responsavelStrokes` —
+os dois convergem no parâmetro.
+
+A fórmula concatena VALORES, não chaves, então renomear não deveria mover
+nada. **"Não deveria" é exatamente o que este projeto não aceita**, então
+capturei três hashes com o código de ANTES do refactor e os congelei como
+asserção:
+
+```
+com geolocalização   d91131af…
+sem geolocalização   44d50904…
+traços nulos         000223191…
+```
+
+Os três continuam idênticos, e `offline-hash.spec.mts` segue dizendo
+"os dois lados concordam". Sem essa captura prévia, um deslize teria
+aparecido como *"o conteúdo da saída mudou depois de assinado"* na
+próxima saída offline de alguém — uma mensagem que aponta pra adulteração
+quando a causa é um rename.
+
+`tipo` **não** entrou na fórmula, de propósito: a amarração vem do
+envelope cifrado mais a validação server-side, e metê-lo no digest seria
+mudança criptográfica gratuita no protocolo histórico da saída.
+
+### Duas coisas que o teste exigiu do código
+
+**O cache da chave pública era global.** Bastava enquanto só existia a do
+ambiente; com `selarSegredosCom` recebendo a chave, ele devolveria a
+primeira importada pra qualquer spki seguinte — o teste selaria com uma
+chave e acharia que selou com outra, e o sintoma seria "a privada não
+abre" apontando pro lugar errado. Virou `Map` por spki.
+
+**`selarSegredos` foi partido.** Ele lê `import.meta.env`, que não roda
+em `npx tsx` (a armadilha do §57), e o formato do envelope é contrato com
+a Edge Function — precisa ser testável sem navegador e sem build.
+`selarSegredosCom(config, segredos)` recebe a chave; `selarSegredos`
+continua sendo o caminho do app. Mesma separação de `caminhosNoDrive.ts`
+e `googleDrive.ts`.
+
+### O spec, e o que ele trava além do pedido
+
+`scripts/envelope.spec.mts`, 18 casos. A resolução de tipo é **extraída**
+de `sync-romaneio/index.ts`, nunca reescrita — mesma disciplina do
+`offline-hash.spec.mts`, senão o spec vira uma segunda implementação da
+regra que deveria conferir.
+
+Além dos seis que o usuário travou, entraram: **`iv` trocado não abre**
+(o par do ciphertext adulterado — sem ele, "AES-GCM é autenticado" ficaria
+provado por um lado só) e **tipo desconhecido não vira saída**.
+
+O caso que mais vale é o (4) do pedido: *a palavra "saida" não aparece
+FORA do envelope*. Ele é quem prova que a amarração é real e não
+decorativa — se o tipo vazasse pro envelope externo, todo o resto do
+desenho seria teatro.
+
+### Uma armadilha do meu próprio ferramental
+
+Escrevi um comentário via `node -e` dentro de aspas duplas do bash, com
+um nome de arquivo entre crases. **O bash executou as crases como
+substituição de comando** e engoliu o trecho, nos dois arquivos ao mesmo
+tempo — `// \`scripts/envelope.spec.mts\` congela…` virou
+`//  congela…`. Passou por `tsc`, lint e build, porque é comentário.
+
+Só apareceu porque fui reler o arquivo depois de escrever. Fica a regra:
+**crase em string de shell é código**, e comentário mutilado não é pego
+por nenhuma das três verificações.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -4952,7 +5060,17 @@ passando). E o C rodou no navegador: **11 de 11**.
 `romaneio_retorno` na fila, com payload congelado e sem o objeto de
 domínio junto. `tsc`, lint e build limpos.
 
-Depois: **2C.5**, o envelope com `tipo` dentro.
+**2C.5 FEITA E CONFERIDA (item 72)** — o contrato criptográfico do
+envelope, nos dois lados. `envelope.spec.mts` 18/18, `offline-hash.spec`
+continua com os gêmeos concordando, e os TRÊS hashes de antes do
+refactor intactos. tsc, lint e build limpos.
+
+**A Edge Function precisa ser REPUBLICADA** (dashboard → Edge Functions
+→ sync-romaneio → Deploy) pra o `resolverTipoDoRomaneio` valer no ar.
+Sem isso o servidor segue na versão anterior, que trataria um envelope
+de retorno como saída.
+
+Depois: **2C.6**, o despacho por tipo.
 
 **O teste de transporte está escrito e não foi rodado** — ele exige
 login, então é clique seu. Item 66: nove cenários, quatro com bloco `d`,

@@ -61,8 +61,8 @@ const traco = [{ points: [{ x: 1, y: 2, time: 1755400000000, pressure: 0.5 }] }]
 const base: Entrada = {
   documentHash: 'a'.repeat(64),
   romaneioId: '019FE83F-1D58-70E9-8DD8-62B04E40D5EA',
-  caixaStrokes: traco,
-  motoboyStrokes: [{ points: [{ x: 9, y: 8, time: 1755400001000, pressure: 1 }] }],
+  assinaturaInternaStrokes: traco,
+  assinaturaMotoboyStrokes: [{ points: [{ x: 9, y: 8, time: 1755400001000, pressure: 1 }] }],
   ocorridoEmLocal: '2026-08-17T14:32:05.123Z',
   geolocalizacao: null,
 }
@@ -71,15 +71,15 @@ const casos: [string, Entrada][] = [
   ['base, geolocalização nula', base],
   ['com geolocalização', { ...base, geolocalizacao: { lat: -30.336, lon: -54.32, acc: 12.5 } }],
   ['romaneioId maiúsculo vs minúsculo', { ...base, romaneioId: base.romaneioId.toLowerCase() }],
-  ['strokes vazios', { ...base, caixaStrokes: [], motoboyStrokes: [] }],
-  ['strokes nulos', { ...base, caixaStrokes: null, motoboyStrokes: null }],
+  ['strokes vazios', { ...base, assinaturaInternaStrokes: [], assinaturaMotoboyStrokes: [] }],
+  ['strokes nulos', { ...base, assinaturaInternaStrokes: null, assinaturaMotoboyStrokes: null }],
   ['documentHash diferente', { ...base, documentHash: 'b'.repeat(64) }],
   ['outro relógio', { ...base, ocorridoEmLocal: '2026-08-17T14:32:05.124Z' }],
-  ['acento no traço', { ...base, caixaStrokes: [{ points: [], rotulo: 'José Antônio' }] }],
-  ['barra invertida e aspas', { ...base, caixaStrokes: [{ rotulo: 'a\\"b|c' }] }],
+  ['acento no traço', { ...base, assinaturaInternaStrokes: [{ points: [], rotulo: 'José Antônio' }] }],
+  ['barra invertida e aspas', { ...base, assinaturaInternaStrokes: [{ rotulo: 'a\\"b|c' }] }],
   ['pipe no relógio (separador do hash)', { ...base, ocorridoEmLocal: '2026|08|17' }],
   ['geolocalização 0,0 não é null', { ...base, geolocalizacao: { lat: 0, lon: 0 } }],
-  ['número grande', { ...base, caixaStrokes: [{ t: 1755400000000000 }] }],
+  ['número grande', { ...base, assinaturaInternaStrokes: [{ t: 1755400000000000 }] }],
 ]
 
 const vistos = new Map<string, string>()

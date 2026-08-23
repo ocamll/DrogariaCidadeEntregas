@@ -315,6 +315,19 @@ export type RetornoOfflineInput = {
 
   ocorridoEmLocal: string
   geolocalizacao: unknown | null
+
+  /**
+   * PIN e token do cartão, selados com a pública do servidor — o mesmo
+   * envelope da saída, e é isso que o torna seguro: não há segunda
+   * implementação de criptografia pra divergir.
+   *
+   * Dentro dele vai `tipo: 'retorno'`, e o retorno o exige explícito. A
+   * ausência significa saída, mas isso é compatibilidade histórica pura:
+   * não existe `romaneio_retorno` antigo em IndexedDB nenhum, então
+   * aceitar envelope sem tipo aqui seria criar hoje uma permissividade
+   * para um formato que nunca existiu.
+   */
+  envelope: EnvelopeSelado
   /** Conferido contra o JWT na Edge Function. Mesma regra da saída. */
   userId: string
 }

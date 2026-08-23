@@ -412,8 +412,13 @@ function NovaCorridaFluxo({
       const offlineEventHash = await calcularOfflineEventHash({
         documentHash,
         romaneioId,
-        caixaStrokes,
-        motoboyStrokes,
+        // O nome do parâmetro é neutro desde a 2C.5; o do FIO continua
+        // `caixaStrokes`, porque corpos já gravados dizem isso. A fórmula
+        // concatena valores, então renomear aqui não move o hash — e
+        // `scripts/envelope.spec.mts` congela três hashes de antes do
+        // refactor pra provar exatamente isso.
+        assinaturaInternaStrokes: caixaStrokes,
+        assinaturaMotoboyStrokes: motoboyStrokes,
         ocorridoEmLocal,
         geolocalizacao,
       })
@@ -423,6 +428,10 @@ function NovaCorridaFluxo({
         operationId: romaneioId,
         documentHash,
         offlineEventHash,
+        // Explícito desde a 2C.5. A ausência continua significando saída,
+        // pra fila antiga seguir drenando — mas o que nasce agora diz o
+        // que é, e o servidor compara em vez de acreditar.
+        tipo: 'saida',
       })
 
       const paraFila: SaidaOfflineInput = {
