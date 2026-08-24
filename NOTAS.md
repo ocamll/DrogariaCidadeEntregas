@@ -5363,6 +5363,75 @@ recusaria** (medido chamando-o direto) **e quem fala primeiro é o
 guard** (medido pelo nome do erro). As duas camadas ficam visíveis em vez
 de uma esconder a outra.
 
+### A máquina de custódia, como redutor puro
+
+`src/lib/custodiaDoRetorno.ts`, sem React e sem imports. O visual vem por
+cima; o gate desta etapa não é aparência, é **percorrer a máquina inteira
+sem que exista uma transição capaz de reaproveitar evidência de um
+documento anterior.**
+
+### A staleness virou detectável em vez de confiada
+
+Toda evidência é guardada CARIMBADA com o `documentHash` sob o qual foi
+colhida:
+
+```
+{ paraDocumento: '<hash>', valor: … }
+```
+
+Com isso, "esta assinatura é deste documento?" vira uma comparação, e não
+uma confiança em que todo caminho de invalidação lembrou de limpar.
+`evidenciaDeOutroDocumento()` é a invariante, e o caso (10) do spec a
+checa **depois de cada transição de cada estado alcançável**:
+
+```
+4403 transições · 258 estados distintos · 0 sujas
+```
+
+Não é sobre os caminhos que eu lembrei de escrever — é sobre a máquina.
+E o mesmo caso força um estado com carimbo errado, porque `0 sujas`
+também seria o resultado de um detector que não funciona.
+
+É o truque do carimbo do §62, onde ler a fila inteira e procurar o item
+concluía "sincronizada" por um instante. Carimbar torna "ainda não sei"
+uma resposta possível.
+
+### A decisão que o usuário deixou em aberto
+
+**Autorização expirada recolhe as DUAS assinaturas.**
+
+O conteúdo não mudou — o `documentHash` é o mesmo —, então em tese os
+traços continuariam sendo manifestação sobre o mesmo documento. O que
+muda é outra coisa: **a autorização é a prova de que aquela pessoa estava
+ali NAQUELE momento.** Expirada, uma nova autenticação prova que ela está
+aqui AGORA, e o documento passaria a juntar evidências de duas janelas de
+presença sem dizer isso em lugar nenhum.
+
+É o §39 de novo: o documento não afirma o que não sabe. Custa duas
+assinaturas; afirmar uma simultaneidade que não houve custa a cadeia.
+
+E o recolhimento é **explicado**, nunca silencioso — daí
+`motivoDoRecolhimento`, que a tela mostra. Foi a ressalva do usuário, e
+ela vale: recolher sem dizer por quê pareceria defeito.
+
+### Duas decisões menores que o spec fixou
+
+**PIN recusado NÃO recolhe o cartão.** Ainda não há assinatura nenhuma, e
+o caixa vai tentar de novo; recolher só faria bipar à toa. Já
+`TROCAR_MOTOBOY` e `CANCELAR` recolhem tudo.
+
+**`recolher()` é um lugar só.** Todo caminho de invalidação passa por
+ele, então acrescentar uma evidência ao estado obriga a acrescentá-la
+lá — o esquecimento vira erro em vez de vazamento.
+
+### `assinando_responsavel` é rótulo, não estado
+
+Hoje a máquina vai de `custodia_autorizada` direto pro traço do
+responsável, então aquele nome existe no tipo pra a tela nomear a etapa,
+mas o redutor não o produz. O caso (11) **afirma isso explicitamente**,
+em vez de deixá-lo passando por estado morto: se um dia virar um passo de
+verdade, o teste cobra.
+
 ### Quatro rodadas, e nenhuma falha estava na migration
 
 O bloco 1 provou na primeira tentativa que a função estava instalada, os
