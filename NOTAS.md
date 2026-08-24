@@ -5206,7 +5206,90 @@ etapa. O caso (e) dele é o mais interessante: imprime o cliente do
 CONTEXTO ao lado do cliente que está em `entregas` hoje — se os dois
 diferirem, o contexto está **certo**.
 
+## 78. Etapa 2D.3 (pré-condição) — a invariante do pagamento realizado
+
+O usuário barrou a minha proposta, e a formulação dele é melhor que a
+regra que eu tinha escrito:
+
+> Um Romaneio de Retorno só pode ser selado se cada linha `pr` assinada
+> corresponder a exatamente uma linha de pagamento realizado persistida
+> pela mesma transação.
+
+"O id não pode colidir com o do previsto" é **consequência** disso, não a
+regra. E o argumento que fecha: a proteção não pode existir só na tela,
+porque um cliente antigo, com defeito ou manipulado manda um DCRR1
+perfeitamente assinado e o banco selaria enquanto o
+`on conflict do nothing` engole a gravação.
+
+### As duas camadas
+
+```
+CLIENTE   no congelamento, ids novos e nenhuma colisão
+          → evita chegar a cartão, PIN e duas assinaturas pra descobrir
+
+BANCO     conta as linhas `pr` assinadas contra as gravadas
+          → o documento inconsistente não chega a existir
+```
+
+Mesma divisão da 2C.2: o cliente evita o custo, o banco impede o dano.
+
+### Por que exceção, e não conflito
+
+A 2B decidiu que recusa vira `status = 'conflito'`, porque quando o
+retorno chega ali as duas partes já assinaram e a prova não pode sumir
+num rollback. **Esta é diferente:** o documento é internamente
+inconsistente — afirma um pagamento que a própria transação não
+conseguiu gravar. Preservá-lo como conflito criaria evidência de algo que
+não pode ter acontecido, e que alguém poderia tentar reaproveitar.
+
+### O método: patch por script, diff conferido antes
+
+É a QUARTA definição de `selar_romaneio_retorno_interno`, e reescrevê-la
+à mão seria a forma mais provável de reintroduzir um bug corrigido. Ela
+foi obtida **patcheando a mais recente por script**, com o diff medido
+antes de virar migration:
+
+```
+14 linhas de código acrescentadas
+ 0 linhas removidas
+ 4 linhas de `digest(...)` byte a byte IDÊNTICAS
+```
+
+Mesmo método do `papel_no_momento` (§59), e pelo mesmo motivo: "a fórmula
+não mudou" tem que ser medição, não leitura.
+
+O `on conflict (id) do nothing` **continua lá**. Ele é o que impede
+reenvio de duplicar pagamento; tirá-lo trocaria um defeito silencioso por
+outro. O que mudou é que agora ele é obrigado a se denunciar.
+
+### A conferência consegue o que a 2B não conseguiu
+
+O bloco 2 monta um DCRR1 **válido** cujo único defeito é o
+`pagamento_id` já existir — usando o id do previsto, que é o uuid da
+entrega. É literalmente o payload que um cliente produziria ao
+pré-preencher o realizado copiando o previsto inteiro.
+
+Pra chegar ao laço de pagamentos ele atravessa tudo: saída selada, hash
+da saída, corrida aberta, conjunto de vales exato, motoboy da custódia e
+o `document_hash` batendo com o DCRR1 reconstruído pelo gêmeo SQL. **A
+autorização é cunhada à mão** — no SQL Editor dá, e é isso que permite
+exercitar o trecho que a conferência da 2B parou antes de alcançar
+(`42501` na autorização).
+
+Ele queima um número de romaneio: o insert em `romaneios` acontece antes
+do laço de pagamentos.
+
+### Uma armadilha do meu conferidor, de novo
+
+O checador de parênteses acusou saldo 2 no script. Falso positivo: ele
+conta parênteses **dentro de literais**, e `'digest('` aparece duas
+vezes. Já tinha mordido na 2A, onde a regra escrita foi "parênteses
+balanceados fora dos literais" — e eu tinha reimplementado a versão
+ingênua. Refeito apagando o conteúdo dos literais antes de contar: 0 nos
+três arquivos.
+
 ## Commits desta sessão
+
 
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
