@@ -90,7 +90,16 @@ begin
            'desfecho', 'entregue',
            'motivo', null,
            'detalhe', null,
-           'documentos', '[]'::jsonb,
+           -- DERIVADOS, não vazios. Se a saída esperar um convênio ou um
+           -- crediário e o payload mandar `[]`, o selo recusa por
+           -- `documentos_nao_conferem` e nunca alcança o laço de
+           -- pagamentos — um dos candidatos ao que travou a 2ª rodada.
+           'documentos', coalesce((
+             select jsonb_agg(jsonb_build_object(
+                      'tipo', d.tipo_documento, 'situacao', 'recebido'))
+               from public.documentos_esperados_do_retorno(v_saida.id) d
+              where d.entrega_id = re.entrega_id
+           ), '[]'::jsonb),
            'pagamentos_realizados', jsonb_build_array(jsonb_build_object(
              'pagamento_id', re.entrega_id,      -- <<< a colisão
              'forma', 'dinheiro',
@@ -141,11 +150,15 @@ begin
   -- levantou" e "recusou por outro motivo" ficam indistinguíveis — foi
   -- exatamente o que aconteceu na primeira rodada.
   if v_resultado is not null then
+    -- OS DOIS MOTIVOS, SEMPRE. `registrar_conflito_retorno` devolve
+    -- `motivo: 'conflito'` (genérico) E `conflitos[]` (específico), e um
+    -- `coalesce` entre os dois para no genérico — foi exatamente o que
+    -- escondeu a causa na segunda rodada. Aqui sai o array inteiro.
     v_rel := v_rel || format('    devolveu: ok=%s motivo=%s%s',
       coalesce(v_resultado ->> 'ok', '-'),
-      coalesce(v_resultado ->> 'motivo',
-               coalesce(v_resultado #>> '{conflitos,0,motivo}', '-')),
-      E'\n');
+      coalesce(v_resultado ->> 'motivo', '-'), E'\n');
+    v_rel := v_rel || format('    conflitos: %s%s',
+      coalesce(v_resultado ->> 'conflitos', '(nenhum)'), E'\n');
     v_rel := v_rel || format('    <-- ERRADO: era pra ter levantado exceção%s', E'\n');
   end if;
 
