@@ -4906,6 +4906,59 @@ avisa se aparecer `romaneio_retorno` — que antes da 2D seria inesperado.
 Ele responde uma pergunta operacional, não um gate: existe item legado
 AQUI que valha exercitar a janela de ponta a ponta antes da 2D?
 
+### O censo rodou em 2026-08-20: fila local vazia
+
+```
+fila local                        0 itens
+fechamento_corrida legado         0
+corridas escondidas pela 2C.7     0
+romaneio_retorno                  0   ← esperado antes da 2D
+```
+
+Zero em tudo, e cada zero quer dizer uma coisa diferente:
+
+- **`romaneio_retorno = 0` é confirmação.** Nada enfileira este tipo até
+  a tela existir, e se aparecesse antes da 2D seria sinal de que alguém
+  está criando retorno offline por um caminho que não deveria existir.
+- **`fechamento_corrida = 0` não autoriza nada.** Vazio nesta máquina não
+  prova vazio nos navegadores das outras 16 filiais. A regra de remoção
+  continua sendo por janela de releases, com a auditoria como sinal.
+
+### E ele corrige uma linha do placar que eu tinha escrito larga demais
+
+Eu marquei `fechamento legado não sobrescreve DCRR1` como verde citando
+"trigger medido, SQLSTATE DCRR1". **A metade do banco está provada; a do
+cliente não.**
+
+```
+trigger recusa a escrita            ✓  medido na 2C.2, contra retorno sintético
+DCRR1 → terminal + auditoria        ✗  CÓDIGO NUNCA EXECUTADO
+```
+
+O handler do cliente foi escrito na 2C.8 e nunca rodou, porque exercitá-lo
+exige as duas coisas ao mesmo tempo: um `fechamento_corrida` legado vivo
+na fila **e** um DCRR1 selado na mesma corrida. Não há nem um nem outro —
+a fila está vazia e o placar de integridade diz `retorno 0 · 0 · 0`.
+
+Isso não é uma falha da 2C.8: é a ordem natural das coisas. O primeiro
+encontro real entre os dois só pode acontecer depois de a 2D selar um
+retorno. **Vai pra lista de testes da 2D**, e o sinal de que funcionou é
+`fechamento_legado_obsoleto` aparecendo no Registro de Auditoria.
+
+Pelo mesmo motivo, o **backfill da 2C.3 nunca encontrou dado legado real**
+— foi provado 11/11 contra um banco v4 sintético, e não contra a fila de
+alguém. Nesta máquina não havia o que backfillar.
+
+### O que a 2C entrega, e o que ela não promete
+
+A infraestrutura offline do retorno está construída e medida em tudo que
+podia ser medido sem uma tela: porta offline, trigger de obsolescência,
+fila com dependência e sem self-lock, payload congelado, envelope com
+tipo, despacho conciliado contra a função no ar, e a proteção local.
+
+O que ela **não** promete, e não deve parecer prometer: que o caminho
+feliz do retorno offline funciona. Ele nunca rodou. Roda na 2D.
+
 ### O placar da 2C
 
 ```
@@ -4925,7 +4978,8 @@ DCRR1 (retorno)
   conflito preservado                     ✓  herdado da 2B
   fila ordenada                           ✓  dependeDeChave sem self-lock
   retorno não passa fechamento legado     ✓  16/16
-  fechamento legado não sobrescreve       ✓  trigger medido, SQLSTATE DCRR1
+  fechamento legado não sobrescreve       ~  trigger medido; o handler
+                                             do cliente nunca executou
   DCRR1 offline REAL                      ✗  aguardando a 2D
 
 FILA
@@ -5364,7 +5418,8 @@ versão está publicada.
 legado do SQLSTATE (que FALTAVA), a regra de remoção no CLAUDE.md e o
 censo da fila. tsc/lint/build limpos.
 
-O que falta é execução, e está no placar da 2C dentro do item 75: a
+Censo rodado: fila local VAZIA. O que falta é execução, e está no placar
+do item 75: a
 saída offline LEGADA sincronizando de verdade, e o DCRR1 offline real,
 que é 2D por construção.
 
