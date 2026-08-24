@@ -5279,6 +5279,55 @@ exercitar o trecho que a conferência da 2B parou antes de alcançar
 Ele queima um número de romaneio: o insert em `romaneios` acontece antes
 do laço de pagamentos.
 
+### Provada contra dado real em 2026-08-20, na quarta rodada
+
+```
+(e) selo: 23514 | Pagamento realizado em conflito: o DCRR1 afirma
+                  1 linha(s) pr e só 0 foi(ram) gravada(s).
+(f) retorno selado=0  conflito=0
+(g) pagamentos realizados gravados=0
+```
+
+Os três juntos são a garantia: **(e)** a transação aborta em vez de
+selar, **(f)** e **(g)** o rollback foi COMPLETO — nenhum romaneio, nem
+selado nem como conflito, e nenhum pagamento parcial. O achado do vale
+impresso virou garantia de banco.
+
+**`23514` bateu com o previsto, e o contraste com o `P0002` da 2C.1 é
+instrutivo.** `check_violation` é nome de condição do padrão SQL, com
+SQLSTATE definido; `no_data_found` é nome do PL/pgSQL, mapeado para
+`P0002`. Prever o primeiro é razoável, prever o segundo não era — e a
+regra continua sendo medir.
+
+### Quatro rodadas, e nenhuma falha estava na migration
+
+O bloco 1 provou na primeira tentativa que a função estava instalada, os
+contadores no lugar e as 4 linhas de `digest` intactas. As três rodadas
+seguintes foram defeitos do INSTRUMENTO, e vale listá-los porque são
+todos da mesma família — o relatório escondendo o que aconteceu:
+
+1. **bloco 2 comentado no arquivo.** Colar comentários dá "Success. No
+   rows returned", e eu não tinha dito que isso significa "nada rodou".
+   Na 2C.2 o bloco 2 estava vivo; aqui não. Formato inconsistente meu.
+2. **dois `limit 1` sem `order by`** — um pro hash, outro pro argumento.
+   Perfis diferentes → canônico divergente → `documento_alterado`. E o
+   relatório somava selado com conflito, então o "1" parecia um selo.
+3. **`coalesce` entre o motivo genérico e o específico.**
+   `registrar_conflito_retorno` devolve os dois, o genérico é sempre
+   `'conflito'`, e o `coalesce` parava nele. Três rodadas sem saber qual
+   recusa era.
+4. **`documentos: []` fixo.** A saída escolhida ESPERAVA papel — é a
+   única das onze, segundo o censo da 2B.5, e por acaso é a que está
+   aberta. `documentos_nao_conferem` recusava antes do laço de
+   pagamentos.
+
+O (4) era a causa; o (3) era o que impedia de vê-la.
+
+**Custo: três números de romaneio queimados** sem exercitar a guarda. E a
+lição, que já é a décima segunda deste projeto com outro nome: quando um
+teste não conclui, o primeiro suspeito é o teste — mas um teste que não
+DIZ onde parou faz cada rodada custar uma iteração inteira.
+
 ### Uma armadilha do meu conferidor, de novo
 
 O checador de parênteses acusou saldo 2 no script. Falso positivo: ele
