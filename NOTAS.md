@@ -4850,6 +4850,106 @@ corridaId não bloqueia ninguém*, porque malformado não pode virar
 bloqueio por aproximação, do mesmo jeito que não vira chave inventada na
 2C.3.
 
+## 75. Etapa 2C.8 — regressão, compatibilidade e o placar
+
+Sem arquitetura nova, como o usuário delimitou. Mas ela achou uma peça
+**faltando**, e não é pequena.
+
+### O protocolo de compatibilidade estava pela metade
+
+O bloco 2 do roteiro pressupunha: trigger recusa → SQLSTATE → handler
+reconhece → item vira terminal. Fui conferir o handler. **Ele não
+existia.**
+
+`processarFilaOperacoes` classifica com `error instanceof
+ErroTerminalDeSaida`, e o que o trigger da 2C.2 devolve é um objeto cru
+do PostgREST com `code: 'DCRR1'`. Ou seja: o fechamento legado recusado
+iria para `erro` e **retentaria para sempre** — exatamente o sintoma que
+o cabeçalho da própria 2C.2 diz que não pode acontecer, e o pior
+conhecido do projeto (§50.4).
+
+As duas metades, agora completas:
+
+```
+banco    trigger recusa a escrita        → o dano não acontece
+cliente  reconhece DCRR1 → TERMINAL      → o item não retenta pra sempre
+         + grava fechamento_legado_obsoleto
+```
+
+**Nenhuma funciona sozinha**, e é a lição da etapa. Um guard que só
+recusa produz um item preso; um handler que só desiste não protegeria
+nada.
+
+A auditoria é gravada pelo CLIENTE, com chave de idempotência derivada
+de um sha256 do tipo mais o `corridaId` — determinística, para duas abas
+ou uma retentativa manual não duplicarem a ocorrência. E não podia ser
+do trigger: um `insert into eventos` antes do `raise` é desfeito pelo
+rollback que o próprio `raise` provoca.
+
+### A regra de remoção, congelada no CLAUDE.md
+
+O usuário foi explícito e está certo: **"veio vazio" não autoriza remover
+o handler.** Vazio nesta máquina não prova vazio nos navegadores das
+outras filiais — são 17, e cada uma tem a própria fila em IndexedDB.
+
+O sinal que autoriza é a AUDITORIA, não a fila local: enquanto
+`fechamento_legado_obsoleto` aparecer no Registro de Auditoria, existe
+cliente antigo drenando por aí.
+
+### O censo, e o que ele é
+
+`scripts/conferir-2c8-no-console.js` só LÊ. Mostra a fila por tipo e
+status, os `fechamento_corrida` em detalhe (com `backfillOk`, que é
+`chave === payload.corridaId`), o que a 2C.7 está escondendo da tela, e
+avisa se aparecer `romaneio_retorno` — que antes da 2D seria inesperado.
+
+Ele responde uma pergunta operacional, não um gate: existe item legado
+AQUI que valha exercitar a janela de ponta a ponta antes da 2D?
+
+### O placar da 2C
+
+```
+DCR1 (saída)
+  online                                  ✓  sete romaneios reais
+  offline novo                            ✓  R-000010
+  offline LEGADO (envelope sem tipo)      ~  formato atravessa a
+                                             conciliação (caso 1 da 2C.6);
+                                             sincronização real NÃO exercitada
+
+DCRR1 (retorno)
+  payload congelado                       ✓  19/19, sem o domínio junto
+  envelope com tipo                       ✓  18/18
+  body × envelope                         ✓  13/13 contra a função NO AR
+  despacho correto                        ✓  ordem provada no texto
+  porta offline pronta                    ✓  2C.1 conferida no banco
+  conflito preservado                     ✓  herdado da 2B
+  fila ordenada                           ✓  dependeDeChave sem self-lock
+  retorno não passa fechamento legado     ✓  16/16
+  fechamento legado não sobrescreve       ✓  trigger medido, SQLSTATE DCRR1
+  DCRR1 offline REAL                      ✗  aguardando a 2D
+
+FILA
+  owner                                   ✓
+  legado sem owner tratado                ✓  bloqueia, porque roda
+  self-dependency corrigida               ✓  3 falham com o predicado antigo
+  malformado preservado                   ✓  sem chave inventada
+  backfill idempotente                    ✓  11/11 contra IndexedDB real
+
+CRIPTO
+  offlineEventHash não mudou              ✓  três hashes de antes congelados
+  tipo fora da fórmula histórica          ✓  decisão do usuário
+  chave errada falha                      ✓
+  IV alterado falha                       ✓
+  ciphertext alterado falha               ✓
+```
+
+**Os dois que não estão verdes são honestos, e não devem ser maquiados.**
+O DCRR1 offline real depende de tela que colete cartão e PIN — é 2D por
+construção. E a saída offline LEGADA teve o formato provado, não a
+sincronização: isso exige uma Nova Corrida sem rede com um envelope
+selado antes da 2C.5, e o valor dela é de regressão de dado, não de
+protocolo.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -5260,7 +5360,13 @@ versão está publicada.
 
 **2C.7 FEITA (item 74)** — 16/16 no spec, tsc/lint/build limpos.
 
-Depois: **2C.8**, regressões e a janela de compatibilidade.
+**2C.8 FEITA (item 75), pendente das regressões de execução** — o handler
+legado do SQLSTATE (que FALTAVA), a regra de remoção no CLAUDE.md e o
+censo da fila. tsc/lint/build limpos.
+
+O que falta é execução, e está no placar da 2C dentro do item 75: a
+saída offline LEGADA sincronizando de verdade, e o DCRR1 offline real,
+que é 2D por construção.
 
 **O teste de transporte está escrito e não foi rodado** — ele exige
 login, então é clique seu. Item 66: nove cenários, quatro com bloco `d`,

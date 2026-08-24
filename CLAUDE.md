@@ -1785,6 +1785,44 @@ caminho normal, e a frente do retorno não o herda). O que entra é uma
 linha: a porta offline nova confere que o responsável tem competência
 sobre a loja da saída, pra não repetir o padrão em código novo.
 
+
+##### A janela de compatibilidade do `fechamento_corrida` — quando remover
+
+Congelado em 2026-08-20. O handler legado **não sai porque a fila está
+vazia numa máquina**: cada navegador tem a própria fila em IndexedDB, e a
+farmácia tem 17 filiais. Vazio aqui não prova vazio lá.
+
+```
+release N     nada mais enfileira `fechamento_corrida`
+              o handler legado continua, e reconhece o SQLSTATE `DCRR1`
+release N+1   handler continua; observar auditoria `fechamento_legado_obsoleto`
+depois        sem ocorrência recente E rollout confirmado → considerar remoção
+```
+
+Não são três releases por numerologia: o princípio é que **clientes
+antigos tenham tido oportunidade real de atualizar e drenar**. Descartar
+antes disso é a perda silenciosa que a chave própria da fila veio
+corrigir em 16/08, com outro nome.
+
+O sinal que autoriza a remoção é a AUDITORIA, não a fila local: enquanto
+`fechamento_legado_obsoleto` aparecer no Registro de Auditoria, existe
+cliente antigo drenando por aí.
+
+##### As duas metades do protocolo de compatibilidade
+
+Nenhuma funciona sozinha, e isso é a lição da 2C.8:
+
+```
+banco    trigger recusa a escrita          → o dano não acontece
+cliente  reconhece `DCRR1` → TERMINAL      → o item não retenta pra sempre
+         + grava `fechamento_legado_obsoleto`
+```
+
+Só o trigger deixaria o item legado em `erro` e no backoff **para
+sempre** — o pior sintoma conhecido do projeto (§50.4). E a auditoria tem
+que ser gravada pelo CLIENTE: um `insert into eventos` antes do `raise`
+seria desfeito pelo rollback que o próprio `raise` provoca.
+
 #### DCRR1 — o canônico do retorno, CONGELADO em 2026-08-19
 
 Congelado antes de existir código, e congelar aqui importa: **depois que
