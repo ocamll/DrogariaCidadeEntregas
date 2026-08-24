@@ -4739,6 +4739,32 @@ retentar repete o resultado.
 descartaria um retorno legítimo, com duas assinaturas colhidas, por causa
 de uma janela de rollout.
 
+### Conferido contra a função NO AR em 2026-08-20: 13 de 13
+
+```
+(1) legado  body sem tipo + envelope sem tipo   → envelope_trocado
+(2) ROLLOUT body saida    + envelope sem tipo   → envelope_trocado
+(3)         body saida    + envelope saida      → envelope_trocado
+(4)         body retorno  + envelope retorno    → envelope_trocado  ← o Deploy
+(5-8)       as quatro divergências               → tipo_divergente
+(9, 9b)     desconhecido nos dois lados          → tipo_desconhecido
+(10-12)     vocabulário nos três sentidos        → vocabulario_invalido
+```
+
+**`envelope_trocado` no (1) a (4) é SUCESSO**, e a leitura importa: quer
+dizer que o tipo foi aceito e a função seguiu pra amarração seguinte,
+onde o `operationId` era divergente de propósito. É assim que se prova
+que a conciliação passou sem selar nada.
+
+**O (4) é a única prova possível de que o Deploy pegou.** Na versão
+anterior ele devolveria `retorno_nao_suportado` (501). Nem o spec (que
+roda contra o TEXTO) nem o `OPTIONS` (que responde `ok` desde a primeira
+versão) conseguem responder essa pergunta.
+
+E nada foi selado — não por promessa, por construção: a ordem do handler
+foi conferida mecanicamente, e cada caso para numa etapa nomeada antes do
+`.rpc(`, com ids sorteados que não existem no banco.
+
 ### O que só o teste integrado pode provar
 
 `despacho-sync-romaneio.spec.mts` roda contra o TEXTO da função e prova a
@@ -5152,7 +5178,10 @@ refactor intactos. tsc, lint e build limpos.
 Sem isso o servidor segue na versão anterior, que trataria um envelope
 de retorno como saída.
 
-**2C.6 FEITA (item 73), pendente do teste integrado** — despacho por
+**2C.6 FEITA E CONFERIDA (item 73)** — 13 de 13 contra a função no ar,
+com o Deploy confirmado pelo caso (4).
+
+~~pendente do teste integrado~~ — despacho por
 tipo, conciliação corpo × envelope, e o cliente mandando retorno.
 `despacho-sync-romaneio.spec.mts` 33/33, envelope 18/18, offline-hash
 com os gêmeos concordando. tsc, lint e build limpos.
