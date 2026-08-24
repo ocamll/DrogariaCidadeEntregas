@@ -5157,6 +5157,48 @@ muda o que faz com ela — o contexto é imutável dos dois jeitos —, mas
 quem estiver depurando "por que este vale não aparece" precisa saber se
 está olhando o que o servidor respondeu agora ou o que ficou guardado.
 
+### Conferida em 2026-08-20: cinco de cinco
+
+```
+(a) instalada=t  anon=f  authenticated=t
+(b) versao=CTXR1  hash=64 chars  saida=R-000001
+(c) vales no contexto=1  em romaneio_entregas=1
+(d) vales sem previstos/esperados=0
+(e) contexto e entregas iguais — ninguém corrigiu este vale
+```
+
+`documentos_esperados: []` num vale de dinheiro é o resultado CERTO: a
+expectativa é derivada das linhas `p` do canônico assinado, e dinheiro
+não gera papel. O caminho do convênio/crediário continua sem exercício
+aqui — a saída escolhida não tinha nenhum.
+
+### E o vale impresso achou a armadilha mais afiada da 2D
+
+O `pagamento_id` do previsto veio **igual ao `entrega_id`**. Não é
+defeito: é o desenho de `criarPagamentoPrevisto`, que usa o uuid da
+entrega como id determinístico porque a relação é 1:1 e isso dá
+idempotência ao reenvio da fila sem upsert.
+
+Mas ele arma um problema para a 2D.3, e o gatilho é a conveniência que
+o próprio usuário sugeriu — pré-preencher o realizado com o previsto.
+Copiando o objeto inteiro, o `pagamentoId` vai junto, o DCRR1 carrega o
+id do previsto na linha `pr`, e o insert do selo bate em
+`on conflict (id) do nothing`: **não grava nada e não levanta erro.** O
+romaneio sela afirmando um pagamento realizado que não existe.
+
+Perda silenciosa com duas assinaturas em cima, e invisível — o
+`on conflict` existe por um bom motivo (reenvio não pode duplicar) e não
+vai sair.
+
+A regra ficou no CLAUDE.md: pré-preencher copia forma, valor e troco,
+**nunca o `pagamentoId`**. E o congelamento tem que RECUSAR a colisão,
+não só evitá-la — custa um `Set` e torna o defeito impossível de
+representar em vez de improvável.
+
+Isto não apareceu em revisão de código nem em teste: apareceu porque a
+conferência imprime o vale por extenso e alguém leu. É o mesmo padrão
+do §42 e do canônico impresso da 2A.
+
 ### O que falta na 2D.2
 
 A migration não foi aplicada, e o conferidor do rodapé é o que fecha a

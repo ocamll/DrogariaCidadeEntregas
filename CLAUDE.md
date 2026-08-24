@@ -1890,6 +1890,68 @@ manuscrita é manifestação sobre um conteúdo específico. Recolher a
 mesma imagem sobre um documento diferente é falsificar consentimento —
 é a mesma família do §39, com o preço maior.
 
+##### O PRÉ-PREENCHIMENTO DO PAGAMENTO NÃO PODE LEVAR O `pagamento_id`
+
+Achado em 2026-08-20, lendo o vale impresso pela conferência da 2D.2. É
+a armadilha mais afiada que a 2D tem, porque o gatilho dela é uma
+conveniência óbvia.
+
+**O id do pagamento PREVISTO é o mesmo uuid da entrega.** Está assim
+desde que a feature existe, de propósito e documentado em
+`criarPagamentoPrevisto`: *"id determinístico (default: mesmo uuid da
+entrega, relação é 1:1)"* — é o que dá idempotência ao reenvio da fila
+sem precisar de upsert.
+
+Então, no contexto, isto é normal e não é defeito:
+
+```
+entrega_id   : 01a00d0c-add7-…
+pagamento_id : 01a00d0c-add7-…   ← o previsto
+```
+
+**E aqui está o problema.** A tela vai querer pré-preencher o realizado
+com o previsto, pra o caixa só confirmar. Se ela copiar o objeto inteiro,
+o `pagamentoId` vai junto — e o DCRR1 passa a carregar, na linha `pr`, o
+id do previsto.
+
+O que acontece então **não é erro**: `selar_romaneio_retorno_interno`
+insere os realizados com `on conflict (id) do nothing`, e aquele id já
+existe como linha `momento = 'previsto'`. O insert não faz nada, o selo
+conclui, e o documento assinado afirma um pagamento realizado que **não
+existe em `pagamentos`**.
+
+```
+tela copia o previsto inteiro
+  → DCRR1 diz  pr E1 <id-do-previsto> dinheiro 12390 0
+  → insert bate no on conflict
+  → nada é gravado
+  → romaneio SELADO afirmando um realizado inexistente
+```
+
+Perda silenciosa, com duas assinaturas em cima — e ela não aparece em
+lugar nenhum, porque o `on conflict do nothing` existe por um bom motivo
+(reenvio da fila não pode duplicar) e não vai ser removido.
+
+**A regra, então:**
+
+```
+pré-preencher COPIA    forma, valorCents, trocoCents
+pré-preencher NUNCA    pagamentoId
+```
+
+O `pagamentoId` do realizado é **sempre** um uuidv7 novo, cunhado no
+congelamento junto com o `romaneioId` — e recunhado a cada novo
+congelamento, como todo o resto que depende do hash.
+
+**E o congelamento deve RECUSAR a colisão**, não só evitá-la: antes de
+montar o DCRR1, nenhum `pagamentoId` da entrada pode ser igual a um
+`pagamentoId` dos previstos do contexto. É invariante local, custa um
+`Set`, e torna o defeito impossível de representar em vez de improvável.
+
+Isso é o §59 aplicado de novo — *tornar um erro impossível de
+representar vale mais que rejeitá-lo* —, e é a mesma razão pela qual
+`pagamentosRealizados` é aninhado no vale.
+
 ##### O que a tela mostra, e de ONDE
 
 **Os fatos antigos vêm do SNAPSHOT da saída, nunca de `entregas`.** É a
