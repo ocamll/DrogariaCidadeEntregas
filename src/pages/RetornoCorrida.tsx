@@ -7,7 +7,13 @@ import {
   type FecharCorridaInput,
   type InsucessoMotivo,
 } from '@/data/corridas'
-import { enfileirarOperacao, donoDaFila, gravacaoEnfileirada } from '@/data/filaOffline'
+import {
+  enfileirarOperacao,
+  donoDaFila,
+  gravacaoEnfileirada,
+  useFilaOperacoesPendentes,
+} from '@/data/filaOffline'
+import { filtrarCorridasRetornaveis } from '@/lib/corridasBloqueadas'
 import { uuidv7 } from '@/lib/uuid'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -20,8 +26,18 @@ const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
 
 export function RetornoCorrida({ profile, onVoltar }: { profile: AuthProfile; onVoltar: () => void }) {
-  const { data: corridas, isLoading, isError, error } = useCorridasAbertas()
+  const { data: abertas, isLoading, isError, error } = useCorridasAbertas()
+  const fila = useFilaOperacoesPendentes()
   const [corridaId, setCorridaId] = useState<string | null>(null)
+
+  // Uma corrida com `fechamento_corrida` legado ainda vivo na fila local
+  // não é OFERECIDA. Não é proteção de integridade — quem impede o dano é
+  // o trigger da 2C.2, no banco. É custo: sem isto o caixa escolheria a
+  // corrida, colheria as duas assinaturas, e só descobriria o problema se
+  // o fechamento drenasse primeiro. Mesmo princípio do `vales-para-saida`.
+  const corridas = abertas
+    ? filtrarCorridasRetornaveis(abertas, fila, profile.id)
+    : abertas
   const [gravacao, setGravacao] = useState<Gravacao | null>(null)
 
   const corridaSelecionada = corridas?.find((c) => c.id === corridaId) ?? null

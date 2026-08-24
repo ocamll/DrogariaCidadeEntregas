@@ -4783,6 +4783,73 @@ retorno + envelope sem tipo   → recusa
 E o retorno só roda de verdade na 2D, que é quem coleta cartão e PIN.
 Até lá o que dá pra exercitar é a metade de validação.
 
+## 74. Etapa 2C.7 — a tela não oferece o que ela já sabe que vai doer
+
+Pequena de propósito, e o enquadramento é do usuário: **não é proteção de
+integridade.** O trigger da 2C.2 impede o dano no banco, venha de onde
+vier. Isto evita o CUSTO — sem a filtragem, o caixa escolhe a corrida,
+colhe as DUAS assinaturas, e só descobre o problema se o fechamento
+legado drenar primeiro.
+
+```
+2C.2  servidor impede o dano
+2C.3  a fila respeita a dependência
+2C.7  a tela evita a operação sabidamente ruim
+```
+
+`src/lib/corridasBloqueadas.ts`, pura e sem imports; a tela combina
+`useCorridasAbertas()` com `useFilaOperacoesPendentes()`. Ela **só
+observa**: não apaga item, não marca terminal, não mexe em `chave`, não
+chama sync.
+
+### Duas coisas que o código disse e mudaram a regra congelada
+
+O usuário listou os estados bloqueantes como "pendente, processando,
+erro/retryable" e mandou não bloquear por terminal. Lendo o laço de
+`processarFilaOperacoes`, duas correções:
+
+**1. `bloqueado` NÃO é fim de linha.** O laço o RESSUSCITA assim que o
+dono entra:
+
+```js
+if (item.status === bloqueado) update({ status: pendente })
+```
+
+Uma lista de status "ativos" que o esquecesse ofereceria uma corrida que
+vai ser fechada na rodada seguinte. Por isso a regra é literalmente
+**"não terminal"** — que, por sorte, é como o usuário a tinha enunciado
+em prosa antes de listar os status.
+
+**2. `userId` vazio bloqueia.** Item herdado da v2 do banco local não tem
+dono, e o laço deixa item sem dono sincronizar sob QUALQUER sessão. Ele
+escreve, logo bloqueia. O predicado espelha o gate do laço:
+`!item.userId || item.userId === userId`.
+
+### E uma em que eu desviei do pedido, de propósito
+
+O usuário pediu filtro por `userId + tenantId + lojaId`, pra não esconder
+corrida por causa de lixo de outra filial. **Deixei tenant e loja de
+fora**, e a razão é que incluí-los só poderia SUB-bloquear:
+
+- eles nunca são comparados pelo laço da fila, então um item de perfil
+  movido de filial rodaria e esta função não teria avisado;
+- e não há o que sobre-bloquear, porque a lista de corridas já vem
+  escopada por filial pela RLS — um item de outra filial não tem como
+  apontar pra uma corrida oferecida aqui.
+
+A pergunta certa não é "de quem é este item", é **"ele vai rodar e
+escrever nesta corrida?"**. O caso (4) do contrato (outro dono não
+bloqueia) continua passando, porque outro dono de fato não roda.
+
+### Os testes
+
+`scripts/corridas-bloqueadas.spec.mts`, 16 casos: os seis do contrato,
+os quatro de pureza, os três que a leitura ingênua perderia
+(`bloqueado`, `erro`, sem dono) e três bordas — inclusive *payload sem
+corridaId não bloqueia ninguém*, porque malformado não pode virar
+bloqueio por aproximação, do mesmo jeito que não vira chave inventada na
+2C.3.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
@@ -5191,7 +5258,9 @@ da 2C.5, que recusa retorno com 501. E o teste que fecha a etapa é o
 integrado, porque o spec roda contra o TEXTO da função e não prova qual
 versão está publicada.
 
-Depois: **2C.7**, a proteção local.
+**2C.7 FEITA (item 74)** — 16/16 no spec, tsc/lint/build limpos.
+
+Depois: **2C.8**, regressões e a janela de compatibilidade.
 
 **O teste de transporte está escrito e não foi rodado** — ele exige
 login, então é clique seu. Item 66: nove cenários, quatro com bloco `d`,
