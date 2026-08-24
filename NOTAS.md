@@ -5004,6 +5004,69 @@ sincronização: isso exige uma Nova Corrida sem rede com um envelope
 selado antes da 2C.5, e o valor dela é de regressão de dado, não de
 protocolo.
 
+## 76. O desenho da 2D.1, fechado antes de qualquer componente
+
+Sessão de 2026-08-20, com a 2C fechada. Mesmo método do item 58: o
+usuário trouxe a máquina de estados e a regra do congelamento, e mandou
+fechar antes do JSX. O desenho completo está no CLAUDE.md, seção "A 2D".
+Aqui fica o que a leitura do código **achou**.
+
+### Um achado que economiza trabalho
+
+`documentos_esperados_do_retorno(uuid)` **já existe e já tem grant para
+`authenticated`**, com `security invoker` — logo a RLS se aplica. A 2B.5
+deixou a porta do lado do cliente pronta sem ninguém registrar isso.
+
+Ou seja: a tela consegue perguntar quais papéis a saída espera **sem
+migration nenhuma**. Sem essa leitura, a 2D.2 começaria escrevendo uma
+função SQL que já está no banco.
+
+### Três coisas que a tela precisa e não existem
+
+| precisa | estado |
+|---|---|
+| `saidaRomaneioId` e `saidaDocumentHash` da corrida | falta — `CorridaAberta` não sabe do romaneio |
+| pagamento PREVISTO por vale | falta |
+| cliente/endereço/valor do SNAPSHOT da saída | falta — só há o caminho por `entregas` |
+
+As três viram UMA consulta, não três: a tela não pode montar o documento
+a partir de fontes que podem discordar entre si.
+
+E os fatos antigos têm que vir do SNAPSHOT, não de `entregas` — é a
+regra 7 e a lição do PDF do romaneio. Mostrar o valor de hoje faria o
+caixa conferir contra algo que o motoboy nunca recebeu.
+
+### O que eu acrescentei à regra de invalidação
+
+O usuário listou o que morre quando o caixa edita depois de congelar:
+hash, autorização, assinaturas. **Falta o ENVELOPE**, e ele é o quarto:
+sela `operationId` + `documentHash` + `tipo`, e os dois primeiros mudam.
+Reaproveitá-lo faria a sincronização recusar `envelope_trocado` horas
+depois, com as duas assinaturas já colhidas.
+
+Somei também `romaneioId` e os `pagamentoId` — os últimos entram no
+DCRR1, logo no hash.
+
+E vale escrever por quê os traços são DESCARTADOS e não reaproveitados:
+assinatura manuscrita é manifestação sobre um conteúdo específico.
+Recolher a mesma imagem sobre um documento diferente é falsificar
+consentimento — a família do §39, com o preço maior.
+
+### Duas regras de tela que caem da transação
+
+**O conjunto de vales é fixo** (vem da saída; `selar_romaneio_retorno`
+exige igualdade de conjunto) e **as linhas de documento não são criadas
+à mão** (a expectativa sai do canônico assinado da saída). Oferecer
+qualquer das duas seria oferecer o impossível, e descobrir custa duas
+assinaturas.
+
+### O número que a 2D.5 move
+
+O placar de integridade diz `retorno 0 · 0 · 0` desde que existe. A
+2D.5 o leva a `retorno 1 · 1 · 0` — e é a primeira vez que as cinco
+camadas do verificador do retorno rodam contra um retorno de verdade.
+Elas são código não exercitado desde a 2B.4.
+
 ## Commits desta sessão
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)

@@ -1593,6 +1593,10 @@ código enfileira `fechamento_corrida`.**
 8. **2D** — tela: Retorno de Corrida vira o fluxo do documento, e é onde
    o caminho feliz finalmente roda (cartão → PIN → duas assinaturas →
    selo). Fecha com o verificador confirmando o retorno recém-selado.
+   **Desenho da 2D.1 fechado em 2026-08-20 — ver "A 2D" abaixo.** Leia a
+   regra do CONGELAMENTO antes de escrever qualquer componente: ela é a
+   invariante de UI mais importante da etapa, e é ela que impede a tela
+   de assinar um documento e mandar outro.
 9. Fluxo excepcional (online), depois PDF do retorno + Drive
 
 **A ordem não é burocracia.** A tela é a parte fácil; o contrato canônico
@@ -1785,6 +1789,263 @@ caminho normal, e a frente do retorno não o herda). O que entra é uma
 linha: a porta offline nova confere que o responsável tem competência
 sobre a loja da saída, pra não repetir o padrão em código novo.
 
+
+#### A 2D — desenho fechado em 2026-08-20, código não começado
+
+Mesmo método do item 58 e da 2C: fechar antes de escrever. Agora a tela
+encosta em tudo que 2A–2C passaram protegendo, e a regra central é do
+usuário:
+
+> **A tela coleta fatos e manifestações; ela nunca decide o que é verdade
+> oficial.** Ela congela o mesmo `p_retorno` que vai ser assinado e
+> entrega esse artefato ao caminho online ou offline já construído.
+
+```
+2D.1  contrato da tela / máquina de estados   ← este documento
+2D.2  montagem do retorno
+2D.3  autenticação + assinaturas
+2D.4  envio online / enfileiramento offline
+2D.5  caminho feliz E2E
+2D.6  as três regressões históricas pendentes
+```
+
+##### A máquina de estados, e por que ela vem antes do JSX
+
+```
+selecionando_corrida
+      ↓
+preenchendo_retorno  ←──────────── editar volta pra cá, SEMPRE
+      ↓ congelar
+documento_congelado
+      ↓
+autenticando_motoboy
+      ↓
+assinando_responsavel
+      ↓
+assinando_motoboy
+      ↓
+   ┌──┴───────────────┐
+ online            offline
+   ↓                  ↓
+selando          enfileirando
+   ↓                  ↓
+selado        aguardando_validacao
+```
+
+Estados de falha EXPLÍCITOS, e não um `error` genérico — cada um manda
+fazer uma coisa diferente:
+
+| estado | o que a tela oferece |
+|---|---|
+| `autenticacao_recusada` | tentar o PIN de novo; nunca "seguir assim mesmo" |
+| `documento_alterado` | reconstruir — é a única saída, e ela é segura |
+| `conflito` | mostrar o número do romaneio de conflito e parar |
+| `erro_rede` | a operação foi pra fila; não é falha do usuário |
+
+`conflito` merece nome próprio porque **não é erro**: é um desfecho
+previsto, com prova preservada no servidor. Tratá-lo como `error`
+genérico faria a tela sugerir "tente de novo", que é exatamente o que não
+se deve fazer.
+
+##### O CONGELAMENTO, que é a regra de UI mais importante da etapa
+
+Enquanto `preenchendo_retorno`, tudo é editável: desfecho, motivo,
+detalhe, pagamentos realizados, documentos `recebido`/`faltante`.
+
+Ao confirmar:
+
+```
+EntradaRetorno → paraJsonbRetorno() → jsonb congelado
+                                    → montarCanonicoRetorno()
+                                    → document_hash
+                 + romaneioId (uuidv7)
+                 + pagamentoId por linha (uuidv7)
+```
+
+**Daí em diante nada disso muda naquela tentativa.**
+
+E se o caixa voltar e editar qualquer fato, TUDO que dependia do hash
+morre junto:
+
+```
+editar
+  ↓ descarta
+  document_hash        o documento é outro
+  jsonb congelado      idem
+  romaneioId           a operação é outra
+  pagamentoIds         entram no DCRR1, logo no hash
+  autorização          nasce amarrada ao hash antigo
+  ENVELOPE             sela operationId + documentHash + tipo
+  strokes dos DOIS     foram colhidos sobre outro documento
+```
+
+**O envelope na lista não é detalhe** — o usuário citou hash,
+autorização e assinaturas, e ele é o quarto. Reaproveitá-lo faria a
+sincronização recusar `envelope_trocado` horas depois, com as duas
+assinaturas colhidas: o envelope amarra `operationId` e `documentHash`,
+e os dois mudaram.
+
+E os traços têm que ser DESCARTADOS, não reaproveitados: uma assinatura
+manuscrita é manifestação sobre um conteúdo específico. Recolher a
+mesma imagem sobre um documento diferente é falsificar consentimento —
+é a mesma família do §39, com o preço maior.
+
+##### O que a tela mostra, e de ONDE
+
+**Os fatos antigos vêm do SNAPSHOT da saída, nunca de `entregas`.** É a
+regra 7 e a lição do PDF do romaneio: o dado vigente pode ter sido
+corrigido, e mostrar o valor de hoje faria o caixa conferir contra algo
+que o motoboy nunca recebeu. Correção posterior, se houver, aparece
+como aviso ao lado — nunca substituindo.
+
+```
+Vale V-000123
+Cliente / endereço            do snapshot da saída, somente leitura
+Valor da compra               idem
+Pagamento PREVISTO            idem
+
+Desfecho        ○ Entregue   ○ Insucesso
+  motivo/detalhe              só quando insucesso
+Pagamento realizado           forma, valor, troco
+Documentos esperados          uma linha por papel que a saída exige
+```
+
+**O CONJUNTO DE VALES É FIXO.** Vem do romaneio de saída e a tela não
+oferece adicionar nem remover — `selar_romaneio_retorno` exige
+igualdade de conjunto (nem falta nem sobra vale), e oferecer o
+impossível custaria duas assinaturas.
+
+**As linhas de documento também não são criadas à mão.** A expectativa
+sai do canônico assinado da saída. Um botão "adicionar crediário" faria
+o documento afirmar custódia de papel que aquela saída nunca gerou —
+e a transação recusa por igualdade de conjunto.
+
+##### O que a tela precisa e HOJE NÃO EXISTE
+
+Levantado contra o código em 2026-08-20:
+
+| precisa | estado |
+|---|---|
+| quais documentos a saída espera | **já existe**: `documentos_esperados_do_retorno(uuid)`, `security invoker`, com grant para `authenticated` |
+| `saidaRomaneioId` e `saidaDocumentHash` da corrida | **falta** — `CorridaAberta` traz id, motoboy, agência, saída e vales, e nada do romaneio |
+| pagamento PREVISTO por vale | **falta** — não há consulta de previsto por corrida |
+| cliente/endereço/valor do SNAPSHOT | **falta** — hoje só há o caminho por `entregas` |
+
+O primeiro é um achado que economiza trabalho: a 2B.5 já deixou a porta
+do lado do cliente, com RLS aplicada por ser `security invoker`. A 2D
+**não precisa de migration** para saber o que a saída espera.
+
+Os outros três são uma consulta nova em `src/data/romaneios.ts` —
+algo como `useRetornoParaCorrida(corridaId)`, que devolve o romaneio de
+saída (id e `document_hash`) mais, por vale, o que veio do snapshot e o
+previsto. Uma consulta, não quatro: a tela não pode montar o documento a
+partir de fontes que podem discordar entre si.
+
+##### Custódia: o vocabulário muda entre online e offline
+
+```
+                 online                    offline
+identidade   servidor valida o HMAC    cache local por public_id
+             "credencial reconhecida"  "credencial INFORMADA"
+PIN          validado na hora          selado no envelope
+o que a      "identidade confirmada"   "PIN guardado, NÃO conferido"
+tela afirma
+```
+
+Nada de "credencial validada" offline, porque não foi. É a regra que o
+§39 e o §49 pagaram duas vezes: **a tela nunca afirma o que não sabe.**
+
+E os três são evidências diferentes, apresentadas separadamente:
+
+```
+cartão   = identificação      quem é
+PIN      = autenticação       é ele mesmo
+strokes  = manifestação       ele concorda com ISTO
+```
+
+**`papel_no_momento` NUNCA é um dropdown.** Não existe "eu sou:
+[caixa/gerente/admin]" na tela. O cargo sai do perfil da sessão e quem
+persiste é o servidor, a partir do `auth.uid()` — é isso que faz dele
+registro de auditoria e não afirmação do cliente. A tela só EXIBE
+("Responsável pela loja — Camilo Ferreira · Caixa").
+
+##### Uma montagem só, bifurcação só no transporte
+
+```
+montarRetorno()
+      ↓
+jsonb congelado + document_hash + strokes + envelope
+      ↓
+  ┌───┴────┐
+online   offline
+```
+
+Nunca `montarRetornoOnline()` e `montarRetornoOffline()`. Dois
+construtores é como o `paraJsonbRetorno` do item 65 aconteceu — e aqui
+o preço seria assinar uma coisa e mandar outra.
+
+Offline persiste exatamente o que a 2C.4 já sabe guardar e a 2C.6 sabe
+transportar: `retornoJsonb`, `documentHash`, `responsavelStrokes`,
+`motoboyStrokes`, `envelope`, `versaoDocumento`, `dependeDeChave =
+corridaId` e **nenhuma `chave`**.
+
+##### O guard contra duplo clique
+
+Ao entrar em `selando` ou `enfileirando`, o CTA trava. A idempotência do
+servidor continua existindo — o guard de reenvio da 2C.1, o `on conflict
+do nothing`, os ids determinísticos —, mas a UI não deve FABRICAR
+trabalho: dois envelopes e dois `operationId` para a mesma retirada são
+dois documentos, e um deles vai virar lixo que alguém precisa entender
+depois.
+
+##### A UX: o caixa não precisa saber nada disto
+
+```
+Conferir retorno → identificar motoboy → assinar → concluir
+```
+
+e, sem rede:
+
+```
+Retorno registrado offline · aguardando validação
+```
+
+`DCRR1`, hash, envelope RSA, autorização efêmera e conflito de
+sincronização ficam debaixo da interface. O vocabulário do balcão é
+"conferir", "identificar", "assinar" — e é o mesmo que a Nova Corrida já
+usa.
+
+##### O que a 2D.5 mede, e o número que ela move
+
+Primeiro ONLINE, que elimina a variável fila. Depois de selar:
+
+```
+DCRR1 existe · status selado · corrida fechada
+entregas atualizadas · pagamentos realizados corretos
+status_documental recomputado · duas assinaturas
+papel_no_momento gravado
+verificar_romaneio: documento, assinatura interna, assinatura motoboy,
+                    envelope e saida_referenciada
+```
+
+E o placar de integridade, que hoje diz `retorno 0 · 0 · 0`, passa a
+`retorno 1 · 1 · 0` — a primeira vez que as cinco camadas do verificador
+do retorno saem do papel. **Elas nunca rodaram contra um retorno**,
+porque não existe nenhum.
+
+Depois o offline, que fecha a promessa que a 2C deliberadamente não fez.
+
+##### As três regressões históricas, e por que só agora
+
+1. **retorno feliz real** — cartão, PIN, assinaturas, selo, verificador;
+2. **saída offline LEGADA sincronizando de verdade** — não só
+   atravessando a conciliação, como o caso (1) da 2C.6 provou;
+3. **`fechamento_corrida` legado × DCRR1 selado** — o trigger recusa, o
+   handler reconhece o SQLSTATE, o item vira terminal e
+   `fechamento_legado_obsoleto` aparece no Registro de Auditoria.
+
+A terceira é a metade que a 2C.8 deixou vermelha de propósito: exercitá-la
+exige um DCRR1 real, que só existe depois da 2D.5.
 
 ##### A janela de compatibilidade do `fechamento_corrida` — quando remover
 
