@@ -114,9 +114,29 @@ export type CredencialEmCache = {
   atualizadoEm: string
 }
 
+
+// O contexto do retorno, guardado pra o retorno offline ter o que usar.
+//
+// Imutável por construção — sai de um romaneio de saída SELADO —, então
+// ele não pode ficar velho: só pode não existir. É o que torna este
+// cache diferente de todos os outros do projeto, e o que dispensa
+// qualquer regra de invalidação.
+//
+// `versao` fica ao lado do objeto, e não só dentro dele, pra a leitura
+// poder descartar um contexto de formato antigo SEM desserializar e
+// adivinhar. Montar o DCRR1 a partir de um formato que esta versão não
+// entende é a definição de assinar uma coisa e mandar outra.
+export type ContextoRetornoEmCache = {
+  corridaId: string
+  versao: string
+  contexto: unknown
+  atualizadoEm: string
+}
+
 const db = new Dexie('tele-entregas') as Dexie & {
   filaOperacoes: EntityTable<ItemFilaOperacao, 'id'>
   credenciaisCache: EntityTable<CredencialEmCache, 'publicId'>
+  contextosRetorno: EntityTable<ContextoRetornoEmCache, 'corridaId'>
 }
 
 db.version(1).stores({
@@ -239,5 +259,14 @@ db.version(5)
       >[0]
     )
   })
+
+// v6 acrescenta só o cache do contexto de retorno. Sem upgrade: tabela
+// nova nasce vazia e é preenchida quando a lista de corridas abertas
+// carregar com rede — mesmo arranjo da v4 com as credenciais.
+db.version(6).stores({
+  filaOperacoes: 'id, status, tipo, userId, chave, proximaTentativaEm',
+  credenciaisCache: 'publicId, motoboyId',
+  contextosRetorno: 'corridaId, atualizadoEm',
+})
 
 export { db }

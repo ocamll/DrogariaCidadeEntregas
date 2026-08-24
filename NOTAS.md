@@ -5067,7 +5067,105 @@ O placar de integridade diz `retorno 0 · 0 · 0` desde que existe. A
 camadas do verificador do retorno rodam contra um retorno de verdade.
 Elas são código não exercitado desde a 2B.4.
 
+## 77. Etapa 2D.2 — o contexto do retorno, e o achado que o simplificou
+
+`20260820190000_contexto_do_retorno.sql` (**não aplicada**),
+`src/data/contextoRetorno.ts` e Dexie v6 com o cache. Nenhum componente
+ainda.
+
+### O payload da saída já tinha tudo
+
+Fui montar a consulta esperando juntar três fontes — `entregas` pro
+snapshot, `pagamentos` pro previsto, e a função de documentos esperados.
+**`romaneios.payload` da saída já carrega as duas primeiras**, incluindo
+`pagamentos_previstos` por vale, com `pagamento_id`, `forma`,
+`valor_cents` e `troco_cents`.
+
+Isso não é economia de join. É o que faz a consulta obedecer à trava que
+o usuário pôs antes de eu escrever: **nenhum fato histórico lido de
+estado operacional mutável.** Se a saída dizia "Rua X, 123" e alguém
+corrigiu o cadastro pra "Rua Y" depois, a tela de conferência mostra
+"Rua X, 123" — porque é isso que o motoboy recebeu sob custódia. A mesma
+regra que governa o PDF do romaneio desde 18/08.
+
+O único join que sobrou é decorativo: motoboy e agência, pra o cabeçalho.
+
+### `ContextoRetorno` é tipo próprio, e a separação é o ponto
+
+```
+ContextoRetorno   fatos antigos, do documento assinado, SÓ LEITURA
+EntradaRetorno    fatos novos, que VÃO ser assinados
+```
+
+Nada no `ContextoRetorno` tem forma parecida com o que
+`paraJsonbRetorno` consome. Isso é deliberado: um
+`{ ...contexto, ...entrada }` colocaria cliente, endereço e valor da
+compra dentro do DCRR1 — e o contrato diz que o retorno **assina só o
+que ACRESCENTA**, porque repetir o que a saída selou criaria uma segunda
+fonte capaz de discordar da primeira.
+
+O mesmo vale por dentro: `pagamentosPrevistos` mora no contexto,
+`pagamentosRealizados` mora na entrada. A tela pode até pré-preencher um
+com o outro pra agilizar, mas o DCRR1 recebe o confirmado, nunca uma
+referência ao previsto.
+
+### O cache não é otimização, é a condição do offline
+
+A trava que o usuário acrescentou muda a natureza da consulta: a 2C
+permite registrar retorno sem internet, então a tela **não pode depender
+do servidor no instante em que o motoboy volta** — e esse instante é o
+fim da tarde, no balcão.
+
+O contexto é imutável por construção (sai de um romaneio selado), o que
+o torna cacheável sem nenhuma das dúvidas de invalidação que um cache de
+dado vivo teria: **ele não pode ficar velho, só pode não existir.**
+
+```
+online   → consulta → guarda em IndexedDB (Dexie v6)
+offline  → lê do cache
+offline sem cache → BLOQUEIA, com a razão dita
+```
+
+O bloqueio é explícito e não tenta remendar: nada de montar o documento
+a partir do que houver em tabela local, porque seria inventar o que o
+motoboy recebeu. É a decisão do §50.1 — a tela diz o que falta em vez de
+deixar o caixa concluir que o sistema perdeu alguma coisa.
+
+`aquecerContextosDeRetorno` é best-effort e engole falha por corrida:
+uma a menos é uma corrida que não fecha offline; um `throw` ali seria
+uma tela de erro por causa de uma preparação que ninguém pediu. Mesmo
+espírito de `aquecerGeolocalizacao()`.
+
+### Duas decisões de versão
+
+`versao: 'CTXR1'` vem dentro do jsonb E ao lado dele no registro do
+cache. A duplicação é de propósito: a leitura descarta um contexto de
+formato antigo **sem desserializar e adivinhar**. Montar o DCRR1 a partir
+de um formato que esta versão não entende é a definição de assinar uma
+coisa e mandar outra.
+
+E `ContextoRetornoEmCache.contexto` é `unknown`. Tipá-lo como
+`ContextoRetorno` faria `db.ts` importar `data/` (ciclo) e, pior, faria o
+TypeScript afirmar sobre bytes que outra versão do app escreveu. O cast
+mora num lugar só — dentro de `lerContextoLocal`, imediatamente depois de
+a versão ser conferida.
+
+### A `origem` sai no resultado
+
+`{ estado: 'pronto', contexto, origem: 'servidor' | 'cache' }`. A tela não
+muda o que faz com ela — o contexto é imutável dos dois jeitos —, mas
+quem estiver depurando "por que este vale não aparece" precisa saber se
+está olhando o que o servidor respondeu agora ou o que ficou guardado.
+
+### O que falta na 2D.2
+
+A migration não foi aplicada, e o conferidor do rodapé é o que fecha a
+etapa. O caso (e) dele é o mais interessante: imprime o cliente do
+CONTEXTO ao lado do cliente que está em `entregas` hoje — se os dois
+diferirem, o contexto está **certo**.
+
 ## Commits desta sessão
+
 
 1. `503dbf9` — fix do bug do Dialog (item 2 acima)
 2. `7c08653` — fila offline completa + cadastros + receita/documentos/
