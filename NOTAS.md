@@ -5299,6 +5299,70 @@ SQLSTATE definido; `no_data_found` é nome do PL/pgSQL, mapeado para
 `P0002`. Prever o primeiro é razoável, prever o segundo não era — e a
 regra continua sendo medir.
 
+### A metade de cliente: `src/lib/congelarRetorno.ts`
+
+Pura, importando só outros módulos de `lib/`. Ela devolve o pacote
+inteiro do congelamento de uma vez —
+
+```
+romaneioId  ·  retornoJsonb  ·  canonico  ·  documentHash
+```
+
+— e é isso que torna a invariante da 2D.1 mecânica em vez de disciplinar:
+**não há como ficar com metade dele.** Editar depois significa chamar de
+novo, e tudo que dependia do hash morre junto por construção.
+
+`novoId` entra por PARÂMETRO em vez de `uuidv7()` ser chamado lá dentro.
+Não é abstração gratuita: é o que permite o caso (7) do spec usar o
+gerador como TESTEMUNHA — numa recusa, ele não pode ter sido chamado
+nenhuma vez, porque um `romaneioId` cunhado para um documento que não
+pode ser assinado é lixo que alguém vai encontrar depois.
+
+**A ordem é contrato:** os ids são conferidos ANTES de qualquer
+conversão. Congelar primeiro e validar depois deixaria um `documentHash`
+existir por um instante para um documento impossível — e é esse tipo de
+"por um instante" que vira defeito quando alguém acrescenta um `await` no
+meio.
+
+### Por que o guard duplica uma checagem que o canônico já faz
+
+`validarRetorno` já recusa `pagamento_duplicado`. O guard checa de novo, e
+a duplicação é deliberada:
+
+```
+canônico   PURO, não conhece o contexto
+           → nunca poderia ver a colisão com o PREVISTO
+           → e recusa o documento inteiro, sem dizer qual linha
+
+guard      conhece os previstos
+           → aponta o VALE
+           → devolve LISTA, não booleano
+```
+
+Pegar as duas coisas no mesmo lugar é o que permite a tela mostrar os
+dois problemas de uma vez, em vez de o caixa corrigir um e descobrir o
+outro. E o `else if` entre os dois motivos é intencional: um id que
+colide E se repete é UM problema por linha, não dois — as duas queixas
+apontariam pro mesmo campo.
+
+### Uma asserção minha que estava errada, e o que ela virou
+
+O caso (4) afirmava que, sem o guard, o canônico pegaria a duplicata
+`pagamento_duplicado` — e media isso chamando `congelarRetorno` com a
+lista de previstos vazia. **Não funciona: o guard checa duplicata
+também, então ele fala primeiro e o canônico nunca opina.**
+
+Diagnosticado com um arquivo temporário em vez de suposição: `lançou
+RetornoNaoCongelavel`, e `validarRetorno` chamado direto devolve
+`pagamento_duplicado`. Cheguei a suspeitar de duas instâncias do módulo
+(`@/lib/...` contra caminho relativo) — não era; o projeto já usa `@/`
+dentro de `lib/` e o `tsx` resolve.
+
+A asserção virou duas, e ficou melhor que a original: **o canônico também
+recusaria** (medido chamando-o direto) **e quem fala primeiro é o
+guard** (medido pelo nome do erro). As duas camadas ficam visíveis em vez
+de uma esconder a outra.
+
 ### Quatro rodadas, e nenhuma falha estava na migration
 
 O bloco 1 provou na primeira tentativa que a função estava instalada, os
