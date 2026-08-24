@@ -51,14 +51,34 @@ não existe, que o fechamento legado não é RPC (logo o guard é trigger), e
 transformou a proteção da regra 7 contra escrita tardia de ordenação de
 fila em **gate de segurança**. Nada dele está construído.
 
-**O que NÃO existe ainda, e é fácil supor errado:** não há deploy — nem
-conta na Cloudflare, nem site no ar. Tudo rodou em localhost, numa
-máquina só. A premissa de dois dispositivos (PC do caixa + tablet do
-motoboy) nunca foi exercitada de verdade. E o **Romaneio de Retorno
-continua sem tela** — o retorno que o caixa usa ainda é o `fecharCorrida`
-de sempre. O que existe é o contrato, a transação e o verificador, os
-três provados; falta a 2C (fila offline) e a 2D (tela), e é na 2D que o
-caminho feliz roda pela primeira vez.
+*(O parágrafo acima foi escrito quando a 2C ainda não existia. Ela
+fechou — ver o seguinte.)*
+
+**Não há deploy**, e isso vale para tudo neste arquivo: nem conta na
+Cloudflare, nem site no ar. Tudo rodou em localhost, numa máquina só, e
+a premissa de dois dispositivos (PC do caixa + tablet do motoboy) nunca
+foi exercitada de verdade.
+
+Ainda em 20/08 a frente do retorno andou até a **2D**. A **2C fechou
+inteira** (itens 68 a 75): porta offline, trigger de obsolescência, Dexie
+v5, o tipo `romaneio_retorno` na fila, o contrato criptográfico do
+envelope, o despacho por tipo na Edge Function, a proteção local e as
+regressões. Depois vieram o **desenho da 2D** (item 76), o **contexto do
+retorno** (77) e a **invariante do pagamento realizado** (78), que nasceu
+de um achado no vale impresso: o `pagamento_id` do previsto é o uuid da
+entrega, e copiá-lo pro realizado faria um documento selar afirmando um
+pagamento que não existe.
+
+**Onde parou:** a lógica da 2D.3 está pronta e medida — servidor,
+congelamento e a máquina de custódia —, e **nenhuma linha de JSX foi
+escrita**. O retorno que o caixa usa continua sendo o `fecharCorrida` de
+sempre; nada mudou pra quem opera.
+
+**O que ainda NÃO existe, e é fácil supor errado:** não há deploy (nem
+conta na Cloudflare), o caminho feliz do Romaneio de Retorno nunca rodou
+— nem online nem offline —, e o verificador do retorno segue em
+`0 · 0 · 0` porque não existe nenhum retorno selado. A 2D.5 é quem move
+esse número.
 
 **Se você está retomando, comece por "PRÓXIMA SESSÃO", perto do fim deste
 arquivo.** É lá que está o trabalho combinado. Logo abaixo dela, "Estado
@@ -5786,7 +5806,124 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: 2B.6 e depois a 2C
+### PRÓXIMA SESSÃO: o COMPONENTE da 2D.3
+
+> **Esta é a seção atual.** As de baixo ("2B.6 e depois a 2C", "etapa
+> 2B") são históricas: descrevem como "próximo" coisas que já foram
+> feitas.
+
+**Onde a frente está, em 2026-08-20:**
+
+```
+2A   ✓   canônico, golden vectors, verificador
+2B   ✓   selar_romaneio_retorno + bloco `d` + verificador do retorno
+2C   ✓   as OITO sub-etapas, todas aplicadas e medidas
+2D.1 ✓   desenho da tela (CLAUDE.md, seção "A 2D")
+2D.2 ✓   contexto do retorno: migration + cache Dexie v6 + conferido
+2D.3 ├─ servidor        ✓  invariante do pagamento, provada
+     ├─ congelamento    ✓  src/lib/congelarRetorno.ts, 19 casos
+     ├─ máquina         ✓  src/lib/custodiaDoRetorno.ts, 4403 transições
+     └─ COMPONENTE      ←  AQUI. Nenhuma linha de JSX escrita.
+2D.4/5/6                    envio, caminho feliz, regressões
+```
+
+**Nenhuma migration pendente.** As duas últimas (`20260820190000` do
+contexto e `20260820200000` da invariante do pagamento) foram aplicadas e
+conferidas no banco.
+
+---
+
+#### O que a próxima sessão vai fazer
+
+`RetornoCorrida.tsx` deixa de enfileirar `fechamento_corrida` e passa a:
+
+```
+useContextoRetorno(corridaId)     ← fatos antigos, do documento assinado
+      ↓
+preenchimento (desfecho, pagamento realizado, documentos)
+      ↓
+congelarRetorno(...)              ← ids novos, guard de colisão, hash
+      ↓
+reduzirCustodia(...)              ← cartão, PIN, duas assinaturas
+      ↓
+online → selar_romaneio_retorno   |  offline → fila `romaneio_retorno`
+```
+
+Tudo que está antes e depois já existe e está medido. **A sessão é de
+montar a tela sobre peças prontas**, não de decidir contrato.
+
+#### LEIA ANTES DE ESCREVER O PRIMEIRO COMPONENTE
+
+1. **CLAUDE.md, seção "A 2D"** — inteira. A regra do CONGELAMENTO é a
+   invariante de UI mais importante da etapa, e é ela que impede a tela
+   de assinar um documento e mandar outro.
+2. **A armadilha do `pagamento_id`** (CLAUDE.md, dentro de "A 2D"):
+   pré-preencher o realizado com o previsto COPIA forma, valor e troco,
+   **nunca o `pagamentoId`**. O id do previsto é o uuid da entrega, e
+   copiá-lo faz o documento selar afirmando um pagamento que não existe.
+   As duas camadas já barram isso; a tela não deve chegar lá.
+3. **Os três módulos de `lib/`**, que já carregam as regras:
+   `congelarRetorno.ts`, `custodiaDoRetorno.ts`, `corridasBloqueadas.ts`.
+
+#### As invariantes de UI que a máquina já garante
+
+Não precisam ser reimplementadas no componente — ele só precisa **não
+contorná-las**:
+
+- a máquina começa em `documento_congelado` e não monta nem altera fato;
+- editar, cancelar, trocar motoboy ou a autorização expirar recolhem
+  autorização, envelope e **as duas assinaturas**, com motivo dito;
+- offline nunca diz "autenticado" — `credencial.validadaPeloServidor`
+  fica `false`, e a tela lê esse campo;
+- o CTA trava em `selando`/`enfileirando`;
+- `conflito` é terminal, não erro retryable: mostra o número do romaneio
+  e para.
+
+#### O que continua NÃO provado, e só a 2D fecha
+
+```
+DCRR1 online real        ✗  o verificador do retorno segue em 0 · 0 · 0
+DCRR1 offline real       ✗  depende da tela coletar cartão e PIN
+saída offline LEGADA     ~  formato provado (2C.6), sincronização não
+fechamento legado × DCRR1 ~ trigger provado; o handler do cliente
+                            NUNCA EXECUTOU — precisa de um DCRR1 real
+```
+
+A 2D.5 é quem move o placar de `retorno 0 · 0 · 0` para `1 · 1 · 0`, e é
+a primeira vez que as cinco camadas do verificador do retorno rodam
+contra um retorno de verdade.
+
+#### Uma coisa que vai assustar, e não é problema
+
+As conferências da 2C e da 2D **queimaram vários números de romaneio**
+(cada bloco que exercita recusa insere e faz rollback, e a sequência não
+volta atrás). Hoje a aritmética ainda fecha porque nenhuma linha nasceu
+depois das queimas:
+
+```
+11 selados + 3 conflitos = 14 = maior R- existente
+```
+
+**No primeiro selo real seguinte ela vai acusar diferença**, e isso não é
+documento perdido. A forma robusta está no item 69:
+
+```sql
+select count(*) = count(*) filter (where status in ('selado','conflito'))
+  from public.romaneios;
+```
+
+#### Credencial e ambiente
+
+- Node em `C:\Program Files\nodejs`, **fora do PATH**. Prefixe
+  `export PATH="/c/Program Files/nodejs:$PATH"`.
+- Os specs que valem rodar antes de mexer em qualquer coisa desta frente:
+  `custodia-do-retorno`, `congelar-retorno`, `canonico-retorno`,
+  `dcrr1-vetores`, `envelope`, `offline-hash`, `despacho-sync-romaneio`,
+  `dependencia-da-fila`, `corridas-bloqueadas`.
+- A Edge Function `sync-romaneio` está publicada na versão da **2C.6**
+  (despacho por tipo), confirmada contra a função no ar em 13 casos.
+
+### (histórico) A retomada de antes da 2C
 
 > **Esta é a seção atual. A de baixo ("etapa 2B") é histórica** — ficou
 > como registro de onde a frente estava antes, e o que ela descreve como
