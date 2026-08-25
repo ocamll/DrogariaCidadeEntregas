@@ -69,16 +69,38 @@ de um achado no vale impresso: o `pagamento_id` do previsto é o uuid da
 entrega, e copiá-lo pro realizado faria um documento selar afirmando um
 pagamento que não existe.
 
-**Onde parou:** a lógica da 2D.3 está pronta e medida — servidor,
-congelamento e a máquina de custódia —, e **nenhuma linha de JSX foi
-escrita**. O retorno que o caixa usa continua sendo o `fecharCorrida` de
-sempre; nada mudou pra quem opera.
+*(Os dois parágrafos acima são de 20/08. Em 21 e 25/08 a 2D fechou — ver
+o seguinte.)*
 
-**O que ainda NÃO existe, e é fácil supor errado:** não há deploy (nem
-conta na Cloudflare), o caminho feliz do Romaneio de Retorno nunca rodou
-— nem online nem offline —, e o verificador do retorno segue em
-`0 · 0 · 0` porque não existe nenhum retorno selado. A 2D.5 é quem move
-esse número.
+**Onde parou, em 2026-08-25:** o **Romaneio de Retorno funciona ponta a
+ponta**, online e offline. A tela existe (`RetornoCorrida.tsx` deixou de
+enfileirar `fechamento_corrida`), e três retornos reais foram selados:
+
+```
+saida    13 · 13 · 0    52 camadas
+retorno   3 ·  3 · 0    15 camadas
+                        R-000023  online
+                        R-000025  online
+                        R-000026  offline_sincronizada
+```
+
+O caminho até aqui, nos itens 79 a 81: a máquina de custódia corrigida
+(o envelope não era construível no passo do PIN), a política de falha de
+rede pós-assinaturas, o componente, e dois defeitos que só o uso real
+achou — `[object Object]` engolindo o erro do PostgREST, e uma função
+`SECURITY DEFINER` que `authenticated` não podia executar.
+
+**A 2D.6 mudou de natureza em 2026-08-25** (item 83). Ela era "provar
+que o sistema novo convive com o passado"; virou **corte limpo pré-V1** —
+não haverá passado, porque o rollout é precedido de limpeza do banco E do
+estado local dos terminais. A compatibilidade de desenvolvimento foi
+REMOVIDA, o trigger de integridade FICOU, e o roteiro do corte está em
+`scripts/corte-pre-v1.sql` (nada dele foi executado).
+
+**O que ainda NÃO existe, e é fácil supor errado:** não há deploy — nem
+conta na Cloudflare, nem projeto do Pages, nem site no ar. Isso não é
+configuração pendente, é infra inteira, e os passos 5 e 6 do roteiro do
+corte dependem dela.
 
 **Se você está retomando, comece por "PRÓXIMA SESSÃO", perto do fim deste
 arquivo.** É lá que está o trabalho combinado. Logo abaixo dela, "Estado
@@ -5490,6 +5512,781 @@ balanceados fora dos literais" — e eu tinha reimplementado a versão
 ingênua. Refeito apagando o conteúdo dos literais antes de contar: 0 nos
 três arquivos.
 
+## 79. A primeira integração da tela achou uma impossibilidade no contrato
+
+2026-08-21. A sessão era pra ser só de leitura das notas; comecei a
+montar o componente da 2D.3 antes de ser pedido. O usuário parou, e
+depois manteve as mudanças — porque a integração tinha encontrado uma
+coisa que nenhuma leitura de código teria encontrado.
+
+### O envelope não pode nascer no passo do PIN
+
+```
+offlineEventHash = documentHash + responsavelStrokes + motoboyStrokes + …
+```
+
+O envelope carrega esse hash, e `sync-romaneio` o **recalcula do corpo**
+pra decidir entre selar e recusar `payload_alterado`. No instante em que
+o PIN é digitado os dois traços não existem, então o artefato que o
+evento `PIN_SELADO` pedia só nasce duas transições depois.
+
+Não era bug de código: a máquina da 2D.3, escrita e medida em 20/08 com
+4403 transições, pedia algo impossível. **O gate anterior não podia ter
+pego isso**, e vale dizer por quê — ele exercitava a máquina com dublês
+(`{ k: '…' }` no lugar do envelope), e um dublê não tem como saber que o
+objeto real depende de dados que ainda não existem. Só a integração com
+quem produz o objeto de verdade responde essa pergunta.
+
+### A minha primeira correção estava certa na ideia e errada no contrato
+
+Eu tinha feito o evento carregar `{ pin, credentialToken }` e o estado
+guardá-los carimbados, nos DOIS caminhos, com o envelope nascendo no
+`CONCLUIR`. O usuário barrou três coisas, e as três melhoraram:
+
+1. **`PIN_SELADO` virou nome falso** — se há PIN em claro e não há
+   envelope, nada foi selado. Virou `SEGREDOS_CAPTURADOS`, com estado
+   próprio `segredos_capturados` (nunca `custodia_autorizada`, porque
+   offline ninguém autorizou nada). "Selado" fica reservado pra
+   `selarSegredos()`. É o §33 e o §61 outra vez: vocabulário que afirma
+   mais do que aconteceu já custou caro nesta cadeia.
+
+2. **PIN e token não podem estar no estado serializável.** Objeto de
+   estado acaba em log, snapshot de teste, telemetria e persistência
+   acidental. Hoje a máquina guarda só um SINAL carimbado
+   (`segredosCapturados`), e o material vive numa ref efêmera do
+   componente. A permissão é DERIVADA — `podeGuardarSegredos(estado)` —,
+   e não uma disciplina que cada caminho da tela precise lembrar.
+
+3. **O adiamento é só do offline.** Online quem prova a presença é a
+   autorização de uso único; segurar o PIN até o fim não compra nada.
+   Então o PIN sai da memória assim que ela é emitida, e o caminho
+   online **não produz envelope**. Isso RESTAUROU a asserção original do
+   spec (`sem envelope no caminho online`), que eu tinha relaxado —
+   sinal de que o desenho do usuário era o coerente e o meu é que tinha
+   torto. `CONCLUIR` virou tipo discriminado, então "online com
+   envelope" deixou de ser escrevível.
+
+### E aí a varredura achou uma janela que eu não tinha visto
+
+A asserção nova do caso (10) — *nenhum estado com autorização deixa o PIN
+em memória* — **falhou na primeira rodada**. O caminho:
+
+```
+SEGREDOS_CAPTURADOS  →  segredos_capturados   PIN em memória: true
+PIN_RECUSADO         →  pin_recusado          PIN em memória: true
+PIN_AUTORIZADO       →  custodia_autorizada   PIN em memória: true  ←
+```
+
+Cenário real, não sintético: o caixa captura o PIN sem rede, a rede
+volta, ele autentica online. Terminava com autorização emitida **e** o
+material em claro ainda autorizado a viver.
+
+Três transições consertadas: `PIN_AUTORIZADO` zera o sinal,
+`SEGREDOS_CAPTURADOS` zera a autorização (os dois ramos passam a ser
+exclusivos), e `PIN_RECUSADO` descarta o material — um PIN recusado é um
+PIN errado, não tem por que sobreviver enquanto o certo é digitado por
+cima.
+
+O caso (9b) existe pra a regressão ter NOME: "5066 transições" não diz
+qual quebrou, e uma varredura que acusa sem apontar custa uma iteração
+inteira — a lição do §78, com outro instrumento.
+
+### As outras três mudanças, todas peças que faltavam
+
+- **`selarRomaneioRetorno`** (`src/data/romaneios.ts`) — a porta ONLINE
+  não existia no cliente. A 2B construiu a RPC; nada a chamava. Recebe o
+  artefato CONGELADO (`retornoJsonb` + `documentHash`), nunca o domínio
+  editável: reconverter na porta reabriria a fresta de assinar uma coisa
+  e mandar outra. **Não manda `corridaId` nem `lojaId`** — o servidor
+  deriva os dois do romaneio de saída selado, e é isso que torna o
+  retorno imune ao buraco de `p_loja_id` que a saída ainda tem.
+- **`corridasComRetornoPendente`** (`src/lib/corridasBloqueadas.ts`) —
+  offline a corrida continua `aberta` no servidor, então a tela a
+  ofereceria de novo pra uma segunda coleta de duas assinaturas.
+  **Bloqueia independentemente do dono**, ao contrário da regra do
+  fechamento legado, e a diferença é o ponto: `fechamento_corrida` não é
+  documento; `romaneio_retorno` já é um documento assinado pelas duas
+  partes, e `UNIQUE (corrida_id, tipo)` garante que só um dos dois pode
+  ser selado. O caso (11) do spec congela a diferença, senão ela some na
+  primeira refatoração que "uniformizar" as duas.
+- O rename pra `assinaturaInternaStrokes` **não é desta sessão** — veio
+  da 2C.5, com os três hashes congelados provando que a fórmula não
+  moveu. Só confirmando que continua de pé.
+
+### A regra 4, congelada no mesmo dia
+
+Eu tinha deixado um buraco anotado — "se o selo online falhar por rede
+depois das duas assinaturas, não há envelope pra mandar pra fila" — e o
+usuário mandou fechar antes do JSX, com razão: o componente ia
+inevitavelmente ter que decidir o que fica na tela quando o selo falha.
+
+O estado naquele instante:
+
+```
+documento congelado      ✓
+duas assinaturas         ✓
+autorização              provavelmente já inútil
+PIN e token              ✗ apagados na autenticação (regra 3)
+envelope                 ✗ nunca existiu neste ramo
+servidor selou           ✗
+```
+
+A decisão de **não fabricar envelope depois** ficou de pé — faltam os
+segredos, e "recuperar" assim incentivaria guardar o PIN além do
+necessário, desfazendo a regra 3. O que ele acrescentou foi a política de
+recuperação, e ela separa duas coisas que pareciam a mesma:
+
+```
+EDIÇÃO DO DOCUMENTO        FALHA DE REDE NO SELO
+destrói tudo               preserva o documento
+  romaneioId                 romaneioId     preserva
+  pagamentoIds               pagamentoIds   preserva
+  documentHash               retornoJsonb   preserva
+  autorização                documentHash   preserva
+  assinaturas              e destrói a custódia:
+documento NOVO               autorização    descarta
+                             assinaturas    descarta
+```
+
+O caixa não refaz a conferência: refaz cartão + PIN e as duas
+assinaturas, sobre o mesmo documento. Bem menos doloroso que voltar ao
+início.
+
+**E as assinaturas caem de propósito, com o conteúdo intacto.** O
+argumento é probatório, e é o do usuário: o que o sistema afirma é uma
+SEQUÊNCIA — *autenticação → manifestação sobre o documento*. Conservar os
+traços e autenticar por cima inverteria a ordem, associando uma
+autenticação nova a uma manifestação anterior a ela. Tecnicamente
+defensável; é exatamente a ambiguidade temporal que a frente vem
+eliminando desde a 2A.
+
+Estado PRÓPRIO (`falha_selo_online`), não `erro_rede` genérico, porque a
+ação certa é específica. E **nunca um "tentar novamente"** que repita o
+selo com a autorização e os traços antigos — o caso (9c) do spec afirma
+que `CONCLUIR` dali é no-op, e que a única saída é bipar o cartão de
+novo.
+
+Duas bordas que o caso (9c) também fixa, e que existem pra o evento não
+virar um jeito de zerar custódia à toa: `FALHA_DE_REDE_NO_SELO` **não
+vale antes de tentar selar** e **não alcança o ramo offline** — lá a
+operação vai pra fila com o envelope, e não há custódia a desfazer.
+
+### E aí o componente foi escrito
+
+Com a regra 4 congelada, o usuário liberou o JSX. `RetornoCorrida.tsx`
+deixou de enfileirar `fechamento_corrida` e passou a ser o fluxo do
+documento: contexto → conferência → congelamento → cartão → PIN → duas
+assinaturas → selo online **ou** fila offline.
+
+**`CampoAssinatura` saiu da `NovaCorrida` pra `src/components/`.** Duas
+cópias de um canvas parecem inofensivas até uma ganhar o `ratio` de tela
+retina e a outra não — e aí os traços dos dois documentos deixam de estar
+na mesma escala, o que só aparece no PDF, meses depois.
+
+Três coisas do componente que valem registro, porque nenhuma delas é
+óbvia lendo o resultado:
+
+- **O PIN não é estado do React.** O input é NÃO-CONTROLADO e o que o
+  componente guarda é um booleano (`pinCompleto`), o suficiente pra
+  habilitar o botão. Texto claro em `useState` acaba em devtools, em
+  snapshot e em qualquer log que serialize o componente — a regra 2 valia
+  pra máquina e vale igual aqui.
+- **O canvas segue a máquina, pelo mesmo motivo que a ref do PIN.**
+  Quando a custódia é recolhida, os traços saem do estado; se o desenho
+  continuasse na tela, ela mostraria uma assinatura que o documento não
+  tem mais. Derivado de `custodia.responsavelStrokes != null`, não
+  lembrado em cada handler — assim um caminho de invalidação novo já
+  nasce coberto. E o canvas TRAVA (`pad.off()`) depois de registrado,
+  senão daria pra rabiscar por cima de uma assinatura já colhida.
+- **O cartão errado é recusado antes das assinaturas.** O documento já
+  nomeia o motoboy (veio da saída), então um cartão de outra pessoa não é
+  "trocar de motoboy": é o cartão errado, e sem essa checagem a transação
+  recusaria `outro_motoboy` depois de duas assinaturas colhidas.
+
+#### Duas decisões de tela que merecem revisão do usuário
+
+1. **A soma dos pagamentos que não bate com a compra AVISA, não
+   bloqueia.** O `marcarDivergencia` bloqueia; aqui não. O DCRR1 não
+   exige que a soma bata, o servidor deriva a divergência comparando
+   previsto × realizado, e travar faria um vale ficar sem como ser
+   fechado às 20h por causa de previsto antigo. O aviso é destacado.
+   Se preferir bloquear, é uma linha.
+2. **O documento físico não tem valor inicial; o desfecho tem.**
+   `entregue` continua sendo o padrão (é o comportamento de hoje e a
+   esmagadora maioria), mas `recebido` NÃO é: presença física de papel é
+   afirmação que ninguém confere depois, e marcá-la por inércia faria o
+   documento assinado dizer que o papel voltou porque o caixa não olhou.
+   Como convênio/crediário são raros, o custo em cliques é baixo.
+
+#### A pendência de contrato que sobrou, e é pequena
+
+**Recusa do SERVIDOR depois das duas assinaturas não tem estado próprio.**
+A 2D.1 previa `documento_alterado` ("reconstruir é a única saída") e ele
+não existe na máquina. Hoje o componente **não despacha nada** nesse caso
+— e deliberadamente não usa `ERRO_REDE`, que seria vocabulário mentiroso:
+não houve falha de rede. A tela de resultado assume, o CTA já está
+travado, e o caminho é sair e refazer.
+
+Vale notar que a maior parte das recusas do retorno **não passa por
+aqui**: `documento_alterado`, `vales_nao_conferem`, `outro_motoboy` e
+`saida_hash_nao_confere` voltam como `ok: false, motivo: 'conflito'`,
+porque a 2B decidiu preservar a prova. O que cai neste ramo são as
+exceções de verdade — saída não selada, autorização inválida, e o `23514`
+da invariante do pagamento.
+
+### O que isto ainda NÃO é
+
+**O caminho feliz nunca rodou.** O componente compila, o app sobe sem
+erro de console e sem erro de servidor, mas exercitá-lo exige login, e
+isso é clique do usuário. O verificador do retorno segue em
+`retorno 0 · 0 · 0`, e é a 2D.5 que move esse número.
+
+## 80. O primeiro uso real da tela, e a porta trancada por dentro
+
+2026-08-25. O usuário abriu uma corrida nova, foi no retorno, e a tela
+disse:
+
+```
+Não consegui carregar: [object Object]
+```
+
+Dois defeitos, e o segundo é o que custaria a sessão.
+
+### `[object Object]` é o erro que apaga o erro
+
+O padrão `e instanceof Error ? e.message : String(e)` está espalhado pelo
+app (17 lugares) e funciona pra tudo — MENOS pra o que mais aparece aqui:
+o erro do PostgREST é um **objeto simples** (`{ message, details, hint,
+code }`), não uma instância de `Error`. Cai no `String(e)` e vira
+literalmente `[object Object]`.
+
+O que se perde não é o texto: é o `code`. É ele que distingue "a função
+não existe no cache do schema" de "a RLS recusou" de um SQLSTATE do
+Postgres — e sem ele os três se parecem.
+
+`mensagemDeErro()` em `src/lib/supabase.ts` monta a mensagem dos campos
+que o objeto tiver, com o `code` entre parênteses, e cai pro JSON antes
+de aceitar `[object Object]`. Com ela a tela passou a dizer, na primeira
+tentativa seguinte:
+
+```
+Não consegui carregar: permission denied for function
+romaneio_documentos_esperados (42501)
+```
+
+**E o `aquecerContextosDeRetorno` engolia isso antes de todo mundo.** Ele
+é best-effort de propósito (uma corrida que não cacheia é uma corrida que
+não fecha offline; um `throw` ali seria tela de erro por causa de uma
+preparação que ninguém pediu) — mas silencioso ele esconde defeito, e
+esse erro passava por lá ANTES de o caixa clicar em qualquer coisa.
+Ganhou `console.warn`. Best-effort é sobre não derrubar a tela, não sobre
+não contar.
+
+### O defeito de verdade: `SECURITY DEFINER` não dispensa o `EXECUTE`
+
+```
+obter_contexto_retorno              security INVOKER
+  └─ romaneio_documentos_esperados  revoke ... from authenticated
+```
+
+O privilégio de CHAMAR é conferido contra **quem chama**; só depois a
+função passa a rodar como dona. Com o `revoke`, todo caller
+`authenticated` leva `42501`.
+
+**E o mesmo vale pra `documentos_esperados_do_retorno`** — que o item 76
+registrou como o achado que economizava trabalho: *"já existe e já tem
+grant para `authenticated`, com `security invoker`, logo a RLS se
+aplica"*. O grant DELA existia. O da função que ela chama, não. Ela nunca
+tinha sido exercitada como `authenticated`.
+
+**Por que cinco dias não pegaram isso:** as conferências da 2B.5 (65/65)
+e da 2D.2 (5/5) rodaram no SQL Editor, como `postgres` — que ignora
+grant. E o caso (a) da 2D.2 chegou a medir `authenticated=t`… **na função
+de fora**. Grant conferido só por leitura, e no nível errado, não é grant
+conferido. É a lição do §59 noutro instrumento: medir o "antes" não vale
+se o instrumento não é o que vai ser usado.
+
+### O conserto é no andar de cima, e o porquê importa
+
+O `revoke` está CERTO e não sai: `romaneio_documentos_esperados` é
+`SECURITY DEFINER` e lê `romaneios` por id ignorando a RLS — liberá-la
+deixaria qualquer autenticado perguntar, sobre romaneio de outra filial,
+quais vales esperam qual papel.
+
+E o corpo dela também não pode ganhar filtro de tenant: é a MESMA função
+que `selar_romaneio_retorno_interno` usa, **inclusive pelo caminho
+offline**, onde quem chama é a `service_role` e não há JWT —
+`current_tenant_id()` seria nulo, a expectativa viria vazia, e o selo
+passaria a discordar do documento assinado. Silenciosamente, que é o pior
+jeito.
+
+Então `20260825120000` conserta onde há como conferir escopo sem tocar no
+caminho da transação: `documentos_esperados_do_retorno` vira
+`SECURITY DEFINER` (assim PODE chamar a de dentro) e ganha
+`pode_ver_romaneio(r.id)` — que não é regra duplicada, é a função que
+existe desde 16/08 declaradamente como espelho da policy
+`romaneios_select`. E `obter_contexto_retorno` passa a entrar por ela.
+
+A função de dentro não é tocada: nem corpo, nem grant, nem `secdef`.
+
+**APLICADA e conferida na tela em 2026-08-25.** Depois dela:
+
+```
+contexto carrega          V-000046 · Saída R-000014 · previsto Dinheiro
+aquecimento do cache      7 contextos em IndexedDB, versão CTXR1
+recusas 42501             zero
+```
+
+O aquecimento é a parte que vale destacar: ele roda pra TODAS as corridas
+abertas, então "0 recusas" ali é uma afirmação mais forte que "a tela que
+eu abri funcionou".
+
+### O que a tela provou de passagem, e não era o alvo
+
+Congelei, cliquei em **Editar a conferência**, e congelei de novo **sem
+mudar nada**:
+
+```
+1º congelamento   329a00567d51d25f…
+editar            o hash some, a conferência volta a ser editável
+2º congelamento   09c25229164777a5…   ← diferente
+```
+
+Nada do conteúdo mudou. A única coisa que pode ter movido o hash é o
+`pagamentoId`, recunhado a cada congelamento — ou seja, a armadilha do
+§77 fechada e VISÍVEL: se o id do realizado fosse derivado da entrega
+(como é o do previsto), os dois hashes seriam iguais.
+
+### E o teste de transporte finalmente rodou
+
+Ele estava escrito desde o item 66 e nunca tinha rodado, porque exige
+login. Com a sessão aberta:
+
+```
+romaneio R-000001 (o com mais vales dos 12 selados), 3 vale(s), 9 cenários
+bloco `d`: 4 de 9 cenários, 14 linhas no total
+TRANSPORTE PRESERVA — 9 cenários, quatro critérios cada
+```
+
+Exatamente os números que o item 66 previa. O canônico impresso no fim
+mostra o `d` com `recebido` e `faltante` convivendo, e os `pagamento_id`
+das linhas `pr` diferentes dos `entrega_id` — o mesmo ponto, por outro
+caminho.
+
+### Um defeito de tela que só apareceu com dado real
+
+Os campos **Valor** e **Troco** estavam lado a lado, visualmente
+idênticos e **sem rótulo nenhum** — o "R$" do `CampoMoeda` é o mesmo nos
+dois. Num formulário que decide o que o documento assinado vai afirmar
+que o cliente pagou, a única defesa contra trocar um pelo outro era a
+memória de quem digita. Os três ganharam rótulo (Forma, Valor, Troco).
+
+## 81. O caminho feliz do Romaneio de Retorno, em 2026-08-25
+
+**O placar saiu de `retorno 0 · 0 · 0`.** Dois retornos reais selados,
+`R-000023` e `R-000025`, e as CINCO camadas do verificador do retorno
+rodaram contra documento de verdade pela primeira vez desde que foram
+escritas na 2B.4:
+
+```
+saida_referenciada           OK    fecha a saída R-000024
+documento                    OK
+assinatura:responsavel_loja  OK
+assinatura:motoboy           OK
+final                        OK
+```
+
+Placar completo no mesmo instante:
+
+```
+saida    13 · 13 · 0    52 camadas
+retorno   2 ·  2 · 0    10 camadas
+TOTAL    15 · 15 · 0
+```
+
+E a corrida fechou **na mesma transação**, com `retorno_em` (servidor) e
+`retorno_em_local` (dispositivo) preenchidos — a regra 8 valendo no
+documento novo.
+
+O que isso encerra, e não é pouco: da 2A até aqui o projeto vinha
+GERANDO evidência criptográfica do retorno sem nunca ter tido um retorno
+pra conferir. `verificar_romaneio` despachando por tipo, a fórmula DCRR1
+com `to_char`, o `papel_no_momento` no hash da assinatura interna, o
+`saida_referenciada` amarrando os dois documentos — tudo isso era código
+não exercitado. Deixou de ser.
+
+### E o OFFLINE fechou no mesmo dia — `R-000026`
+
+```
+saida    13 · 13 · 0    52 camadas
+retorno   3 ·  3 · 0    15 camadas
+                        R-000023  online
+                        R-000025  online
+                        R-000026  offline_sincronizada   ←
+```
+
+A cadeia do retorno está exercitada nos dois modos que ela pode assumir.
+O que o `R-000026` prova, e nenhum dos outros dois provava:
+
+```
+auth_method do motoboy   physical_card_pin_offline_then_verified
+```
+
+Esse carimbo só existe por uma via: o PIN foi selado no envelope RSA no
+balcão, sem rede, e **aberto e conferido pela Edge Function na
+sincronização**. Envelope, `ROMANEIO_KEYS`, despacho por tipo da 2C.6,
+fila com dono, JWT — tudo isso deixou de ser suposição de uma vez.
+
+O resto do registro, e cada linha responde uma decisão de projeto:
+
+| | |
+|---|---|
+| `tipo_signatario` = `responsavel_loja` | o slot NOVO da 2A, não `caixa` |
+| `papel_no_momento` = `admin` | o cargo real de quem assinou, separado do slot |
+| `auth_method` do responsável | `sessao_autenticada` — a identidade nunca vem do cliente |
+| geolocalização | presente: o aquecimento pegou posição enquanto havia rede |
+| `status_documental` | `nao_aplica` — dinheiro não gera papel, recomputado do zero |
+
+**Os dois relógios, medidos:**
+
+```
+retorno_em_local   04:09:29.741   dispositivo, no balcão
+retorno_em         04:09:47.227   servidor, na sincronização
+                   ~18 segundos de diferença
+```
+
+Não é curiosidade: é a regra 8 aparecendo pela primeira vez com uma
+distância visível entre os dois. Um sistema de relógio único teria
+gravado 04:09:47 como se fosse a hora da devolução.
+
+**E a armadilha do §77, fechada e MEDIDA NO BANCO:**
+
+```
+pagamento previsto    id == uuid da entrega    (por desenho)
+pagamento realizado   id != uuid da entrega    ← e foi GRAVADO
+```
+
+O realizado existe em `pagamentos` com o valor certo. Se a tela tivesse
+copiado o `pagamentoId` do previsto, o insert teria batido em
+`on conflict (id) do nothing`, nada seria gravado, e o romaneio estaria
+selado afirmando um pagamento inexistente — sem erro nenhum.
+
+### A FALHA que sobrou é honesta: os dois PRIMEIROS são `online`
+
+```
+FALHA  modo offline_sincronizada — online
+```
+
+O caminho offline **não rodou**. E a causa não é do app:
+
+**`Object.defineProperty(navigator, 'onLine', …)` morre no F5.** O
+bloco 1 rodou, a página recarregou em algum momento, `navigator.onLine`
+voltou a ser `true`, e a tela — que lê o valor NO INSTANTE DA AÇÃO, como
+manda a convenção — escolheu o caminho online, corretamente. Ninguém
+notou até o bloco 3 olhar o `modo`.
+
+Os carimbos denunciam: os contextos foram recacheados às `03:51:4x`, e o
+aquecimento só roda `if (navigator.onLine)`. Ou seja, às 03:51 a página
+já estava online de novo.
+
+**Isso é justamente o que o `modo` existe pra responder.** Uma saída — e
+agora um retorno — online também "sela e fecha a corrida"; olhar a tela
+não distinguiria. É o mesmo argumento do item 48, quando o `R-000010`
+provou a saída offline.
+
+O script foi corrigido: **DevTools → Network → Offline é o mecanismo
+PRINCIPAL**, porque ele põe `navigator.onLine` em false nativamente e
+sobrevive a recarregar. O override do bloco 1 virou o reforço, e ele
+agora avisa, em `console.warn`, que morre no F5.
+
+### O formato de "colar bloco no console" foi aposentado
+
+Um dos blocos chegou pela metade e morreu em `db is not defined` — a
+linha do `const { db } = await import(...)` não foi avaliada junto. Colar
+80 linhas num console é frágil por natureza, e a mensagem não diz nada
+sobre a causa.
+
+Agora o script é um MÓDULO que registra `window.retornoOffline` com
+`bloco1() · bloco2() · bloco3()`. Uma linha por chamada, repetível, sem
+como quebrar no meio.
+
+**O `import` tem que acontecer com rede** — ele busca do dev server. Os
+`import()` de dentro dos blocos resolvem do registro de módulos já
+carregado, então funcionam offline; mas só se o arquivo tiver entrado
+antes.
+
+### O que continua sem exercício
+
+```
+DCRR1 online real          ✓  R-000023 e R-000025, 5 camadas cada
+DCRR1 offline real         ✓  R-000026, physical_card_pin_offline_then_verified
+saída offline LEGADA       ~  formato provado (2C.6), sincronização não
+fechamento legado × DCRR1  ~  trigger provado; o handler do cliente
+                              NUNCA EXECUTOU — e agora JÁ EXISTEM três
+                              DCRR1 reais pra exercitá-lo
+```
+
+**A 2D.5 fechou inteira.** E as duas últimas linhas **deixaram de ser
+trabalho** em 2026-08-25 — ver o item 83.
+
+O parágrafo que estava aqui explicava como fabricar um
+`fechamento_corrida` legado no IndexedDB pra exercitar a drenagem. O
+usuário barrou com uma pergunta que desmontou a etapa: *essa versão
+antiga vai deixar de existir quando limpar todos os dados, qual o ponto
+disso?*
+
+Nenhum. As duas regressões testariam formatos que **não vão existir
+depois do corte pré-V1**. Em vez de prová-los, foram removidos:
+
+```
+saída offline LEGADA        o fallback "sem tipo = saida" saiu
+fechamento_corrida legado   o tipo e o handler saíram
+o trigger no banco          FICOU — virou invariante de integridade
+```
+
+O que a 2D.6 pede agora é regressão da V1 limpa, e ela está listada no
+CLAUDE.md, seção "A 2D.6 — CORTE LIMPO PRÉ-V1".
+
+## 82. `R$ NaN` — o retorno vazando pelas telas da saída
+
+2026-08-25, minutos depois de o `R-000026` selar. O usuário abriu o
+romaneio de um vale e viu **`R$ NaN`** nos valores.
+
+O `NaN` era o sintoma. O defeito é que **três consultas assumem
+"romaneio = saída"**, e desde hoje existem romaneios de retorno.
+
+### Por que dá `NaN`, e por que isso era inevitável
+
+O payload do retorno **não tem** `valor_compra_cents` nem
+`valor_entrega_cents` — de propósito, e está no contrato: *o retorno
+assina só o que ACRESCENTA*, porque repetir o que a saída selou criaria
+uma segunda fonte capaz de discordar da primeira.
+
+A página soma `s + v.valor_compra_cents` sobre um payload que não tem o
+campo → `undefined` → `NaN` → `formatBRL(NaN)` → `R$ NaN`. Ou seja: a
+decisão de contrato estava CERTA, e a tela é que precisava saber que
+existe mais de um tipo de documento.
+
+### As três superfícies, em ordem de estrago
+
+**1. A custódia do vale — e aqui o `NaN` escondia coisa pior.**
+
+`buscarCustodias` junta `romaneio_entregas` → `romaneios` sem filtrar
+tipo, e monta um `Map` chaveado por `entrega_id`. Com duas linhas por
+vale, **a última ganha**:
+
+```
+V-000046  →  R-000014 (saida)  ← era esta que o chevron mostrava
+             R-000026 (retorno) ← passou a ser esta, em silêncio
+```
+
+O chevron do vale responde *"quem tirou este vale da farmácia"*, e isso
+é a saída. Ele tinha parado de responder isso — o `R$ NaN` foi só o que
+tornou o sumiço visível.
+
+**2. A SANGRIA, que é o pior dos três.** Ela gera PDF e **manda pro
+Drive**. Sem o filtro, os retornos de hoje seriam desenhados com o
+layout da saída e arquivados nas duas vias, na pasta de custódia, como
+se fossem o documento da retirada. Medido:
+
+```
+sangria de 25/08, antes:  R-000022(s) R-000023(r) R-000024(s) R-000025(r) R-000026(r)
+sangria de 25/08, agora:  R-000022(s) R-000024(s)
+```
+
+Errado na tela é feio; errado no Drive é documento de custódia falso, e
+**ninguém revisa pasta de arquivo morto**. Nenhuma sangria foi rodada
+entre o primeiro retorno e o conserto — por sorte, não por desenho.
+
+**3. A página do romaneio**, que desenhava qualquer um com o layout da
+saída. `SELECT_ROMANEIO` nem trazia `tipo`: ela não tinha COMO saber.
+
+### O conserto, e o que ele deliberadamente não faz
+
+```
+buscarCustodias            romaneios!inner + eq('romaneios.tipo','saida')
+buscarRomaneiosRecebidosEm eq('tipo','saida')
+SELECT_ROMANEIO            passa a trazer `tipo`
+Romaneio.tsx               recusa desenhar retorno, e DIZ por quê
+```
+
+A página recusar é a segunda barreira, não a primeira: as consultas já
+não trazem retorno pra lá, mas ela recebe um **id**, e id vem de
+qualquer lugar. Imprimir `NaN` é a tela afirmando um número que ninguém
+calculou — recusar é a única resposta honesta enquanto o retorno não
+tiver página própria.
+
+**E o retorno volta a entrar nos três lugares quando tiver PDF e tela
+próprios — etapa 9.** Filtrar não é a solução final; é a solução
+enquanto a alternativa é desenhar errado.
+
+### A lição, e ela não é sobre `NaN`
+
+Um documento NOVO no mesmo lugar de armazenamento vaza por toda consulta
+que não sabia que ele podia existir. `romaneios` ganhou `tipo` na
+migration de 19/08, e as três consultas continuaram escritas como se
+`tipo` não existisse — porque na época não existia mesmo.
+
+O que teria pego isso mais cedo: procurar por `from('romaneios')` no dia
+em que a coluna `tipo` foi criada, e não no dia em que a primeira linha
+`retorno` nasceu. **Coluna discriminadora nova é um pedido de auditoria
+em toda consulta da tabela.**
+
+## 83. A 2D.6 mudou de natureza: de retrocompatibilidade para corte limpo
+
+2026-08-25. Eu ia fabricar um `fechamento_corrida` antigo no IndexedDB pra
+exercitar a drenagem. O usuário parou, e a pergunta dele desmontou a
+etapa inteira:
+
+> Mas essa versão antiga vai deixar de existir quando limpar todos os
+> dados, qual o ponto disso?
+
+Nenhum. A retrocompatibilidade que a 2C construiu protegia filas geradas
+pelas versões intermediárias **do próprio desenvolvimento**. Se o
+rollout é precedido de limpeza controlada — banco E estado local dos
+terminais —, não existe passado operacional a preservar, e manter os
+caminhos antigos é entrar em produção carregando dívida que nasceu
+enquanto tomávamos cuidado pra não quebrar dado de teste.
+
+### A decisão, registrada no CLAUDE.md
+
+Está lá inteira, na seção "A 2D.6 — CORTE LIMPO PRÉ-V1", com as cinco
+consequências. O resumo do que ela troca:
+
+```
+2D.6 ANTES                      2D.6 AGORA
+provar saída offline legada     provar que nada novo sai sem tipo
+provar fechamento legado        provar que nada novo cria fechamento
+                                limpar o estado local pré-V1
+                                remover a compatibilidade de dev
+                                MANTER o trigger no banco
+                                regressão da V1 limpa
+```
+
+### O que foi REMOVIDO, e o método
+
+As duas provas passavam **por leitura** — que é a forma fraca, e
+envelhece. Viraram estruturais primeiro, e foi isso que guiou a remoção:
+
+```
+TipoOperacaoFila     sem 'corrida' e 'fechamento_corrida'
+SegredosDoRomaneio   tipo obrigatório (era opcional)
+```
+
+**O compilador então enumerou 17 pontos**, e a lista dele foi o roteiro —
+não a minha memória de onde os caminhos legados moravam. Saíram:
+
+```
+corridas.ts        criarCorridaComAssinatura, fecharCorrida,
+                   o handler do SQLSTATE DCRR1, chaveDoEventoLegado
+                   −181 linhas
+db.ts              os dois tipos, o backfill da v5
+filaOffline.ts     2 casos, 2 listas de query key, 2 imports
+corridasBloqueadas a metade do fechamento legado + o gate por dono
+scripts            conferir-2c8, conferir-dexie-v5
+```
+
+**A versão 5 do Dexie continua declarada**, com o `upgrade` vazio.
+Apagar uma versão do meio faz um navegador parado na v4 não achar
+caminho até a v7 — a cadeia é o contrato.
+
+### A v7, e por que ela só pode estar certa uma vez
+
+Ela apaga `filaOperacoes`, `credenciaisCache` e `contextosRetorno`. Todo
+o conteúdo das três referencia ids do Supabase, e o pior caso não é
+falhar: é **sincronizar** contra um banco novo.
+
+Apagar a fila descarta operação não sincronizada. Hoje é seguro por três
+motivos que não se repetem — não existe deploy, a fila foi medida vazia,
+e o banco de destino vai ser zerado. **Uma v8 fazendo o mesmo depois do
+go-live perde trabalho de gente que estava no balcão**, e isso está
+escrito no arquivo. O `clear()` conta e DIZ quantas descartou: silencioso
+seria indistinguível de "já estava vazia".
+
+### Uma escolha que o spec me fez melhorar
+
+Ao tornar ausência de `tipo` uma recusa, os dois casos caíam no mesmo
+motivo. Mas no dia da virada eles pedem coisas opostas: **aba com bundle
+antigo** (um F5) contra **corpo corrompido** (investigar). Virou
+`tipo_ausente`, separado de `tipo_desconhecido`.
+
+E ele é TERMINAL, o que não é óbvio — parece caso de "recarrega e tenta
+de novo". Não é: o `tipo` que falta está DENTRO do envelope, selado por
+um bundle antigo, e nenhuma versão nova consegue reabri-lo pra
+acrescentar o campo.
+
+A matriz do despacho encolheu — quatro linhas que aceitavam ausência
+viraram recusa —, e elas **ficaram na tabela do spec em vez de sumir**:
+o que o teste congela agora é que ausência NÃO PASSA, e apagá-las
+deixaria a regra nova sem quem a cobrasse.
+
+### O baseline preservado
+
+Medido no dia do corte, e registrado pra que a remoção do código legado
+não pareça acidente daqui a alguns meses:
+
+```
+saida  selada      13
+saida  conflito     3
+retorno selado      3
+                  ────
+documentos relevantes no corte: 19
+```
+
+**Observação do ambiente atual:** todos os 3 conflitos históricos de
+Romaneio de Saída foram produzidos por `offline_sincronizada`; nenhum
+conflito de saída foi observado no caminho online.
+
+Isso é **consistente** com a janela de concorrência maior do offline, mas
+**o histórico observado não é, isoladamente, prova causal** — são três
+casos, num ambiente de teste, com um operador só. Eu tinha escrito
+"confirmação empírica" numa mensagem anterior; era forte demais para o
+que três linhas sustentam.
+
+### O roteiro do corte
+
+`scripts/corte-pre-v1.sql` — censo, wipe, sequências, sementes e
+conferência. **Nada dele foi executado.** Três coisas que ele registra e
+que não são óbvias:
+
+- **É o único lugar do projeto que viola a regra 4**, e diz isso na
+  primeira linha. Só é defensável porque produção não existe; depois do
+  go-live o mesmo comando é perda de dado real.
+- **As sequências não voltam sozinhas.** `entregas_numero_vale_seq` e
+  `romaneios_numero_seq` foram criadas soltas, sem `owned by`, então
+  `truncate ... restart identity` não as alcança. Sem o `alter sequence`
+  explícito, o primeiro vale real nasce `V-000047`.
+- **Todo cartão impresso morre junto.** O v3 bipado no leitor em 17/08
+  deixa de ser reconhecido; cartões novos precisam ser impressos ANTES
+  de a operação começar.
+
+A ordem tem duas amarrações: a Edge Function nova **recusa cliente
+antigo**, então ela e o cliente vão antes de qualquer terminal abrir; e
+a limpeza local só roda quando o terminal carrega o bundle novo — o que
+exige **fechar todas as abas**, porque F5 não basta se houver outra viva.
+
+### O que ficou parado, esperando resposta
+
+O bloco 4 (sementes) tem o dado real de São Gabriel — oito lojas a
+R$ 9,00 e a agência Gabrielense. Segura ele **uma coisa só**:
+
+- **os convênios**, que ninguém listou ainda. O modelo está comentado,
+  com o aviso sobre `farmacia_paga_entrega_integral` — é a flag que faz a
+  farmácia bancar os dois vales do endereço distante, e ela nunca deve
+  ser trocada por comparação de nome no código.
+
+**A dúvida das 17 filiais foi RESPONDIDA:** as oito são as de São
+Gabriel; as demais ficam em outras cidades e entram depois. O número do
+CLAUDE.md é o total da rede, não o desta cidade — e isso explica a
+sequência esburacada (02, 04, 09, 10, 12, 15, 18): os que faltam estão
+nas outras cidades. **Ninguém deve renumerar pra fechar os buracos.**
+
+E cada cidade nova custa mais que lojas: pela regra de uma agência de
+tele por cidade, é `cidades → lojas → agencias → mototaxistas →`
+`credenciais`. Acrescentar só as lojas as deixaria sem agência que as
+atenda — cadastradas e inoperantes, o mesmo modo de falha da agência sem
+cidade.
+
 ## Commits desta sessão
 
 
@@ -5822,14 +6619,71 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 2D.2 ✓   contexto do retorno: migration + cache Dexie v6 + conferido
 2D.3 ├─ servidor        ✓  invariante do pagamento, provada
      ├─ congelamento    ✓  src/lib/congelarRetorno.ts, 19 casos
-     ├─ máquina         ✓  src/lib/custodiaDoRetorno.ts, 4403 transições
-     └─ COMPONENTE      ←  AQUI. Nenhuma linha de JSX escrita.
-2D.4/5/6                    envio, caminho feliz, regressões
+     ├─ máquina         ✓  src/lib/custodiaDoRetorno.ts, 5066 transições
+     ├─ porta online    ✓  selarRomaneioRetorno (faltava no cliente)
+     ├─ proteção local  ✓  corrida com retorno pendente não é oferecida
+     ├─ política pós-   ✓  regra 4: falha_selo_online
+     │  falha online
+     └─ COMPONENTE      ✓  escrito em 2026-08-21
+2D.4                     ✓  as duas portas, dentro do componente
+2D.5   online            ✓  R-000023 e R-000025, em 2026-08-25
+       offline           ✓  R-000026, no mesmo dia
+2D.6                     ←  AQUI. As regressões históricas
 ```
 
-**Nenhuma migration pendente.** As duas últimas (`20260820190000` do
-contexto e `20260820200000` da invariante do pagamento) foram aplicadas e
-conferidas no banco.
+**O placar saiu de `retorno 0 · 0 · 0` e hoje diz:**
+
+```
+saida    13 · 13 · 0    52 camadas
+retorno   3 ·  3 · 0    15 camadas — online (2) e offline (1)
+```
+
+**A máquina MUDOU em 2026-08-21, e o item 79 é leitura obrigatória antes
+do JSX.** A primeira integração achou uma impossibilidade no contrato da
+2D.1: o envelope não é construível no passo do PIN, porque o
+`offlineEventHash` que vai dentro dele amarra os dois traços. Hoje:
+
+```
+evento offline      SEGREDOS_CAPTURADOS   (não `PIN_SELADO`)
+estado offline      segredos_capturados   (não `custodia_autorizada`)
+PIN e token         em ref efêmera do componente, NUNCA no estado
+permissão pra isso  podeGuardarSegredos(estado) — derivada, não lembrada
+online              PIN sai da memória ao autenticar; SEM envelope
+CONCLUIR            tipo discriminado: envelope só no ramo offline
+selo online falhou  falha_selo_online — preserva documento, descarta
+por rede            autorização e as DUAS assinaturas. Nunca "tentar
+                    novamente" com as antigas.
+```
+
+**Nenhuma migration pendente.** A última, `20260825120000`, foi aplicada
+em 2026-08-25 e conferida NA TELA — sem ela o retorno não abria
+(`permission denied for function romaneio_documentos_esperados`, 42501).
+Ver o item 80, que é também onde está a lição: as conferências anteriores
+rodaram no SQL Editor, como `postgres`, que ignora grant.
+
+**O que já rodou com dado real, logado:** a tela abre, o contexto vem do
+snapshot da saída, o congelamento funciona (e recunha os ids a cada
+tentativa — medido), o cache offline aquece (7 contextos, `CTXR1`), e o
+teste de transporte do item 66 passou pela primeira vez
+(`TRANSPORTE PRESERVA — 9 cenários`).
+
+**O que falta é do cartão pra frente:** bipar, PIN, as duas assinaturas e
+o selo. Isso é a 2D.5, e exige o cartão físico.
+
+Pro caminho OFFLINE existe
+`scripts/conferir-retorno-offline-no-console.js` — **três blocos que
+cercam o trecho manual**: (1) pré-condições e ficar offline, (2) com a
+fila ainda parada, o que foi ASSINADO, (3) depois de religar, o que o
+servidor SELOU. Pré-condições conferidas aqui em 2026-08-25: envelope
+disponível, 7 contextos `CTXR1` em cache, fila vazia.
+
+O bloco 2 é o que nenhuma tela responde — ele reconstrói o canônico a
+partir do jsonb CONGELADO e exige o mesmo `documentHash` que as duas
+partes assinaram, mais: nenhum `pin`/`credentialToken` em claro no item,
+`responsavelStrokes` e nunca `caixaStrokes`, `dependeDeChave` sem
+`chave`, e nenhum `pagamento_id` igual ao `entrega_id`. O bloco 3 checa
+o `modo = offline_sincronizada`, que é a única coisa que distingue esta
+via de um selo online.
 
 ---
 
@@ -5893,24 +6747,46 @@ A 2D.5 é quem move o placar de `retorno 0 · 0 · 0` para `1 · 1 · 0`, e é
 a primeira vez que as cinco camadas do verificador do retorno rodam
 contra um retorno de verdade.
 
-#### Uma coisa que vai assustar, e não é problema
+#### Uma coisa que vai assustar, e não é problema — MEDIDA em 2026-08-25
 
 As conferências da 2C e da 2D **queimaram vários números de romaneio**
 (cada bloco que exercita recusa insere e faz rollback, e a sequência não
-volta atrás). Hoje a aritmética ainda fecha porque nenhuma linha nasceu
-depois das queimas:
+volta atrás). Até 20/08 a aritmética ingênua ainda fechava, porque
+nenhuma linha tinha nascido depois das queimas:
 
 ```
-11 selados + 3 conflitos = 14 = maior R- existente
+11 selados + 3 conflitos = 14 = maior R- existente     ← fechava
 ```
 
-**No primeiro selo real seguinte ela vai acusar diferença**, e isso não é
-documento perdido. A forma robusta está no item 69:
+**Ela quebrou no primeiro selo real seguinte**, exatamente como previsto.
+O censo de 2026-08-25, depois de o `R-000022` nascer de uma corrida de
+teste:
+
+```
+15 linhas   →  selado 12 · conflito 3   (R-000002, 04, 09)
+tipo        →  saida × 15   ← nenhum retorno, nem em conflito
+maior       →  R-000022
+buracos     →  R-000015 … R-000021   (7 números queimados)
+
+12 + 3 = 15  ≠  22
+```
+
+**Isso não é documento perdido**, e a forma robusta de dizer isso é a do
+item 69 — ela não depende da sequência, só de nenhuma linha estar em
+limbo:
 
 ```sql
 select count(*) = count(*) filter (where status in ('selado','conflito'))
   from public.romaneios;
 ```
+
+Hoje: `15 = 15`, verdadeiro.
+
+**O placar de integridade, no mesmo dia: `12 · 12 · 0`**, quatro camadas
+cada. Ele subiu de 11 pra 12 por causa do `R-000022` e de mais nada — as
+onze que verificavam continuam verificando. E `porTipo: saida × 15` é a
+outra metade da leitura: **o caminho do retorno nunca executou**, nem
+para produzir um conflito.
 
 #### Credencial e ambiente
 
@@ -6027,6 +6903,11 @@ Censo rodado: fila local VAZIA. O que falta é execução, e está no placar
 do item 75: a
 saída offline LEGADA sincronizando de verdade, e o DCRR1 offline real,
 que é 2D por construção.
+
+**(RODOU em 2026-08-25 — ver o item 80. `TRANSPORTE PRESERVA — 9
+cenários, quatro critérios cada`, com `d: 4 de 9 cenários, 14 linhas`,
+sobre o `R-000001` de 3 vales. O parágrafo abaixo é de quando ainda não
+tinha rodado.)**
 
 **O teste de transporte está escrito e não foi rodado** — ele exige
 login, então é clique seu. Item 66: nove cenários, quatro com bloco `d`,

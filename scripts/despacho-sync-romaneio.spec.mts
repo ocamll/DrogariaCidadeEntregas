@@ -58,23 +58,46 @@ const mod = (await import(pathToFileURL(arquivo).href)) as {
 function decidir(bodyTipo?: string, envelopeTipo?: string) {
   const corpo: Record<string, unknown> = bodyTipo === undefined ? {} : { tipo: bodyTipo }
   const segredos = envelopeTipo === undefined ? {} : { tipo: envelopeTipo }
-  const r = mod.conciliarTipos(mod.resolverTipoDoBody(corpo), mod.resolverTipoDoRomaneio(segredos))
+  const r = mod.conciliarTipos(
+    mod.resolverTipoDoBody(corpo),
+    mod.resolverTipoDoRomaneio(segredos),
+    { body: corpo.tipo === undefined, envelope: segredos.tipo === undefined }
+  )
   return 'tipo' in r ? r.tipo : `RECUSA:${r.motivo}`
 }
 
 const A = '(ausente)'
 console.log('\n--- a matriz inteira ---')
+
+// A MATRIZ ENCOLHEU EM 2026-08-25, e encolher é o resultado.
+//
+// Até aqui, ausência significava `saida` — compatibilidade com os
+// envelopes selados antes da 2C.5. O corte para a V1 zera o Supabase e a
+// Dexie v7 apaga a fila local, então não existe envelope antigo em lugar
+// nenhum, e a frouxidão passou a não proteger dado nenhum.
+//
+// As QUATRO linhas que aceitavam ausência viraram recusa. Sobrou o caso
+// simétrico: os dois lados dizem a mesma coisa, explicitamente.
+//
+// E ausência tem motivo PRÓPRIO (`tipo_ausente`), separado de
+// `tipo_desconhecido`: no dia da virada, "bundle antigo numa aba que
+// ninguém recarregou" e "corpo corrompido" pedem coisas opostas — um F5
+// contra uma investigação —, e um motivo só faria os dois se parecerem.
 const matriz: Array<[string, string, string]> = [
   // body        envelope     esperado
-  [A, A, 'saida'], //            o que já rodava, e continua rodando
-  ['saida', A, 'saida'], //      ROLLOUT: item capturado antes da 2C.5
-  [A, 'saida', 'saida'], //      cliente antigo, envelope novo
   ['saida', 'saida', 'saida'],
   ['retorno', 'retorno', 'retorno'],
-  ['retorno', A, 'RECUSA:tipo_divergente'], //  ausência nunca vira retorno
-  [A, 'retorno', 'RECUSA:tipo_divergente'],
   ['saida', 'retorno', 'RECUSA:tipo_divergente'],
   ['retorno', 'saida', 'RECUSA:tipo_divergente'],
+  // As quatro que mudaram de resposta. Elas ficam na tabela EM VEZ DE
+  // sumir: o que este teste congela agora é que ausência NÃO PASSA, e
+  // apagá-las deixaria a regra nova sem quem a cobrasse.
+  [A, A, 'RECUSA:tipo_ausente'],
+  ['saida', A, 'RECUSA:tipo_ausente'],
+  [A, 'saida', 'RECUSA:tipo_ausente'],
+  [A, 'retorno', 'RECUSA:tipo_ausente'],
+  ['retorno', A, 'RECUSA:tipo_ausente'],
+  // Valor estranho continua sendo outra coisa, e com outro motivo.
   ['coisa_nova', 'saida', 'RECUSA:tipo_desconhecido'],
   ['saida', 'coisa_nova', 'RECUSA:tipo_desconhecido'],
   ['coisa_nova', 'coisa_nova', 'RECUSA:tipo_desconhecido'],

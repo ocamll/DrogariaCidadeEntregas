@@ -12,14 +12,31 @@ esperando no balcão. Velocidade de digitação é o requisito número um.
 
 Usuário secundário: mototaxista, que só encosta num tablet para assinar.
 
-A farmácia real tem **17 filiais** (hoje só 2 existem como dado de teste:
-Matriz e Filial 02) — o sistema já suporta múltiplas lojas de ponta a
-ponta (entregas escopadas por `loja_id`, transferência entre filiais,
-relatórios e Registro de Auditoria filtráveis por filial). Só a
-**criação** de loja nova continua manual via SQL, decisão consciente
-(filial é rara; usuário, que tem rotatividade, já se cria pelo app — ver
-"Gestão de usuários" abaixo) — não confundir isso com "não suporta
-multi-loja".
+A farmácia real tem **17 filiais**, espalhadas por mais de uma cidade
+(hoje só 2 existem como dado de teste: Matriz e Filial 02) — o sistema já
+suporta múltiplas lojas de ponta a ponta (entregas escopadas por
+`loja_id`, transferência entre filiais, relatórios e Registro de
+Auditoria filtráveis por filial). Só a **criação** de loja nova continua
+manual via SQL, decisão consciente (filial é rara; usuário, que tem
+rotatividade, já se cria pelo app — ver "Gestão de usuários" abaixo) —
+não confundir isso com "não suporta multi-loja".
+
+**As de SÃO GABRIEL/RS são oito**, levantadas em 2026-08-25: Matriz,
+Filial 02, 04, 09, 10, 12, 15 e 18, todas com tarifa de R$ 9,00 e
+atendidas pela agência **Gabrielense**. O SQL delas está pronto em
+`scripts/corte-pre-v1.sql` (bloco 4); as outras cidades entram depois.
+
+**Os números são da REDE, não da cidade** — por isso a sequência daqui é
+esburacada, e os que faltam estão nas outras cidades. Ninguém deve
+renumerar pra fechar os buracos: o número é como a farmácia chama a loja,
+e mudá-lo quebraria a correspondência com a placa da porta, com o Trier e
+com as pastas já criadas no Drive.
+
+E **cidade nova custa mais que lojas**: pela regra de uma agência de tele
+por cidade (ver "Cidade, filial e agência"), é `cidades → lojas →
+agencias → mototaxistas → credenciais`. Só as lojas as deixaria sem
+agência que as atenda — cadastradas e inoperantes, o mesmo modo de falha
+da agência sem cidade.
 
 ---
 
@@ -1590,11 +1607,26 @@ código enfileira `fechamento_corrida`.**
    antes do código — seção própria abaixo ("A 2C").** Leia-a inteira
    antes da primeira linha: ela tem uma etapa que não é fila nem crypto,
    e sim um gate de segurança da regra 7.
-8. **2D** — tela: Retorno de Corrida vira o fluxo do documento, e é onde
-   o caminho feliz finalmente roda (cartão → PIN → duas assinaturas →
-   selo). Fecha com o verificador confirmando o retorno recém-selado.
-   **Desenho da 2D.1 fechado em 2026-08-20 — ver "A 2D" abaixo.** Leia a
-   regra do CONGELAMENTO antes de escrever qualquer componente: ela é a
+8. **2D** — tela: Retorno de Corrida vira o fluxo do documento.
+   **FEITA em 21 e 25/08**, e o caminho feliz rodou nos DOIS modos:
+
+   ```
+   R-000023  online
+   R-000025  online
+   R-000026  offline_sincronizada
+   ```
+
+   O placar de integridade saiu de `retorno 0 · 0 · 0` para
+   **`3 · 3 · 0`**, 5 camadas cada — a primeira vez que
+   `saida_referenciada`, `documento`, as duas assinaturas e `final`
+   rodam contra documento de verdade.
+
+   O `R-000026` é o que prova mais: a assinatura do motoboy ficou com
+   `auth_method = physical_card_pin_offline_then_verified`, carimbo que
+   só existe por uma via — PIN selado no envelope RSA no balcão, aberto
+   e conferido pela Edge Function na sincronização.
+
+   Leia a regra do CONGELAMENTO antes de mexer no componente: ela é a
    invariante de UI mais importante da etapa, e é ela que impede a tela
    de assinar um documento e mandar outro.
 9. Fluxo excepcional (online), depois PDF do retorno + Drive
@@ -1875,6 +1907,7 @@ editar
   romaneioId           a operação é outra
   pagamentoIds         entram no DCRR1, logo no hash
   autorização          nasce amarrada ao hash antigo
+  PIN e token          capturados sob o documento anterior
   ENVELOPE             sela operationId + documentHash + tipo
   strokes dos DOIS     foram colhidos sobre outro documento
 ```
@@ -1884,6 +1917,13 @@ autorização e assinaturas, e ele é o quarto. Reaproveitá-lo faria a
 sincronização recusar `envelope_trocado` horas depois, com as duas
 assinaturas colhidas: o envelope amarra `operationId` e `documentHash`,
 e os dois mudaram.
+
+Desde 2026-08-21 o envelope só nasce no `CONCLUIR` (ver "O PIN offline é
+CAPTURADO, não selado", abaixo), então ele não tem como sobreviver a uma
+edição — o princípio continua, e passou a ser garantido por construção
+em vez de por disciplina. **Quem entrou na lista no lugar dele foi o PIN
+em claro**, que existe entre a captura e a selagem: e por isso o
+recolhimento da máquina zera o sinal que autoriza a tela a guardá-lo.
 
 E os traços têm que ser DESCARTADOS, não reaproveitados: uma assinatura
 manuscrita é manifestação sobre um conteúdo específico. Recolher a
@@ -2009,13 +2049,98 @@ partir de fontes que podem discordar entre si.
                  online                    offline
 identidade   servidor valida o HMAC    cache local por public_id
              "credencial reconhecida"  "credencial INFORMADA"
-PIN          validado na hora          selado no envelope
+PIN          validado na hora          CAPTURADO; só vira envelope
+                                       depois das duas assinaturas
 o que a      "identidade confirmada"   "PIN guardado, NÃO conferido"
 tela afirma
 ```
 
 Nada de "credencial validada" offline, porque não foi. É a regra que o
 §39 e o §49 pagaram duas vezes: **a tela nunca afirma o que não sabe.**
+
+###### O PIN offline é CAPTURADO, não selado — e o envelope nasce no fim
+
+Corrigido em 2026-08-21, quando a primeira integração com a tela achou
+uma **impossibilidade** no desenho da 2D.1, não um bug de código:
+
+```
+offlineEventHash = documentHash + responsavelStrokes + motoboyStrokes + …
+```
+
+O envelope carrega esse hash dentro dele, e a Edge Function o recalcula
+do corpo pra decidir entre selar e recusar `payload_alterado`. Logo, no
+instante em que o PIN é digitado **os dois traços ainda não existem, e o
+envelope não é construível ali**. A ordem verdadeira é:
+
+```
+PIN + token capturados → assinatura do responsável → assinatura do
+motoboy → offlineEventHash → envelope → fila
+```
+
+Disso saem três regras, e as três valem para quem for mexer na máquina:
+
+1. **"Selado" é palavra reservada.** O evento chama-se
+   `SEGREDOS_CAPTURADOS`, e o estado `segredos_capturados` — nunca
+   `custodia_autorizada`, porque offline ninguém autorizou nada. Selar é
+   o que `selarSegredos()` faz, com RSA e AES. Este projeto já pagou por
+   vocabulário que afirma mais do que aconteceu.
+
+2. **PIN e token NÃO entram no estado da máquina.** Ela guarda um SINAL
+   carimbado (`segredosCapturados`); o material vive só numa ref efêmera
+   do componente — nunca Dexie, nunca localStorage, nunca payload de
+   fila, nunca evento de auditoria. A permissão pra ele existir é
+   DERIVADA: `podeGuardarSegredos(estado)`. Falso, a ref se apaga.
+   Recarregar a página perde os segredos e obriga a refazer o PIN, e
+   isso é melhor que persistir texto claro pra permitir retomada.
+
+3. **O adiamento é só do offline.** Online, quem prova a presença é a
+   autorização de uso único já amarrada ao hash, então **o PIN sai da
+   memória assim que ela é emitida** e o caminho online **não produz
+   envelope**. `CONCLUIR` é tipo discriminado (`online: true` sem
+   envelope, `online: false` com), o que torna "online com envelope"
+   impossível de escrever.
+
+   É onde o retorno difere da saída, que sela o envelope sempre — e a
+   consequência disso é a regra 4.
+
+4. **Falha de rede no selo online NÃO vira offline.** Congelada em
+   2026-08-21. Nesse instante o documento está congelado e as duas
+   assinaturas existem, mas o PIN já foi apagado e envelope nunca houve
+   neste ramo — então não há o que mandar pra fila, e fabricar um
+   incentivaria guardar o PIN além do necessário.
+
+   A política separa duas coisas que parecem a mesma:
+
+   | | edição do documento | falha de rede no selo |
+   |---|---|---|
+   | `romaneioId`, `pagamentoIds` | destrói | **preserva** |
+   | `retornoJsonb`, `documentHash` | destrói | **preserva** |
+   | autorização | destrói | destrói |
+   | as duas assinaturas | destrói | destrói |
+   | resultado | documento NOVO | mesmo documento, custódia refeita |
+
+   O caixa **não** refaz a conferência do retorno: refaz cartão + PIN e
+   as duas assinaturas, sobre o mesmo documento.
+
+   **As assinaturas caem de propósito**, mesmo com o conteúdo intacto. O
+   que o sistema afirma é uma sequência — *autenticação → manifestação
+   sobre o documento*. Conservar os traços e autenticar por cima
+   inverteria a ordem, associando uma autenticação nova a uma
+   manifestação anterior a ela. É a ambiguidade temporal que a
+   `AUTORIZACAO_EXPIROU` já recusa.
+
+   Por isso o estado é próprio (`falha_selo_online`) e não o `erro_rede`
+   genérico: a tela precisa dizer a ação certa — *"os dados conferidos
+   foram preservados, mas é preciso autenticar o motoboy e assinar de
+   novo"*. **Nunca um botão "tentar novamente"** que repita o selo com a
+   autorização e os traços antigos.
+
+**E a varredura da máquina achou uma janela que a leitura não acharia:**
+capturar o PIN offline → a rede voltar → `PIN_RECUSADO` no meio →
+autenticar online terminava com autorização emitida **e** o material em
+claro ainda autorizado a viver. Hoje `PIN_AUTORIZADO` zera o sinal,
+`SEGREDOS_CAPTURADOS` zera a autorização (os dois ramos são exclusivos) e
+`PIN_RECUSADO` descarta o material — um PIN recusado é um PIN errado.
 
 E os três são evidências diferentes, apresentadas separadamente:
 
@@ -2109,7 +2234,118 @@ Depois o offline, que fecha a promessa que a 2C deliberadamente não fez.
 A terceira é a metade que a 2C.8 deixou vermelha de propósito: exercitá-la
 exige um DCRR1 real, que só existe depois da 2D.5.
 
-##### A janela de compatibilidade do `fechamento_corrida` — quando remover
+**A lista acima foi SUPERADA em 2026-08-25** — ver "A 2D.6" logo abaixo.
+A (1) foi cumprida; a (2) e a (3) deixaram de fazer sentido, porque o
+formato que elas testariam não vai existir depois do corte.
+
+##### A 2D.6 — CORTE LIMPO PRÉ-V1
+
+**Decisão fechada em 2026-08-25**, e ela substitui a estratégia de
+retrocompatibilidade das seções seguintes.
+
+> Não haverá necessidade de retrocompatibilidade com artefatos locais das
+> versões intermediárias de desenvolvimento, porque o rollout definitivo
+> será precedido por limpeza controlada dos dados de teste e do estado
+> persistido dos clientes.
+
+O raciocínio: a compatibilidade foi útil **enquanto** havia filas e dados
+gerados pelas versões intermediárias. Com um corte controlado antes da
+V1, deixa de existir "passado" operacional a preservar — e manter os
+caminhos antigos seria entrar em produção carregando dívida criada pelo
+próprio desenvolvimento.
+
+**As cinco consequências:**
+
+**1. `fechamento_corrida` legado**
+- nenhuma feature nova pode criá-lo;
+- o handler de compatibilidade sai no corte;
+- **não** é necessário fabricar item legado só pra testar drenagem;
+- **permanece no banco** a proteção que impede escrita sobre um DCRR1
+  selado (o trigger da 2C.2). Ela fica por ser **invariante de
+  integridade**, não compatibilidade: depois que um Romaneio de Retorno
+  está selado, nenhum caminho — antigo, novo ou bug futuro — reescreve
+  aqueles fatos.
+
+**2. Protocolo offline**
+- `tipo` é OBRIGATÓRIO nos novos body/envelopes;
+- o fallback "ausência de tipo = `saida`" sai depois do corte;
+- saída e retorno passam a usar protocolo explícito.
+
+**3. Dexie v7**
+- versão de corte pré-V1;
+- descarta artefatos locais incompatíveis das versões de desenvolvimento;
+- **não tenta reinterpretar** filas antigas;
+- instala somente o estado local suportado pela V1.
+
+**4. Rollout**
+- banco de teste/produção conforme o roteiro de corte;
+- limpar IndexedDB/estado local pré-V1;
+- garantir atualização/reload dos terminais;
+- impedir abas antigas de continuar produzindo payload de versão
+  anterior;
+- só então liberar operação real.
+
+**5. Regressão pós-corte**
+- saída online; saída offline;
+- retorno online; retorno offline;
+- hashes/verificadores;
+- fila e sincronização;
+- nenhuma operação nova sem `tipo`;
+- nenhuma operação nova `fechamento_corrida`.
+
+**Objetivo:** entrar na V1 sem carregar compatibilidade permanente para
+formatos que existiram somente durante o desenvolvimento.
+
+O roteiro executável do corte — censo, wipe, sequências, sementes e
+conferência — está em `scripts/corte-pre-v1.sql`. Ele é o único lugar do
+projeto que viola a regra 4, e diz isso na primeira linha.
+
+###### As duas provas que a 2D.6 exige, e por que não são testes
+
+A decisão pede garantir que nada novo crie `fechamento_corrida` e que
+nenhum payload saia sem `tipo`. As duas ficaram **estruturais**, não
+testadas:
+
+```
+TipoOperacaoFila       sem 'corrida' e 'fechamento_corrida'
+                       → enfileirar não compila
+SegredosDoRomaneio     tipo: 'saida' | 'retorno'   (era opcional)
+                       → envelope sem tipo não compila
+```
+
+Regra que o compilador cobra não depende de alguém lembrar dela daqui a
+seis meses. E foi o compilador que enumerou os 17 pontos a remover —
+não a memória de quem removeu.
+
+###### O baseline preservado, para a remoção não parecer acidente
+
+Estado do banco no dia do corte, medido:
+
+```
+saida  selada      13
+saida  conflito     3
+retorno selado      3
+                  ────
+documentos relevantes no corte: 19
+```
+
+Quem olhar a remoção do código legado daqui a alguns meses precisa achar
+este número junto — senão parece que alguém apagou compatibilidade por
+descuido, e não como decisão com um estado conhecido embaixo.
+
+**Observação do ambiente atual:** todos os 3 conflitos históricos de
+Romaneio de Saída foram produzidos por `offline_sincronizada`; nenhum
+conflito de saída foi observado no caminho online. Isso é **consistente**
+com a janela de concorrência maior do offline, mas o histórico observado
+**não é, isoladamente, prova causal**.
+
+##### (superada) A janela de compatibilidade do `fechamento_corrida`
+
+> **SUPERADA pela 2D.6 em 2026-08-25.** A janela de releases descrita
+> abaixo pressupunha filas antigas nos computadores das filiais. Com o
+> corte controlado, elas não existem — e a remoção aconteceu de uma vez,
+> sem janela. O texto fica como registro do raciocínio que valia enquanto
+> a premissa valia.
 
 Congelado em 2026-08-20. O handler legado **não sai porque a fila está
 vazia numa máquina**: cada navegador tem a própria fila em IndexedDB, e a
@@ -2131,7 +2367,12 @@ O sinal que autoriza a remoção é a AUDITORIA, não a fila local: enquanto
 `fechamento_legado_obsoleto` aparecer no Registro de Auditoria, existe
 cliente antigo drenando por aí.
 
-##### As duas metades do protocolo de compatibilidade
+##### (superada) As duas metades do protocolo de compatibilidade
+
+> **SUPERADA pela 2D.6.** A metade do CLIENTE saiu no corte: sem escritor
+> legado, não há quem receba a recusa. A metade do BANCO — o trigger —
+> **fica**, e a 2D.6 diz por quê: ela deixou de ser compatibilidade e
+> virou invariante de integridade.
 
 Nenhuma funciona sozinha, e isso é a lição da 2C.8:
 

@@ -18,14 +18,9 @@ import {
 const ROTULO_POR_TIPO: Record<ItemFilaOperacao['tipo'], string> = {
   entrega: 'Vale de cliente',
   transferencia: 'Transferência entre filiais',
-  corrida: 'Saída do motoboy',
   romaneio_saida: 'Saída do motoboy (romaneio)',
   romaneio_retorno: 'Retorno do motoboy (romaneio)',
   divergencia: 'Divergência de pagamento',
-  // Fluxo antigo de retorno, e o rótulo não diz "legado" de propósito:
-  // pra quem olha a fila importa o que a operação É, não em que release
-  // ela nasceu. Some quando a janela de compatibilidade fechar (2C.8).
-  fechamento_corrida: 'Retorno de corrida',
   falta_receita: 'Ocorrência de documento',
 }
 

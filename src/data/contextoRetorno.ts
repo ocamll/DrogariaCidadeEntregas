@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { supabase } from '@/lib/supabase'
+import { supabase, mensagemDeErro } from '@/lib/supabase'
 import { db, type ContextoRetornoEmCache } from '@/lib/db'
 
 // =====================================================================
@@ -199,8 +199,13 @@ export async function aquecerContextosDeRetorno(corridaIds: string[]): Promise<n
         await guardarContextoLocal(contexto)
         guardados++
       }
-    } catch {
-      // Preparação é best-effort por definição.
+    } catch (erro) {
+      // Preparação é best-effort por definição — mas SILENCIOSA ela
+      // esconde defeito. Em 2026-08-25 a RPC estava recusando por falta
+      // de EXECUTE numa função interna, e este `catch` engoliu a
+      // primeira evidência: o aquecimento roda antes de o caixa clicar
+      // em qualquer coisa, então o erro aparecia aqui primeiro.
+      console.warn('aquecerContextosDeRetorno: corrida', id, mensagemDeErro(erro))
     }
   }
   return guardados
@@ -247,7 +252,13 @@ export function useContextoRetorno(corridaId: string | null) {
           // Rede prometida e não entregue: o cache ainda pode salvar.
           const local = await lerContextoLocal(corridaId)
           if (local) return { estado: 'pronto', contexto: local, origem: 'cache' }
-          return { estado: 'erro', erro: erro instanceof Error ? erro : new Error(String(erro)) }
+          // `mensagemDeErro` e não `String(erro)`: o erro do PostgREST é
+          // um objeto simples, não um `Error`, e o `String()` o
+          // transformava em "[object Object]" — apagando justamente o
+          // `code` que diz se foi RLS, cache de schema ou SQLSTATE.
+          // Aconteceu em uso real em 2026-08-25.
+          console.error('obter_contexto_retorno falhou:', erro)
+          return { estado: 'erro', erro: new Error(mensagemDeErro(erro)) }
         }
       }
 

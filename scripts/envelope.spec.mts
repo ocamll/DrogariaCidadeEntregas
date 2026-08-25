@@ -120,11 +120,21 @@ console.log('\n--- os segredos não vazam ---')
 
 console.log('\n--- o tipo atravessa e é resolvido pelo servidor ---')
 {
-  // (1) legado: envelope sem tipo → saída
+  // (1) SEM TIPO NÃO RESOLVE MAIS NADA, e a mudança é de 2026-08-25.
+  //
+  // Este caso afirmava `resolve como saida` — a compatibilidade com os
+  // envelopes selados antes da 2C.5. O corte pré-V1 zera o Supabase e a
+  // Dexie v7 apaga a fila local, então não existe envelope antigo em
+  // lugar nenhum, e a frouxidão passou a não proteger dado.
+  //
+  // **Repare no que continua verdadeiro:** o envelope sem tipo ABRE
+  // normalmente. A recusa é da conciliação, não da criptografia — e as
+  // duas coisas não podem se confundir, senão um erro de chave pareceria
+  // um erro de protocolo.
   const legado = await selarSegredosCom(config, segredosBase)
   const abertoLegado = await abrir(legado, par.privateKey)
-  checa('envelope legado abre', abertoLegado.pin === PIN)
-  checa('legado sem tipo resolve como saida', resolverTipoDoRomaneio(abertoLegado) === 'saida')
+  checa('envelope sem tipo ainda ABRE', abertoLegado.pin === PIN, 'a recusa é do protocolo, não do RSA')
+  checa('mas não resolve tipo nenhum', resolverTipoDoRomaneio(abertoLegado) === null)
 
   // (2) novo, explícito
   const saida = await selarSegredosCom(config, { ...segredosBase, tipo: 'saida' })

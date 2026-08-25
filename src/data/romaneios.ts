@@ -208,6 +208,83 @@ export async function autorizarSaida(
 }
 
 // =====================================================================
+// A PORTA ONLINE DO ROMANEIO DE RETORNO
+//
+// Espelho de `selarRomaneio`, e as diferenças são todas de contrato:
+//
+//   - NÃO manda corrida nem loja. O servidor deriva as duas do romaneio
+//     de saída selado, e é isso que torna o retorno imune ao buraco de
+//     `p_loja_id` que a porta da saída ainda tem: payload nenhum opina
+//     sobre filial.
+//   - manda `retornoJsonb` já CONVERTIDO por `paraJsonbRetorno`, o
+//     mesmo objeto que produziu o `documentHash`. Reconverter aqui
+//     abriria a fresta de assinar uma coisa e mandar outra.
+//   - `responsavelStrokes`, nunca `caixaStrokes`.
+//
+// A autorização é a MESMA `autorizar_saida`: ela amarra cartão + PIN a
+// um `document_hash` qualquer, e o do retorno é um deles. Reaproveitar a
+// função é o que evita uma segunda implementação de bcrypt e de bloqueio
+// progressivo pra divergir da primeira.
+// =====================================================================
+
+export async function selarRomaneioRetorno(input: {
+  romaneioId: string
+  saidaRomaneioId: string
+  saidaDocumentHash: string
+  motoboyId: string
+  retornoJsonb: unknown[]
+  documentHash: string
+  autorizacaoId: string
+  responsavelStrokes: unknown
+  motoboyStrokes: unknown
+  ocorridoEmLocal: string
+  geolocalizacao: unknown | null
+}): Promise<ResultadoSelo> {
+  const { data, error } = await supabase.rpc('selar_romaneio_retorno', {
+    p_romaneio_id: input.romaneioId,
+    p_saida_romaneio_id: input.saidaRomaneioId,
+    p_saida_document_hash: input.saidaDocumentHash,
+    p_motoboy_id: input.motoboyId,
+    p_retorno: input.retornoJsonb,
+    p_document_hash: input.documentHash,
+    p_autorizacao_id: input.autorizacaoId,
+    p_responsavel_strokes: input.responsavelStrokes,
+    p_motoboy_strokes: input.motoboyStrokes,
+    p_ocorrido_em_local: input.ocorridoEmLocal,
+    p_geolocalizacao: input.geolocalizacao,
+  })
+  if (error) {
+    if (ehRecusaDoServidor(error)) throw new ErroDoServidor(error.message, error.code)
+    throw error
+  }
+
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const r = data as any
+  if (r?.ok) {
+    return {
+      ok: true,
+      jaExistia: !!r.ja_existia,
+      romaneioId: r.romaneio_id,
+      numero: r.numero,
+      finalHash: r.final_hash ?? null,
+    }
+  }
+  // Conflito NÃO é exceção aqui tampouco: a transação commitou o
+  // registro com as DUAS assinaturas preservadas, porque a devolução
+  // física aconteceu. Tratar isto como erro retryable faria a tela
+  // sugerir "tente de novo", que é o oposto do que se deve fazer.
+  return {
+    ok: false,
+    motivo: 'conflito',
+    jaExistia: !!r?.ja_existia,
+    romaneioId: r?.romaneio_id,
+    numero: r?.numero ?? null,
+    conflitos: r?.conflitos,
+  }
+}
+
+
+// =====================================================================
 // Saída registrada offline
 //
 // A tela sela o envelope SEMPRE (online ou não) e tenta o caminho online
@@ -364,6 +441,15 @@ const MOTIVOS_TERMINAIS = [
   'payload_alterado',
   'tipo_divergente',
   'tipo_desconhecido',
+  // Entrou em 2026-08-25, com o fim da compatibilidade de ausência.
+  //
+  // É TERMINAL, e o motivo não é óbvio: parece um caso de "recarrega a
+  // página e tenta de novo". Não é. O `tipo` que falta está DENTRO do
+  // envelope, selado por um bundle antigo — nenhuma versão nova
+  // consegue reabri-lo pra acrescentar o campo. Retentar repete o mesmo
+  // resultado para sempre, que é exatamente o que a lista existe pra
+  // evitar.
+  'tipo_ausente',
   'vocabulario_invalido',
 ]
 
@@ -720,9 +806,26 @@ async function buscarCustodias(entregaIds: string[]): Promise<Map<string, Custod
   const { data: vinculos, error: erroVinculo } = await supabase
     .from('romaneio_entregas')
     .select(
-      'entrega_id, romaneios(id, numero, status, modo, selado_em, ocorrido_em_local, recebido_em_servidor, final_hash)'
+      // `!inner` + filtro por tipo, e isto NÃO é otimização.
+    //
+    // Desde 2026-08-25 existem romaneios de RETORNO, e eles também
+    // ligam as entregas em `romaneio_entregas`. Sem o filtro, cada vale
+    // passou a trazer DUAS linhas — e o `Map` abaixo é chaveado por
+    // `entrega_id`, então a última ganhava: o retorno substituía a
+    // saída, em silêncio.
+    //
+    // O sintoma que apareceu no uso foi `R$ NaN` na página do romaneio
+    // (o payload do retorno não tem `valor_compra_cents` — ele assina só
+    // o que ACRESCENTA), mas o defeito era outro: a custódia do vale
+    // deixou de mostrar quem LEVOU o vale.
+    //
+    // O chevron do vale responde "quem tirou este vale da farmácia", e
+    // isso é a saída. Quando o retorno tiver tela e PDF próprios
+    // (etapa 9), ele entra AO LADO — nunca por cima.
+    'entrega_id, romaneios!inner(id, numero, tipo, status, modo, selado_em, ocorrido_em_local, recebido_em_servidor, final_hash)'
     )
     .in('entrega_id', entregaIds)
+    .eq('romaneios.tipo', 'saida')
 
   if (erroVinculo) throw erroVinculo
 
@@ -791,6 +894,8 @@ export function useCustodiaDosVales(entregaIds: string[]) {
 }
 
 export type RomaneioCompleto = CustodiaDoVale & {
+  /** `saida` | `retorno`. A página só sabe desenhar o primeiro. */
+  tipo: string
   lojaNome: string | null
   documentHash: string
   canonico: string | null
@@ -815,7 +920,10 @@ export type RomaneioCompleto = CustodiaDoVale & {
 // listas de colunas que precisam concordar é a classe de divergência que
 // este projeto já paga caro nos gêmeos do canônico.
 const SELECT_ROMANEIO =
-  'id, numero, status, modo, selado_em, ocorrido_em_local, recebido_em_servidor, ' +
+  // `tipo` entrou em 2026-08-25: sem ele a página não tinha COMO saber
+  // que estava desenhando um retorno com o layout da saída, e o
+  // resultado era `R$ NaN` em vez de uma recusa.
+  'id, numero, tipo, status, modo, selado_em, ocorrido_em_local, recebido_em_servidor, ' +
   'final_hash, document_hash, canonico, payload, conflito, ip, geolocalizacao, ' +
   // Os quatro relógios da corrida. Existem desde 2026-08-10 e nunca
   // tiveram tela: são eles que dão retirada, retorno e, mais pra frente,
@@ -831,6 +939,7 @@ function mapRomaneio(r: any, assinaturas: AssinaturaDoRomaneio[]): RomaneioCompl
   return {
     romaneioId: r.id,
     numero: r.numero,
+    tipo: r.tipo,
     status: r.status,
     modo: r.modo,
     seladoEm: r.selado_em,
@@ -923,6 +1032,17 @@ async function buscarRomaneiosRecebidosEm(filtro: {
   let q = supabase
     .from('romaneios')
     .select(SELECT_ROMANEIO)
+    // SÓ SAÍDAS, e esta linha impede o pior dos três defeitos irmãos.
+    //
+    // A sangria GERA PDF e MANDA PRO DRIVE. Sem o filtro, um romaneio de
+    // retorno seria desenhado com o layout da saída — valores vindo de
+    // campos que o payload do retorno não tem — e arquivado nas duas
+    // vias, na pasta de custódia, como se fosse o documento da retirada.
+    // Errado na tela é feio; errado no Drive é um documento de custódia
+    // falso, e ninguém revisa pasta de arquivo morto.
+    //
+    // O retorno volta a entrar aqui quando tiver PDF próprio (etapa 9).
+    .eq('tipo', 'saida')
     .gte('recebido_em_servidor', inicio.toISOString())
     .lt('recebido_em_servidor', fim.toISOString())
     .order('recebido_em_servidor', { ascending: true })

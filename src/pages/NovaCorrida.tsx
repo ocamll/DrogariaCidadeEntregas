@@ -40,6 +40,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { CampoAssinatura } from '@/components/CampoAssinatura'
 
 export function NovaCorrida({ profile, onVoltar }: { profile: AuthProfile; onVoltar: () => void }) {
   if (!profile.lojaId) {
@@ -784,45 +785,6 @@ function Secao({
       </h3>
       {children}
     </section>
-  )
-}
-
-function CampoAssinatura({
-  rotulo,
-  padRef,
-}: {
-  rotulo: string
-  padRef: React.RefObject<SignaturePad | null>
-}) {
-  const canvasRef = useRef<HTMLCanvasElement>(null)
-
-  useEffect(() => {
-    const canvas = canvasRef.current
-    if (!canvas) return
-
-    const ratio = Math.max(window.devicePixelRatio || 1, 1)
-    canvas.width = canvas.offsetWidth * ratio
-    canvas.height = canvas.offsetHeight * ratio
-    canvas.getContext('2d')?.scale(ratio, ratio)
-
-    const pad = new SignaturePad(canvas, { backgroundColor: 'rgb(255, 255, 255)' })
-    padRef.current = pad
-    return () => {
-      pad.off()
-      padRef.current = null
-    }
-  }, [padRef])
-
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <Label className="text-xs">{rotulo}</Label>
-        <Button type="button" variant="ghost" size="sm" onClick={() => padRef.current?.clear()}>
-          Limpar
-        </Button>
-      </div>
-      <canvas ref={canvasRef} className="h-32 w-full touch-none rounded-lg border bg-white" />
-    </div>
   )
 }
 

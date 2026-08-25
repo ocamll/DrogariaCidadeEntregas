@@ -52,53 +52,33 @@ function aindaPodeEscrever(item: ItemDeFilaObservado): boolean {
 }
 
 /**
- * O item vai rodar sob a sessão atual?
+ * O QUE SAIU DAQUI EM 2026-08-25.
  *
- * **Espelha o gate de `processarFilaOperacoes`, e só ele:**
+ * `rodaNestaSessao` e `corridasComFechamentoLegadoPendente` — a metade
+ * da 2C.7 que escondia corrida com `fechamento_corrida` legado na fila.
+ * O tipo não existe mais (ver `TipoOperacaoFila`), então a função não
+ * tinha mais o que encontrar.
  *
- *     if (item.userId && item.userId !== usuario) → bloqueia
+ * **O que sobrou é a metade que importa daqui pra frente**, e ela nunca
+ * foi sobre compatibilidade: uma corrida com Romaneio de Retorno
+ * pendente na fila não pode ser oferecida de novo, porque
+ * `UNIQUE (corrida_id, tipo)` garante que só um dos dois documentos
+ * pode ser selado — e o outro custa duas assinaturas pra virar
+ * conflito.
  *
- * Ou seja, `userId` vazio (item herdado da v2 do banco local, de antes de
- * existir dono) **roda sob qualquer sessão** — e por isso bloqueia.
- * Deixá-lo de fora seria oferecer uma corrida que um item sem dono vai
- * fechar na próxima rodada.
- *
- * `tenantId` e `lojaId` DELIBERADAMENTE não entram, e é uma decisão
- * contra a intuição:
- *
- *  - eles nunca são comparados pelo laço da fila, então incluí-los aqui
- *    só poderia SUB-bloquear — um item de perfil movido de filial rodaria
- *    e esta função não teria avisado;
- *  - e não há o que sobre-bloquear: a lista de corridas já vem escopada
- *    por filial pela RLS, então um item de outra filial não tem como
- *    apontar para uma corrida que está sendo oferecida aqui.
- *
- * A pergunta certa não é "de quem é este item", é **"ele vai rodar e
- * escrever nesta corrida?"**.
+ * Com a outra metade foi junto o gate por dono, e vale registrar por
+ * quê: ele existia porque `fechamento_corrida` NÃO é documento, então
+ * espelhar o gate do laço da fila bastava. O retorno é documento, e por
+ * isso bloqueia independentemente de quem vai fazê-lo subir.
  */
-function rodaNestaSessao(item: ItemDeFilaObservado, userId: string): boolean {
-  return !item.userId || item.userId === userId
-}
-
-/**
- * Os ids de corrida com um `fechamento_corrida` legado ainda vivo na fila
- * local desta sessão.
- *
- * `romaneio_saida` **não** entra: ele também carrega `chave = corridaId`,
- * mas quem trata a ordem entre saída e retorno é o `dependeDeChave` da
- * 2C.3. Esta etapa é especificamente sobre o fechamento LEGADO, que é o
- * único que escreve desfecho por fora de um documento.
- */
-export function corridasComFechamentoLegadoPendente(
-  itens: readonly ItemDeFilaObservado[],
-  userId: string
+export function corridasComRetornoPendente(
+  itens: readonly ItemDeFilaObservado[]
 ): Set<string> {
   const bloqueadas = new Set<string>()
 
   for (const item of itens) {
-    if (item.tipo !== 'fechamento_corrida') continue
+    if (item.tipo !== 'romaneio_retorno') continue
     if (!aindaPodeEscrever(item)) continue
-    if (!rodaNestaSessao(item, userId)) continue
 
     const corridaId = (item.payload as { corridaId?: unknown } | undefined)?.corridaId
     if (typeof corridaId === 'string' && corridaId.length > 0) bloqueadas.add(corridaId)
@@ -115,10 +95,9 @@ export function corridasComFechamentoLegadoPendente(
  */
 export function filtrarCorridasRetornaveis<T extends { id: string }>(
   corridas: readonly T[],
-  itens: readonly ItemDeFilaObservado[],
-  userId: string
+  itens: readonly ItemDeFilaObservado[]
 ): T[] {
-  const bloqueadas = corridasComFechamentoLegadoPendente(itens, userId)
+  const bloqueadas = corridasComRetornoPendente(itens)
   if (bloqueadas.size === 0) return [...corridas]
   return corridas.filter((c) => !bloqueadas.has(c.id))
 }

@@ -11,7 +11,6 @@ import { uuidv7 } from '@/lib/uuid'
 import { bloqueadoPorDependencia } from '@/lib/dependenciaDaFila'
 import { supabase } from '@/lib/supabase'
 import { criarEntrega, criarTransferencia } from '@/data/entregas'
-import { criarCorridaComAssinatura, fecharCorrida } from '@/data/corridas'
 import { marcarDivergencia } from '@/data/pagamentos'
 import { notificarFaltaReceita } from '@/data/documentos'
 import {
@@ -34,14 +33,6 @@ const QUERY_KEYS_POR_TIPO: Record<TipoOperacaoFila, string[]> = {
   // Faltava, e a Nova Corrida seguia oferecendo vale que já tinha saído.
   entrega: ['entregas-hoje', 'vales-para-saida', 'eventos-auditoria'],
   transferencia: ['transferencias', 'vales-para-saida', 'eventos-auditoria'],
-  corrida: [
-    'entregas-hoje',
-    'transferencias',
-    'entregas-pendentes-sem-corrida',
-    'vales-para-saida',
-    'entregas-historico',
-    'eventos-auditoria',
-  ],
   romaneio_saida: [
     'entregas-hoje',
     'transferencias',
@@ -80,16 +71,6 @@ const QUERY_KEYS_POR_TIPO: Record<TipoOperacaoFila, string[]> = {
     'notificacoes-todas',
     'eventos-auditoria',
   ],
-  fechamento_corrida: [
-    'entregas-hoje',
-    'vales-para-saida',
-    'transferencias',
-    'entregas-historico',
-    'corridas-abertas',
-    'notificacoes-hoje',
-    'notificacoes-todas',
-    'eventos-auditoria',
-  ],
   falta_receita: ['notificacoes-hoje', 'notificacoes-todas', 'eventos-auditoria'],
 }
 
@@ -101,17 +82,11 @@ async function executarOperacao(item: ItemFilaOperacao): Promise<void> {
     case 'transferencia':
       await criarTransferencia(item.payload)
       return
-    case 'corrida':
-      await criarCorridaComAssinatura(item.payload)
-      return
     case 'romaneio_saida':
       await sincronizarSaidaOffline(item.payload)
       return
     case 'divergencia':
       await marcarDivergencia(item.payload)
-      return
-    case 'fechamento_corrida':
-      await fecharCorrida(item.payload)
       return
     case 'romaneio_retorno':
       await sincronizarRetornoOffline(item.payload)

@@ -67,16 +67,25 @@ export type SegredosDoRomaneio = {
    * `documentHash`) impedem reaproveitar um envelope em OUTRA operação
    * concreta, mas não impediriam trocar de CAMINHO com o envelope certo.
    *
-   * **Ausente = saída**, e isso é compatibilidade histórica exclusiva:
-   * todo envelope selado antes da 2C.5 é de saída, por construção — o
-   * retorno não existia. Não é permissividade pra operação nova; o
-   * retorno exige o valor explícito, aqui e no corpo.
+   * **OBRIGATÓRIO desde 2026-08-25.** Ele era opcional, e a ausência
+   * significava `saida` — compatibilidade com os envelopes selados antes
+   * da 2C.5, quando o retorno não existia.
+   *
+   * Essa compatibilidade deixou de ter objeto no corte para a V1: o
+   * Supabase é zerado e a Dexie v7 apaga a fila local, então não existe
+   * envelope antigo em lugar nenhum. Mantê-la seria carregar
+   * permissividade permanente por causa de dados que nunca vão existir.
+   *
+   * Sendo obrigatório no TIPO, "envelope sem tipo" deixa de ser algo que
+   * se possa escrever por engano — o compilador cobra, e nenhum teste
+   * precisa lembrar de checar. A regra do §59 outra vez: tornar o erro
+   * impossível de representar vale mais que rejeitá-lo.
    *
    * NÃO confundir com `versaoDocumento` (`DCRR1`), que é a versão do
    * canônico e vive no payload da fila, em claro. Este aqui é o tipo de
    * documento, é selado, e é verificado.
    */
-  tipo?: 'saida' | 'retorno'
+  tipo: 'saida' | 'retorno'
 }
 
 function paraBase64(buffer: ArrayBuffer): string {

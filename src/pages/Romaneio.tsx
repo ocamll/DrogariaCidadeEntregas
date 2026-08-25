@@ -143,6 +143,34 @@ export function Romaneio({
     return <p className="p-4 text-sm text-muted-foreground">Romaneio não encontrado.</p>
   }
 
+  // ESTA PÁGINA SÓ SABE DESENHAR A SAÍDA, e desde 2026-08-25 existem
+  // romaneios de RETORNO.
+  //
+  // O payload do retorno não tem `valor_compra_cents` nem
+  // `valor_entrega_cents` — de propósito: o DCRR1 assina só o que
+  // ACRESCENTA, e os valores já foram selados na saída. Desenhá-lo aqui
+  // somava `undefined` e imprimia **R$ NaN**, que é a tela afirmando um
+  // número que ninguém calculou.
+  //
+  // As consultas já não trazem retorno pra cá (custódia do vale e
+  // sangria filtram `tipo = 'saida'`), então isto é a segunda barreira —
+  // a página recebe um id, e id vem de qualquer lugar. Recusar é a única
+  // resposta honesta enquanto o retorno não tiver tela própria (etapa 9).
+  if (data.tipo === 'retorno') {
+    return (
+      <div className="mx-auto max-w-2xl p-4">
+        <Button variant="ghost" className="mb-3" onClick={onVoltar}>
+          ← Voltar
+        </Button>
+        <p className="text-sm text-muted-foreground">
+          <strong>{data.numero}</strong> é um Romaneio de <strong>Retorno</strong>, e a tela dele
+          ainda não existe — esta aqui desenha o documento da saída, que tem outros campos. O
+          retorno está selado e íntegro no servidor; o que falta é a página.
+        </p>
+      </div>
+    )
+  }
+
   const payload = data.payload as { vales?: ValeDoPayload[] } | null
   const vales = payload?.vales ?? []
   const totalEntrega = vales.reduce((s, v) => s + v.valor_entrega_cents, 0)

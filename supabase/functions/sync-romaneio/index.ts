@@ -99,57 +99,64 @@ type Segredos = {
  * Qual documento o envelope autoriza — lido de DENTRO dele, depois de
  * decifrado, e por isso não falsificável pelo cliente.
  *
- * **Ausente = `saida`, e isso é compatibilidade histórica exclusiva.**
- * Todo envelope selado antes da 2C.5 é de saída por construção: o
- * retorno não existia. Sem essa regra, toda saída offline parada numa
- * fila deixaria de sincronizar no dia do deploy.
+ * **AUSÊNCIA DEIXOU DE SIGNIFICAR `saida` em 2026-08-25.**
  *
- * Ela NÃO é permissividade pra operação nova: o retorno exige o valor
- * explícito. Valor desconhecido é recusado em vez de virar saída por
- * omissão — "não reconheço" e "é uma saída" são coisas diferentes, e
- * tratá-las igual é como uma versão futura passaria despercebida por
- * esta aqui.
+ * Ela significava, e por um bom motivo: todo envelope selado antes da
+ * 2C.5 é de saída por construção — o retorno não existia —, e sem a
+ * regra toda saída offline parada numa fila deixaria de sincronizar no
+ * dia do deploy.
+ *
+ * O corte para a V1 tirou o objeto dessa regra: o Supabase é zerado e a
+ * Dexie v7 apaga a fila local dos terminais, então não existe envelope
+ * antigo em lugar nenhum. Mantê-la seria carregar permissividade
+ * permanente por causa de dados que nunca vão existir — e permissividade
+ * num campo que decide QUAL PORTA de selagem será usada é o tipo de
+ * folga que se paga caro uma vez.
+ *
+ * Agora ausência é recusa, igual a valor desconhecido. As três respostas
+ * possíveis viraram duas: **é isto, ou não passa.**
  */
 function resolverTipoDoRomaneio(segredos: Segredos): 'saida' | 'retorno' | null {
-  if (segredos.tipo === undefined || segredos.tipo === 'saida') return 'saida'
+  if (segredos.tipo === 'saida') return 'saida'
   if (segredos.tipo === 'retorno') return 'retorno'
   return null
 }
 
 /**
  * O tipo declarado no CORPO — em claro, e portanto não confiável sozinho.
- * Mesma regra de ausência do envelope, pelo mesmo motivo histórico.
+ * Mesma regra do envelope: desde a V1, ausência é recusa.
  */
 function resolverTipoDoBody(corpo: Record<string, unknown>): 'saida' | 'retorno' | null {
   const tipo = corpo.tipo
-  if (tipo === undefined || tipo === 'saida') return 'saida'
+  if (tipo === 'saida') return 'saida'
   if (tipo === 'retorno') return 'retorno'
   return null
 }
 
 /**
- * A MATRIZ DE COMPATIBILIDADE, e ela cabe em uma igualdade.
+ * A MATRIZ, e ela cabe em uma igualdade.
  *
- * Os dois lados resolvem ausência como `saida` (compatibilidade
- * histórica), e depois **têm que concordar**. Disso decorre tudo:
+ * Os dois lados resolvem, e depois **têm que concordar**. Disso decorre
+ * tudo:
  *
  *   body      envelope     resultado
  *   ────────────────────────────────────────────────────────────
- *   ausente   ausente      saída legado, o que já rodava
- *   saida     ausente      saída — ver ROLLOUT abaixo
- *   ausente   saida        saída
  *   saida     saida        saída
  *   retorno   retorno      retorno
- *   retorno   ausente      RECUSA  (envelope resolve saida ≠ retorno)
- *   ausente   retorno      RECUSA
  *   saida     retorno      RECUSA
  *   retorno   saida        RECUSA
+ *   ausente em qualquer lado       RECUSA
  *   desconhecido em qualquer lado  RECUSA
  *
- * **"Retorno exige explícito nos dois lados" não é uma regra à parte** —
- * é consequência da igualdade, já que ausência nunca resolve `retorno`.
- * Quem ler procurando por um `if` que exige o valor explícito não vai
- * achar, e não está faltando.
+ * **A matriz ENCOLHEU em 2026-08-25**, e encolher é o ponto: as quatro
+ * linhas que aceitavam ausência sumiram junto com a compatibilidade
+ * histórica, porque o corte para a V1 zera banco e fila local. Sobrou o
+ * caso simétrico — os dois lados dizem a mesma coisa, explicitamente.
+ *
+ * **"Exige explícito nos dois lados" não é uma regra à parte** — é
+ * consequência da igualdade e de ausência não resolver mais nada. Quem
+ * ler procurando por um `if` que exige o valor não vai achar, e não está
+ * faltando.
  *
  * ROLLOUT: `body = saida` com `envelope ausente` é REAL, não hipotético.
  * O envelope é selado na captura e guardado na fila; o corpo é montado
@@ -163,8 +170,34 @@ function resolverTipoDoBody(corpo: Record<string, unknown>): 'saida' | 'retorno'
  */
 function conciliarTipos(
   doBody: 'saida' | 'retorno' | null,
-  doEnvelope: 'saida' | 'retorno' | null
+  doEnvelope: 'saida' | 'retorno' | null,
+  // Só pra DIAGNÓSTICO: distinguir "não veio" de "veio algo estranho".
+  ausente?: { body: boolean; envelope: boolean }
 ): { tipo: 'saida' | 'retorno' } | { motivo: string; erro: string } {
+  // AUSÊNCIA TEM MOTIVO PRÓPRIO, e a distinção paga no go-live.
+  //
+  // Até 25/08 ausência significava `saida`. Agora recusa — mas recusar
+  // com `tipo_desconhecido` faria "cliente com bundle antigo, aba nunca
+  // recarregada" parecer "corpo corrompido ou adulterado", e essas duas
+  // pedem coisas opostas: a primeira é um F5 no terminal, a segunda é
+  // investigar.
+  //
+  // É o caso mais provável do dia da virada, justamente porque zerar o
+  // Supabase não fecha as abas que já estavam abertas.
+  if (ausente && (ausente.body || ausente.envelope)) {
+    const onde = ausente.body && ausente.envelope
+      ? 'no corpo e no envelope'
+      : ausente.body
+        ? 'no corpo'
+        : 'no envelope'
+    return {
+      motivo: 'tipo_ausente',
+      erro:
+        `O tipo do documento não veio ${onde}. Desde a V1 ele é obrigatório ` +
+        'nos dois lados — provavelmente é um cliente antigo que ainda não ' +
+        'recarregou a página.',
+    }
+  }
   if (doBody === null || doEnvelope === null) {
     return {
       motivo: 'tipo_desconhecido',
@@ -278,7 +311,11 @@ Deno.serve(async (req) => {
   // O corpo é em claro e sozinho não vale nada; o envelope o cliente não
   // consegue reabrir nem reescrever. Por isso a decisão é a CONCILIAÇÃO
   // dos dois, e não a leitura de um deles.
-  const conciliado = conciliarTipos(resolverTipoDoBody(corpo), resolverTipoDoRomaneio(segredos))
+  const conciliado = conciliarTipos(
+    resolverTipoDoBody(corpo),
+    resolverTipoDoRomaneio(segredos),
+    { body: corpo.tipo === undefined, envelope: segredos.tipo === undefined }
+  )
   if ('motivo' in conciliado) {
     return responder({ error: conciliado.erro, motivo: conciliado.motivo }, 400)
   }

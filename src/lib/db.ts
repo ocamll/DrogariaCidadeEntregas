@@ -1,36 +1,37 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { NovaEntrega, NovaTransferencia } from '@/data/entregas'
-import type { NovaCorridaComAssinatura, FecharCorridaInput } from '@/data/corridas'
 import type { MarcarDivergenciaInput } from '@/data/pagamentos'
 import type { NotificarFaltaReceitaInput } from '@/data/documentos'
 import type { SaidaOfflineInput, RetornoOfflineInput } from '@/data/romaneios'
 
+// OS SEIS TIPOS DA V1.
+//
+// `corrida` e `fechamento_corrida` saíram em 2026-08-25. Eram os fluxos
+// anteriores ao Romaneio de Saída e ao de Retorno, e desde 16/08 e 21/08
+// nenhuma tela os enfileirava — o que os mantinha vivos era drenar filas
+// antigas no IndexedDB das filiais. O corte para a V1 zera o Supabase e o
+// estado local (v7, abaixo), então não há fila antiga para drenar.
+//
+// Tirá-los DAQUI é o que torna a regra estrutural em vez de combinada:
+// `enfileirarOperacao('fechamento_corrida', …)` deixou de compilar. Uma
+// regra que o compilador cobra não precisa de teste, nem de disciplina,
+// nem de alguém lembrar dela daqui a seis meses.
 export type TipoOperacaoFila =
   | 'entrega'
   | 'transferencia'
-  | 'corrida'
   | 'romaneio_saida'
   | 'romaneio_retorno'
   | 'divergencia'
-  | 'fechamento_corrida'
   | 'falta_receita'
 
 export type PayloadPorTipo = {
   entrega: NovaEntrega
   transferencia: NovaTransferencia
-  // Fluxo antigo de corrida. NADA MAIS PRODUZ ITENS DESTE TIPO desde que
-  // a Nova Corrida virou romaneio — mas o handler continua aqui de
-  // propósito: pode haver item deste tipo parado na fila de alguém, e
-  // remover o tipo faria essa saída (que já aconteceu de verdade)
-  // desaparecer sem sincronizar nunca. Some quando não houver mais
-  // nenhum na base instalada.
-  corrida: NovaCorridaComAssinatura
   romaneio_saida: SaidaOfflineInput
   // Tipo PRÓPRIO, não uma variação da saída — ver RetornoOfflineInput.
   // Nada o enfileira ainda: quem vai é a tela, na 2D.
   romaneio_retorno: RetornoOfflineInput
   divergencia: MarcarDivergenciaInput
-  fechamento_corrida: FecharCorridaInput
   falta_receita: NotificarFaltaReceitaInput
 }
 
@@ -189,76 +190,20 @@ db.version(4).stores({
   credenciaisCache: 'publicId, motoboyId',
 })
 
-/**
- * O backfill da v5, exportado pra ter UMA cópia só.
- *
- * O `romaneio_retorno` da 2C.4 vai declarar `dependeDeChave: corridaId`
- * pra não ultrapassar nem a `romaneio_saida` daquela corrida nem um
- * `fechamento_corrida` legado. A saída já usa `chave: corridaId`; o
- * fechamento **nunca teve `chave` nenhuma**, só `dependeDeChave` — então
- * nada podia depender dele.
- *
- * E não adianta passar a setar daqui pra frente: **nenhum código novo
- * enfileira `fechamento_corrida`.** Os itens que importam são exatamente
- * os que já estão gravados no IndexedDB de alguém, esperando drenar. Por
- * isso é upgrade, e não um valor a mais no `enfileirarOperacao`.
- *
- * O que ele deliberadamente NÃO faz: não reinterpreta outros tipos, não
- * recalcula payload, não mexe em `status`, `tentativas` nem `erro`. Item
- * legado é evidência de estado antigo, não rascunho pra modernizar.
- *
- * **Item malformado é preservado e denunciado, nunca consertado por
- * aproximação.** Um `fechamento_corrida` sem `payload.corridaId` não
- * ganha chave inventada e não é apagado: fica como está, e o
- * `console.warn` diz quais são. Chave inventada faria outro item esperar
- * por uma corrida que não existe — trocaria um item preso por dois.
- */
-export async function backfillChaveDoFechamentoLegado(tabela: {
-  toArray: () => Promise<ItemFilaOperacao[]>
-  update: (id: string, mudancas: Partial<ItemFilaOperacao>) => Promise<number>
-}): Promise<{ corrigidos: number; malformados: string[] }> {
-  const todos = await tabela.toArray()
-  const malformados: string[] = []
-  let corrigidos = 0
-
-  for (const item of todos) {
-    if (item.tipo !== 'fechamento_corrida' || item.chave) continue
-
-    const corridaId = (item.payload as { corridaId?: unknown } | undefined)?.corridaId
-    if (typeof corridaId !== 'string' || corridaId.length === 0) {
-      malformados.push(item.id)
-      continue
-    }
-
-    await tabela.update(item.id, { chave: corridaId } as Partial<ItemFilaOperacao>)
-    corrigidos++
-  }
-
-  if (malformados.length > 0) {
-    console.warn(
-      `[fila offline] ${malformados.length} item(ns) 'fechamento_corrida' sem ` +
-        `payload.corridaId — preservados sem chave, e nada pode depender deles: `,
-      malformados
-    )
-  }
-
-  return { corrigidos, malformados }
-}
-
-// v5 não muda a FORMA da fila — `chave` já era índice desde a v3. Ela
-// existe só pelo backfill acima.
-db.version(5)
-  .stores({
-    filaOperacoes: 'id, status, tipo, userId, chave, proximaTentativaEm',
-    credenciaisCache: 'publicId, motoboyId',
-  })
-  .upgrade(async (tx) => {
-    await backfillChaveDoFechamentoLegado(
-      tx.table('filaOperacoes') as unknown as Parameters<
-        typeof backfillChaveDoFechamentoLegado
-      >[0]
-    )
-  })
+// O BACKFILL DA v5 FOI REMOVIDO EM 2026-08-25.
+//
+// Ele existia pra dar `chave` a itens `fechamento_corrida` já gravados no
+// IndexedDB de alguém — o tipo não existe mais, e a v7 abaixo apaga o
+// conteúdo da fila de qualquer forma. Um upgrade que roda logo antes de
+// um `clear()` é trabalho para ninguém.
+//
+// A VERSÃO 5 CONTINUA DECLARADA, e isso não é sobra: apagar uma versão
+// do meio faz o Dexie de um navegador parado na v4 não achar caminho até
+// a v7. A cadeia é o contrato; o `upgrade` dela é que ficou vazio.
+db.version(5).stores({
+  filaOperacoes: 'id, status, tipo, userId, chave, proximaTentativaEm',
+  credenciaisCache: 'publicId, motoboyId',
+})
 
 // v6 acrescenta só o cache do contexto de retorno. Sem upgrade: tabela
 // nova nasce vazia e é preenchida quando a lista de corridas abertas
@@ -268,5 +213,57 @@ db.version(6).stores({
   credenciaisCache: 'publicId, motoboyId',
   contextosRetorno: 'corridaId, atualizadoEm',
 })
+
+// =====================================================================
+// v7 — O CORTE PRÉ-V1. ELA APAGA DADO LOCAL, DE PROPÓSITO.
+//
+// Todo conteúdo destas três tabelas referencia ids do Supabase:
+//
+//     filaOperacoes     operações apontando pra entregas e corridas
+//     credenciaisCache  cartões, por public_id
+//     contextosRetorno  documentos de saída selados
+//
+// O corte para a V1 zera o banco. Um artefato local que sobrevivesse a
+// isso apontaria para linhas que não existem mais — e o pior caso não é
+// falhar, é **sincronizar**: um item da fila reenviando uma operação
+// contra um banco novo, ou um contexto cacheado montando um DCRR1 sobre
+// uma saída que foi apagada.
+//
+// ---------------------------------------------------------------------
+// ISTO SÓ PODE ESTAR CERTO UMA VEZ, E É AGORA
+//
+// Apagar `filaOperacoes` **descarta operação não sincronizada**. Hoje
+// isso é seguro por três motivos que não se repetem: não existe deploy
+// (o sistema nunca rodou fora de localhost), a fila foi medida vazia em
+// 25/08, e o banco de destino vai ser zerado de qualquer forma.
+//
+// **Se um dia houver produção, uma v8 que faça isto perde trabalho real
+// de gente que estava no balcão.** Uma limpeza de fila depois do go-live
+// tem que ser cirúrgica — por tipo, por idade, por dono —, nunca um
+// `clear()`. Esta versão é o último momento da vida do projeto em que a
+// resposta grosseira é a resposta certa.
+//
+// Não há `.stores()` novo porque a FORMA não mudou: só o conteúdo sai.
+// =====================================================================
+db.version(7)
+  .stores({
+    filaOperacoes: 'id, status, tipo, userId, chave, proximaTentativaEm',
+    credenciaisCache: 'publicId, motoboyId',
+    contextosRetorno: 'corridaId, atualizadoEm',
+  })
+  .upgrade(async (tx) => {
+    const antes = await tx.table('filaOperacoes').count()
+    await tx.table('filaOperacoes').clear()
+    await tx.table('credenciaisCache').clear()
+    await tx.table('contextosRetorno').clear()
+    // Contado e DITO. Um `clear()` silencioso seria indistinguível de
+    // "a fila já estava vazia", e essas duas coisas não podem se
+    // parecer num sistema que passou o projeto inteiro evitando perda
+    // silenciosa.
+    console.warn(
+      `[fila offline] corte pré-V1: ${antes} operação(ões) local(is) descartada(s), ` +
+        'mais os caches de credencial e de contexto. Ver a v7 em lib/db.ts.'
+    )
+  })
 
 export { db }

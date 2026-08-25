@@ -1,12 +1,5 @@
 import { useQuery } from '@tanstack/react-query'
-import { supabase, isDuplicateKeyError } from '@/lib/supabase'
-import { sha256Hex } from '@/lib/hash'
-import { inserirEventoIdempotente } from '@/data/eventos'
-// Mora em `romaneios.ts` porque nasceu com a saída offline, mas o que
-// ele significa é "a fila não deve retentar isto" — vale pra qualquer
-// operação. Importar daqui não cria ciclo: `romaneios.ts` não conhece
-// `corridas.ts`.
-import { ErroTerminalDeSaida } from '@/data/romaneios'
+import { supabase } from '@/lib/supabase'
 
 // Tetos explícitos (nossos, não o `max-rows` do servidor). Dropdown de
 // cadastro é limitado pela realidade; as duas listas operacionais
@@ -121,76 +114,30 @@ export function useEntregasPendentesSemCorrida() {
   })
 }
 
-export type NovaCorridaComAssinatura = {
-  corridaId: string
-  // gerado uma única vez por quem monta o payload (antes de enfileirar) —
-  // assinaturas não tem policy de UPDATE, então o insert abaixo depende de
-  // um id determinístico pra poder tratar reenvio como no-op.
-  assinaturaId: string
-  tenantId: string
-  lojaId: string
-  agenciaId: string | null
-  mototaxistaId: string
-  entregaIds: string[]
-  strokes: unknown
-  criadoPor: string
-  ocorridoEmLocal: string
-}
-
-// Três escritas sequenciais (corrida, depois as entregas em lote, depois a
-// assinatura) — sem transação, então cada uma precisa sobreviver a reenvio
-// da fila offline por conta própria. corridas tem policy de UPDATE (upsert
-// funciona); assinaturas não (insert + trata 23505 como já aplicado). A
-// imutabilidade de valor/cliente/vale só passa a valer DEPOIS que a
-// assinatura existir — o trigger no banco cuida disso sozinho.
-export async function criarCorridaComAssinatura(
-  input: NovaCorridaComAssinatura
-): Promise<{ numeroVales: string[] }> {
-  const { error: corridaError } = await supabase.from('corridas').upsert({
-    id: input.corridaId,
-    tenant_id: input.tenantId,
-    loja_id: input.lojaId,
-    agencia_id: input.agenciaId,
-    mototaxista_id: input.mototaxistaId,
-    status: 'aberta',
-    saida_por: input.criadoPor,
-    // só o relógio do dispositivo — saida_em (relógio do servidor) é
-    // carimbado pela trigger fn_corrida_registrar_saida, que preserva o
-    // valor original se a fila offline reenviar isso depois.
-    saida_em_local: input.ocorridoEmLocal,
-  })
-  if (corridaError) throw corridaError
-
-  const { data: entregasAtualizadas, error: entregasError } = await supabase
-    .from('entregas')
-    .update({ corrida_id: input.corridaId, status_entrega: 'em_rota' })
-    .in('id', input.entregaIds)
-    .select('numero_vale')
-  if (entregasError) throw entregasError
-
-  // hash do JSON canônico da corrida no ato — vincula a assinatura a
-  // exatamente quais vales estavam nela no momento de assinar.
-  const canonico = JSON.stringify({
-    corridaId: input.corridaId,
-    mototaxistaId: input.mototaxistaId,
-    entregaIds: [...input.entregaIds].sort(),
-    assinadoEm: input.ocorridoEmLocal,
-  })
-  const hashSha256 = await sha256Hex(canonico)
-
-  const { error: assinaturaError } = await supabase.from('assinaturas').insert({
-    id: input.assinaturaId,
-    tenant_id: input.tenantId,
-    corrida_id: input.corridaId,
-    strokes: input.strokes,
-    hash_sha256: hashSha256,
-    user_agent: navigator.userAgent,
-  })
-  if (assinaturaError && !isDuplicateKeyError(assinaturaError)) throw assinaturaError
-
-  const rows = entregasAtualizadas as unknown as Array<{ numero_vale: string }>
-  return { numeroVales: rows.map((r) => r.numero_vale) }
-}
+// ---------------------------------------------------------------------
+// O QUE SAIU DAQUI EM 2026-08-25, E POR QUE NÃO VOLTA
+//
+// `NovaCorridaComAssinatura` / `criarCorridaComAssinatura` (o fluxo de
+// corrida anterior ao romaneio) e `FecharCorridaInput` / `fecharCorrida`
+// (o fechamento anterior ao Romaneio de Retorno) foram REMOVIDOS.
+//
+// Eles já não eram chamados por tela nenhuma desde 16/08 e 21/08; o que
+// os mantinha vivos era a promessa de drenar filas antigas no IndexedDB
+// das filiais. Essa promessa deixou de ter objeto: o corte para a V1
+// zera o Supabase E o estado local dos terminais (Dexie v7), então não
+// existe fila antiga para drenar.
+//
+// **O trigger da 2C.2 FICA**, e não pela compatibilidade: depois que um
+// Romaneio de Retorno está selado, nenhum caminho — antigo, novo ou
+// bug futuro — pode reescrever aqueles fatos. Virou invariante de
+// banco, e é barata.
+//
+// Com o handler foi junto o reconhecimento do SQLSTATE `DCRR1` no
+// cliente. Isso é consequência, não perda: sem escritor legado, não há
+// quem receba a recusa. Se algum dia um caminho novo tentar escrever
+// desfecho por fora do documento, o banco recusa e o erro aparece cru —
+// que é o certo, porque aí seria bug, não compatibilidade.
+// ---------------------------------------------------------------------
 
 export type InsucessoMotivo = 'ausente' | 'endereco_errado' | 'recusou' | 'outro'
 
@@ -274,138 +221,3 @@ async function buscarCorridasAbertas(): Promise<CorridaAberta[]> {
 export function useCorridasAbertas() {
   return useQuery({ queryKey: ['corridas-abertas'], queryFn: buscarCorridasAbertas })
 }
-
-export type FecharCorridaInput = {
-  corridaId: string
-  tenantId: string
-  retornoPor: string
-  autorNome: string
-  // relógio do dispositivo, capturado antes de enfileirar — retorno_em
-  // (relógio do servidor) é preenchido pelo trigger fn_corrida_registrar_retorno
-  // no instante em que o UPDATE é de fato aplicado (dois relógios, regra 8).
-  retornoEmLocal: string
-  entregas: Array<{
-    entregaId: string
-    numeroVale: string
-    statusEntrega: 'entregue' | 'insucesso'
-    insucessoMotivo: InsucessoMotivo | null
-    // só quando motivo === 'outro' — reaproveita entregas.observacoes
-    // (coluna já existia, nunca usada em lugar nenhum antes disso).
-    insucessoDetalhe: string | null
-    // gerado no componente, só quando tem detalhe — mesmo padrão de
-    // idempotência dos outros eventos (fecharCorrida passa pela fila
-    // offline, pode reenviar depois de falha parcial).
-    eventoIdempotencyKey: string | null
-  }>
-}
-
-// Uma escrita por entrega (status/motivo variam linha a linha) + uma pra
-// fechar a corrida — mesma ressalva de sempre: sequencial, sem transação.
-/**
- * O SQLSTATE que o trigger da 2C.2 levanta quando um fechamento legado
- * tenta reescrever um desfecho já selado num Romaneio de Retorno.
- *
- * **Medido, não previsto** — na 2C.1 eu previ `02000` para
- * `no_data_found` e o banco devolveu `P0002`. Este aqui foi lido do
- * resultado da conferência da 2C.2.
- */
-const SQLSTATE_DESFECHO_SELADO = 'DCRR1'
-
-// eslint-disable-next-line @typescript-eslint/no-explicit-any
-function ehDesfechoJaSelado(error: any): boolean {
-  return error?.code === SQLSTATE_DESFECHO_SELADO
-}
-
-/**
- * Um id determinístico a partir do que a ocorrência É.
- *
- * Assim, se este caminho for percorrido duas vezes pela mesma corrida
- * (retentativa manual, duas abas), o `select`-antes-de-inserir de
- * `inserirEventoIdempotente` reconhece e não duplica a auditoria.
- */
-async function chaveDoEventoLegado(corridaId: string): Promise<string> {
-  const h = await sha256Hex(`fechamento_legado_obsoleto|${corridaId}`)
-  return [h.slice(0, 8), h.slice(8, 12), h.slice(12, 16), h.slice(16, 20), h.slice(20, 32)].join('-')
-}
-
-export async function fecharCorrida(input: FecharCorridaInput) {
-  for (const entrega of input.entregas) {
-    const { error } = await supabase
-      .from('entregas')
-      .update({
-        status_entrega: entrega.statusEntrega,
-        insucesso_motivo: entrega.insucessoMotivo,
-        // só toca observacoes quando há detalhe de verdade — mandar o
-        // null do caso "entregue" apagaria qualquer observação que a
-        // entrega já tivesse.
-        ...(entrega.insucessoDetalhe ? { observacoes: entrega.insucessoDetalhe } : {}),
-      })
-      .eq('id', entrega.entregaId)
-
-    // A OUTRA METADE DO PROTOCOLO DE COMPATIBILIDADE DA 2C.2.
-    //
-    // O trigger impede a escrita; sozinho, ele deixaria este item da fila
-    // em `erro` e no backoff PARA SEMPRE — o pior sintoma conhecido do
-    // projeto (§50.4), e justamente o que o cabeçalho daquela migration
-    // diz que não pode acontecer.
-    //
-    // `ErroTerminalDeSaida` é o que a fila entende como "não adianta
-    // repetir": o item sai do laço e aparece em "Precisa de atenção". E
-    // isso é honesto — nada se perdeu, o Romaneio de Retorno já registrou
-    // o desfecho, com duas assinaturas.
-    //
-    // A AUDITORIA É GRAVADA AQUI, e não no trigger, e não é preferência:
-    // um `insert into eventos` antes do `raise` seria desfeito pelo
-    // rollback que o próprio `raise` provoca. O evento nunca existiria, e
-    // quem lesse o código concluiria que existe.
-    if (ehDesfechoJaSelado(error)) {
-      await inserirEventoIdempotente({
-        tenantId: input.tenantId,
-        corridaId: input.corridaId,
-        entregaId: entrega.entregaId,
-        tipo: 'fechamento_legado_obsoleto',
-        payload: {
-          motivo: 'desfecho ja selado em romaneio de retorno',
-          autor_nome: input.autorNome,
-          detalhe_do_banco: (error as { message?: string })?.message ?? null,
-        },
-        registradoPor: input.retornoPor,
-        idempotencyKey: await chaveDoEventoLegado(input.corridaId),
-        ocorridoEmLocal: input.retornoEmLocal,
-      })
-      throw new ErroTerminalDeSaida(
-        'O retorno desta corrida já foi registrado num romaneio selado. ' +
-          'Este fechamento antigo não é mais aplicável e foi encerrado.',
-        { motivo: 'fechamento_legado_obsoleto', corridaId: input.corridaId }
-      )
-    }
-    if (error) throw error
-
-    if (entrega.insucessoDetalhe && entrega.eventoIdempotencyKey) {
-      await inserirEventoIdempotente({
-        tenantId: input.tenantId,
-        entregaId: entrega.entregaId,
-        tipo: 'insucesso_detalhado',
-        idempotencyKey: entrega.eventoIdempotencyKey,
-        payload: {
-          numero_vale: entrega.numeroVale,
-          motivo_detalhe: entrega.insucessoDetalhe,
-          autor_nome: input.autorNome,
-        },
-        registradoPor: input.retornoPor,
-        ocorridoEmLocal: input.retornoEmLocal,
-      })
-    }
-  }
-
-  const { error: corridaError } = await supabase
-    .from('corridas')
-    .update({
-      status: 'fechada',
-      retorno_em_local: input.retornoEmLocal,
-      retorno_por: input.retornoPor,
-    })
-    .eq('id', input.corridaId)
-  if (corridaError) throw corridaError
-}
-
