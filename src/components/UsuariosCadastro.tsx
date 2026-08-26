@@ -25,6 +25,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { normalizarNome } from '@/lib/texto'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -157,7 +158,7 @@ function UsuarioFormDialog({
   const salvando = criar.isPending || editar.isPending
 
   function handleSalvar() {
-    const nomeTrim = nome.trim()
+    const nomeTrim = normalizarNome(nome)
     if (!nomeTrim) {
       setErro('Nome é obrigatório.')
       return

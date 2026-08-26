@@ -23,6 +23,7 @@ import {
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { normalizarParagrafo } from '@/lib/texto'
 
 function formatarData(iso: string): string {
   return new Date(iso).toLocaleDateString('pt-BR')
@@ -79,7 +80,7 @@ function NaoVoltouDialog({
   const [erro, setErro] = useState<string | null>(null)
 
   function confirmar() {
-    const texto = justificativa.trim()
+    const texto = normalizarParagrafo(justificativa)
     if (!texto) {
       setErro('Escreve o que aconteceu — é o que a gestão vai ler.')
       return

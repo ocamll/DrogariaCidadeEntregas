@@ -59,6 +59,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { normalizarParagrafo } from '@/lib/texto'
 
 // =====================================================================
 // RETORNO DE CORRIDA — a tela do Romaneio de Retorno (2D)
@@ -501,7 +502,7 @@ function FluxoDeRetorno({
           entregaId: vale.entregaId,
           desfecho: p.desfecho,
           motivo: entregue ? null : p.motivo,
-          detalhe: entregue ? null : p.motivo === 'outro' ? p.detalhe.trim() : null,
+          detalhe: entregue ? null : p.motivo === 'outro' ? normalizarParagrafo(p.detalhe) : null,
           // Pagamento em vale com insucesso é recusado pelo contrato: não
           // houve entrega, não houve pagamento na porta.
           pagamentosRealizados: entregue
@@ -532,7 +533,7 @@ function FluxoDeRetorno({
       if (p.desfecho === 'insucesso' && !p.motivo) {
         return `Vale ${vale.numeroVale}: escolhe o motivo do insucesso.`
       }
-      if (p.desfecho === 'insucesso' && p.motivo === 'outro' && !p.detalhe.trim()) {
+      if (p.desfecho === 'insucesso' && p.motivo === 'outro' && !normalizarParagrafo(p.detalhe)) {
         return `Vale ${vale.numeroVale}: escreve o que aconteceu.`
       }
       if (p.desfecho === 'entregue') {

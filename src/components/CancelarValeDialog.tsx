@@ -14,6 +14,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { EmAndamento } from '@/components/EmAndamento'
+import { normalizarParagrafo } from '@/lib/texto'
 
 export function CancelarValeDialog({
   entregaId,
@@ -35,7 +36,7 @@ export function CancelarValeDialog({
   const cancelar = useCancelarEntrega()
 
   function handleConfirmar() {
-    const motivoTrim = motivo.trim()
+    const motivoTrim = normalizarParagrafo(motivo)
     // Motivo é obrigatório pela regra 4 e pelo CHECK do banco — melhor
     // barrar aqui com mensagem clara que deixar estourar constraint.
     if (!motivoTrim) {

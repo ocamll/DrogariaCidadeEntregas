@@ -21,6 +21,7 @@ import {
 } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { normalizarNome } from '@/lib/texto'
 
 export function MototaxistasCadastro({ profile }: { profile: AuthProfile }) {
   const { data, isLoading, isError, error } = useMototaxistasCadastro()
@@ -154,7 +155,7 @@ function MototaxistaFormDialog({
       {
         id: mototaxista?.id,
         tenantId: profile.tenantId,
-        nome: nome.trim(),
+        nome: normalizarNome(nome),
         agenciaId,
         cpf: cpf.trim() || null,
         telefone: telefone.trim() || null,

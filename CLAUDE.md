@@ -3220,6 +3220,89 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
 - Valores monetários: helpers em `src/lib/money.ts` — `centsFromDigits(digitos)`,
   `formatCentsInput(cents)` (máscara de digitação) e `formatBRL(cents)` (exibição).
   Nenhum outro lugar do código faz conversão.
+- **Texto livre passa por `src/lib/texto.ts`, e só na ENTRADA** (E1,
+  2026-08-25). Quatro funções, uma por natureza de campo:
+
+  | função | campos |
+  |---|---|
+  | `normalizarNome` | cliente, motoboy, agência, convênio, usuário |
+  | `normalizarEndereco` | endereço do cliente |
+  | `normalizarParagrafo` | justificativa, observação, motivo do insucesso |
+  | `normalizarLinha` | o resto de uma linha só |
+
+  **A fronteira é a regra**, e `scripts/fiacao-texto.spec.mts` a prova
+  lendo o fonte, porque "não é chamado em lugar nenhum" é afirmação sobre
+  o código, não sobre execução:
+
+  ```
+  DIGITAÇÃO → normalização → validação → persistência → snapshot
+  ```
+
+  e **nunca** o contrário. `canonico.ts`, `canonicoRetorno.ts`,
+  `congelarRetorno.ts`, `romaneioPdf.ts`, `contextoRetorno.ts` e as telas
+  de exibição **não podem importar daqui**. O canônico tem gêmeo em SQL e
+  sanitiza só TAB/CR/LF; normalizar na leitura mudaria os bytes que as
+  duas partes assinaram.
+
+  Também nunca passa por aqui: **senha, PIN, token de cartão, hash, uuid,
+  username, e-mail técnico** — nada disso é linguagem humana.
+
+  O que ela **não** faz, e não vai fazer: inventar acento. `"joao"`
+  continua `"Joao"`. `Joao`, `Fatima` e `Luis` são grafias legalmente
+  registradas, e adivinhar corromperia nome de documento — no endereço,
+  mandaria o motoboy pra rua errada.
+
+  **A caixa é tímida:** só é ajustada quando o texto está inteiro numa
+  caixa só. `"Maria DE fátima"` e `"João MacArthur"` saem intocados —
+  caixa mista é escolha do autor. É essa timidez que torna aceitável o
+  único falso positivo conhecido do endereço (`"RUA MIX CENTER"` →
+  `"Rua MIX Center"`, pelo validador de numeral romano que existe pra
+  acertar `"Rua XV de Novembro"`).
+- **Busca é o contrato OPOSTO, e mora em outra função** (E1.1). A regra:
+
+  ```
+  persistência preserva o que foi digitado
+  busca é tolerante
+  ```
+
+  `normalizarNome('Joao')` continua `'Joao'` porque mudar o dado seria
+  inventar um nome; `normalizarParaBusca` achata acento e caixa porque
+  ela não altera nada — só decide quais registros correspondem.
+  `casaComBusca(valor, pesquisa)` normaliza **os dois lados**, e existe
+  pra nenhuma tela escrever `.includes()` esquecendo um deles.
+
+  **O resultado da busca NUNCA volta pro campo.** O caso (12) de
+  `texto.spec.mts` existe só pra isso: ele afirma que, sobre a mesma
+  entrada, as duas funções discordam de propósito. Sem ele, alguém daqui
+  a meses pensa "já temos uma função que tira acento" e a usa pra
+  salvar.
+
+  Do lado do BANCO, o gêmeo é `public.sem_acento(text)` mais as colunas
+  geradas `cliente_nome_busca` / `cliente_endereco_busca` — o Histórico
+  filtra por elas, e elas **nunca entram num `select`**, porque a tela
+  mostraria `"joao da silva"` no lugar do nome da pessoa.
+
+  Três coisas dessa migration que não são óbvias:
+
+  - **`unaccent` é STABLE, não IMMUTABLE**, e coluna gerada exige
+    imutável. O invólucro declara `immutable` chamando a forma de dois
+    argumentos com o **dicionário explícito** — é o dicionário explícito
+    que torna a declaração honesta, porque sem ele o resultado
+    dependeria do `search_path` de quem chama.
+  - **Coluna gerada, não trigger.** Ela não pode ser escrita, então não
+    tem como divergir da origem — nem servir de porta dos fundos pra
+    regra 7, já que mudá-la exigiria mudar `cliente_nome`, que a
+    `fn_entrega_imutavel` congela.
+  - **Nenhum índice, de propósito.** A busca é `like '%termo%'`, com
+    curinga à esquerda, e btree não serve pra isso — seria cargo cult
+    com custo de manutenção. O que serviria é `pg_trgm` + GIN, e o SQL
+    está comentado na migration esperando o volume justificar.
+
+  Medido ao aplicar: **16 · 16 · 0** no verificador, ou seja, duas
+  colunas novas em `entregas` não moveram documento assinado nenhum.
+  Isso vale porque canônico e payload leem **colunas explícitas**, nunca
+  `to_jsonb(e)` — se alguém trocar por `to_jsonb`, elas entram no hash
+  sozinhas.
 - **Campo de dinheiro é sempre `<CampoMoeda>`**, nunca `<Input>` cru. O caixa digita
   só dígitos e eles preenchem da direita (centavos primeiro), igual maquininha de
   cartão: `1` `2` `3` `4` `5` → `0,01` → `0,12` → `1,23` → `12,34` → `123,45`. Ele

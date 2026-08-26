@@ -13,6 +13,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { StatusDeGravacao, type Gravacao } from '@/components/StatusDeGravacao'
+import { normalizarNome, normalizarEndereco } from '@/lib/texto'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -106,8 +107,8 @@ function CadastroEntregaForm({
   }
 
   function handleSalvar() {
-    const nomeTrim = nome.trim()
-    const enderecoTrim = endereco.trim()
+    const nomeTrim = normalizarNome(nome)
+    const enderecoTrim = normalizarEndereco(endereco)
     const valorCompraCents = centsFromDigits(valorCompra)
 
     if (!nomeTrim || !enderecoTrim || valorCompraCents <= 0) {

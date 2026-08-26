@@ -19,6 +19,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { normalizarNome } from '@/lib/texto'
 
 export function ConveniosCadastro({ profile }: { profile: AuthProfile }) {
   const { data, isLoading, isError, error } = useConveniosCadastro()
@@ -129,7 +130,7 @@ function ConvenioFormDialog({
       {
         id: convenio?.id,
         tenantId: profile.tenantId,
-        nome: nome.trim(),
+        nome: normalizarNome(nome),
         cnpj: cnpj.trim() || null,
         exigeAssinatura,
         farmaciaPagaEntregaIntegral: pagaEntregaIntegral,

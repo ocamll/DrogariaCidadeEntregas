@@ -24,6 +24,7 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { normalizarParagrafo } from '@/lib/texto'
 
 const FORMA_PADRAO: FormaPagamento = 'dinheiro'
 const MAX_LINHAS = 4
@@ -173,7 +174,7 @@ function DivergenciaPagamentoForm({
         valorCents: centsFromDigits(linha.valor),
       })),
       valorCentsPrevisto: valorCents,
-      justificativa: justificativa.trim(),
+      justificativa: normalizarParagrafo(justificativa),
       registradoPor: profile.id,
       autorNome: profile.nome,
       criarPrevisto: formaEsperadaAtual === null,
@@ -302,7 +303,7 @@ function FaltaReceitaForm({
     const payload: NotificarFaltaReceitaInput = {
       tenantId: profile.tenantId,
       entregaId,
-      justificativa: justificativa.trim(),
+      justificativa: normalizarParagrafo(justificativa),
       registradoPor: profile.id,
       autorNome: profile.nome,
       eventoIdempotencyKey: uuidv7(),

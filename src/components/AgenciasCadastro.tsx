@@ -20,6 +20,7 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { normalizarNome } from '@/lib/texto'
 
 export function AgenciasCadastro({ profile }: { profile: AuthProfile }) {
   const { data, isLoading, isError, error } = useAgenciasCadastro()
@@ -147,7 +148,7 @@ function AgenciaFormDialog({
       {
         id: agencia?.id,
         tenantId: profile.tenantId,
-        nome: nome.trim(),
+        nome: normalizarNome(nome),
         cnpj: cnpj.trim() || null,
         contato: contato.trim() || null,
         cidadeId,

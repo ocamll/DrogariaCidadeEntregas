@@ -4,6 +4,7 @@ import { supabase } from '@/lib/supabase'
 import { criarPagamentoPrevisto, type FormaPagamento } from '@/data/pagamentos'
 import { inserirEventoIdempotente } from '@/data/eventos'
 import { centsFromDigits } from '@/lib/money'
+import { normalizarParaBusca } from '@/lib/texto'
 
 /**
  * As formas que geram PAPEL FÍSICO — o que sai com o motoboy e tem que
@@ -418,10 +419,33 @@ async function buscarHistoricoEntregas(
     .order('id', { ascending: false })
     .range(de, de + TAMANHO_PAGINA_HISTORICO - 1)
 
+  // `numero_vale` continua no `ilike` cru: "V-000046" não tem acento
+  // nem caixa pra ignorar, e uma coluna de busca pra ele seria peso sem
+  // ganho.
   if (filtros.numeroVale.trim()) query = query.ilike('numero_vale', `%${filtros.numeroVale.trim()}%`)
-  if (filtros.clienteNome.trim()) query = query.ilike('cliente_nome', `%${filtros.clienteNome.trim()}%`)
-  if (filtros.clienteEndereco.trim())
-    query = query.ilike('cliente_endereco', `%${filtros.clienteEndereco.trim()}%`)
+
+  // NOME E ENDEREÇO VÃO PELA COLUNA DERIVADA (E1.1, migration
+  // 20260825130000), e os DOIS LADOS são normalizados.
+  //
+  // `ilike` ignora caixa e NÃO ignora acento — então, até 2026-08-25,
+  // procurar "joao" aqui não achava "João da Silva", e o resultado vazio
+  // era indistinguível de "não existe cadastro".
+  //
+  // Normalizar só um dos lados reintroduz o mesmo defeito com outra
+  // cara: a coluna já perdeu o acento, então um termo cru com acento
+  // ("João") não casaria com "joao". É por isso que `casaComBusca`
+  // existe no front — aqui a mesma regra é escrita à mão porque o filtro
+  // é do PostgREST.
+  //
+  // `like`, e não `ilike`: a coluna já é minúscula por construção, e
+  // `normalizarParaBusca` também baixa a caixa do termo. Um `ilike`
+  // aqui seria trabalho repetido por precaução contra o que não pode
+  // acontecer.
+  const nomeBusca = normalizarParaBusca(filtros.clienteNome)
+  if (nomeBusca) query = query.like('cliente_nome_busca', `%${nomeBusca}%`)
+
+  const enderecoBusca = normalizarParaBusca(filtros.clienteEndereco)
+  if (enderecoBusca) query = query.like('cliente_endereco_busca', `%${enderecoBusca}%`)
   if (filtros.valorCompra) query = query.eq('valor_compra_cents', centsFromDigits(filtros.valorCompra))
   if (filtros.lojaId) query = query.eq('loja_id', filtros.lojaId)
   // intervalo — "De" sozinho é "a partir de", "Até" sozinho é "até", os dois

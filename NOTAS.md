@@ -97,16 +97,28 @@ estado local dos terminais. A compatibilidade de desenvolvimento foi
 REMOVIDA, o trigger de integridade FICOU, e o roteiro do corte está em
 `scripts/corte-pre-v1.sql` (nada dele foi executado).
 
+**E DESDE 2026-08-25 CORRE OUTRA FRENTE.** Com a cadeia de custódia
+fechada, o usuário abriu uma frente de **produto e UX** de nove itens,
+que roda ANTES do corte pré-V1. Ela não reabre 2A–2D — respeita as
+invariantes já construídas.
+
+```
+E1   normalização de texto livre     ✓  itens 84 e 85
+E1.1 busca sem acento                ✓  migration aplicada
+E2   estados visuais de consulta     ←  próximo
+E3..E9  pagamento, login, router, divergência, agência, endereço
+```
+
 **O que ainda NÃO existe, e é fácil supor errado:** não há deploy — nem
 conta na Cloudflare, nem projeto do Pages, nem site no ar. Isso não é
 configuração pendente, é infra inteira, e os passos 5 e 6 do roteiro do
 corte dependem dela.
 
 **Se você está retomando, comece por "PRÓXIMA SESSÃO", perto do fim deste
-arquivo.** É lá que está o trabalho combinado. Logo abaixo dela, "Estado
-em 2026-08-20" traz onde a frente parou e o que já foi aplicado no
-Supabase. **O trabalho vive na `main`** — a `cadeia-de-custodia` já foi
-mergeada e está para trás.
+arquivo.** É lá que está o trabalho combinado — hoje o **E2**, com as
+decisões já fechadas (React Router entra na stack; username usa
+identificador técnico interno) e os cinco achados da auditoria que
+mudaram a ordem das etapas. **O trabalho vive na `main`.**
 
 ## 1. Fila offline nas outras 4 escritas
 
@@ -6287,6 +6299,219 @@ tele por cidade, é `cidades → lojas → agencias → mototaxistas →`
 atenda — cadastradas e inoperantes, o mesmo modo de falha da agência sem
 cidade.
 
+## 84. E1 — normalização de texto livre, e os três achados que ela custou
+
+Primeira etapa da frente de produto pré-V1. O pedido era "espaços
+duplicados, capitalização quando fizer sentido, consistência visual" —
+e parecia cosmético. Não era.
+
+### Os três casos difíceis, medidos ANTES do código
+
+```
+1.  regex s pega NBSP (U+00A0)   -> true
+    regex s pega ZWSP (U+200B)   -> FALSE
+    "Jose" + ZWSP === "Jose"      -> false
+
+2.  "José" pré-composto === "José" decomposto  -> false
+    depois de NFC                              -> true
+
+3.  title-case ingênuo: "rua xv de novembro" -> "Rua Xv De Novembro"
+```
+
+O (1) é o que justifica a etapa inteira: colar um nome do WhatsApp pode
+trazer um caractere de largura zero e criar **dois clientes visualmente
+idênticos** no banco — que nenhuma busca casa e que ninguém enxerga na
+tela. Isso não é embelezar texto; é impedir que o banco acumule valores
+iguais aos olhos e diferentes em bytes ANTES de eles entrarem em
+snapshot, busca e relatório.
+
+### A fronteira, que é a regra mais importante
+
+```
+DIGITAÇÃO → normalização → validação → persistência → snapshot
+```
+
+e **nunca** dado salvo/assinado → normalização posterior.
+
+O canônico tem gêmeo em SQL e sanitiza só TAB/CR/LF; uma normalização
+que só existe em TypeScript faria os dois lados divergirem em silêncio.
+E renormalizar um snapshot mudaria os bytes que as duas partes
+assinaram.
+
+**Isso é afirmação sobre o CÓDIGO, não sobre execução** — por isso
+`fiacao-texto.spec.mts` LÊ O FONTE, no mesmo método do
+`despacho-sync-romaneio.spec.mts`. Onze arquivos afirmados como
+proibidos, nove telas de entrada afirmadas como ligadas, e a lista de
+entrada é EXPLÍCITA em vez de um glob: tela nova tem que aparecer ali
+pra alguém decidir qual função ela usa.
+
+### A decisão que o uso real INVERTEU
+
+O E1 nasceu sem caixa no endereço, por causa do caso (3). O usuário
+testou e reportou a inconsistência: com o nome sendo corrigido e o
+endereço não, a tela fica visivelmente errada.
+
+A saída não foi desistir da guarda — foi torná-la ESTRITA. Medido:
+
+```
+xv ix xxi iii vi xx   ->  romano       (o que queremos)
+mil vil civil id      ->  não romano   (a regra frouxa erraria)
+di li mi mix          ->  romano       <- falso positivo
+```
+
+Dos falsos positivos, `di` é o único que aparece de verdade em
+endereço ("Rua Di Cavalcanti") — e já está em `PARTICULAS`, consultada
+ANTES. Os outros exigiriam uma rua "Li", "Mi" ou "Mix" digitada inteira
+em caixa única. E a timidez faz o resto: **a caixa só dispara em caixa
+única**, então quem digita com as maiúsculas certas nunca é tocado.
+
+### Dois defeitos que só a tela achou
+
+- **Romano com pontuação colada.** `"rua dom pedro ii, 300"` — o token é
+  `"ii,"`, e o teste de romano falhava. Saía "Rua Dom Pedro Ii": o
+  MESMO erro que a guarda existe pra impedir, uma vírgula mais adiante.
+- **Espaço antes de vírgula.** `"av. brasil , 90"` sobrevivia ao colapso —
+  o espaço é UM só, e está no lugar errado.
+
+### O que NÃO faz, e não vai fazer: inventar acento
+
+O usuário reportou `"joao" -> "Joao"` como erro. Medi antes de responder,
+porque acento sendo REMOVIDO seria grave:
+
+```
+"joão da silva"  ->  "João da Silva"   preservado
+"CONCEIÇÃO"      ->  "Conceição"       preservado
+"joao da silva"  ->  "Joao da Silva"   NÃO inventado
+```
+
+Nada remove acento. O que ele viu foi o terceiro caso — e é a regra que
+ele mesmo pediu ("não corrigir conteúdo semanticamente"). `Joao`,
+`Fatima` e `Luis` são grafias legalmente registradas; adivinhar
+corromperia nome de documento e, no endereço, mandaria o motoboy pra
+rua errada.
+
+### O gate, e o que cada número prova
+
+```
+biblioteca            43 asserções, isoladas
+fiação                26 asserções, lendo o fonte
+cadeia de custódia    11 specs verdes (os dois canônicos inclusos)
+custo medido          51,77 us por vale = 0,0002 % de 25 s
+handlers de evento    nenhum tocado (diff de 3 linhas no cadastro)
+REGRESSÃO OPERACIONAL 10,23 s
+```
+
+**O 10,23 s é UMA repetição, "correndo"** — ou seja, o MELHOR caso, não
+a mediana de cinco que o protocolo pedia. Fica registrado assim de
+propósito. O que sustenta o fechamento não é a amostra, é a margem:
+2,4× o alvo, contra um baseline documentado de 15–18 s em uso normal
+(§9). Para a mediana estourar 25 s, ela teria que ser 2,4× pior que o
+melhor caso.
+
+**E a comparação com os 15–18 s não é limpa**: não se sabe se o mesmo
+nome e endereço foram digitados. Ela serve pra dizer "não regrediu",
+não pra dizer "ficou mais rápido".
+
+Os três sinais de UX conferidos na mesma passada: Enter volta ao
+primeiro campo, a tela libera na hora, e nenhum campo muda
+visualmente durante a digitação — esperado, porque a normalização
+acontece no SUBMIT, não em `onChange` nem em `blur`.
+
+**E1 FECHADO.**
+
+## 85. E1.1 — busca sem acento, o contrato oposto ao do E1
+
+Extensão do E1, decidida quando o usuário apontou o caso que a
+biblioteca de entrada deliberadamente não resolve:
+
+```
+BANCO       "João da Silva"
+EXIBIÇÃO    "João da Silva"
+BUSCA       "joao"  ->  acha as quatro grafias
+```
+
+A regra que separa os dois: **persistência preserva o que foi
+digitado; busca é tolerante.** O E1 não inventa acento porque isso
+alteraria o dado; o filtro pode ignorá-lo porque não altera nada — só
+decide quais registros correspondem.
+
+### O achado que mudou o escopo
+
+A parte de front era o pedido. Auditando, achei que **o defeito já
+estava no app**: o Histórico filtra `cliente_nome` com `ilike`, que
+ignora CAIXA e não ignora ACENTO. Procurar "joao" ali não achava "João
+da Silva" — e resultado vazio é indistinguível de "não existe
+cadastro", a pior forma de errar numa busca.
+
+Como a lista é paginada no servidor, **nenhuma função de front alcança
+aquele resultado**. Daí a migration.
+
+### Três decisões da migration que não são óbvias
+
+**1. A mentira controlada do `immutable`.** `unaccent()` é STABLE — depende
+de um dicionário — e coluna gerada exige IMMUTABLE. O invólucro
+declara `immutable` chamando a forma de DOIS argumentos, com o
+dicionário EXPLÍCITO. É o dicionário explícito que torna a declaração
+honesta: sem ele o resultado dependeria do `search_path` de quem chama,
+e aí `immutable` seria falso de verdade.
+
+**2. Coluna gerada, não trigger.** Ela não pode ser escrita, então não
+tem como divergir da origem. E não é porta dos fundos pra regra 7:
+mudá-la exigiria mudar `cliente_nome`, que a trigger já congela.
+
+**3. NENHUM índice, de propósito.** A tentação era
+`create index on entregas (cliente_nome_busca)`. Seria **cargo cult**:
+a busca é `like '%termo%'`, com curinga à esquerda, e btree não serve —
+o planejador o ignora e faz seq scan igual, só que agora com um índice
+pra manter a cada INSERT. O que serviria é `pg_trgm` + GIN, e o SQL
+ficou COMENTADO esperando o volume justificar. A hora de saber é
+medindo o `explain analyze` da consulta real.
+
+### A verificação que importava
+
+Antes de escrever, conferi no fonte que `romaneio_canonico` e
+`romaneio_payload` leem COLUNAS EXPLÍCITAS, nunca `to_jsonb(e)`. Depois
+de aplicar, o usuário mediu:
+
+```
+sem_acento('João da Silva') === sem_acento('Joao da Silva')   ok
+51 entregas · 0 divergentes                                    ok
+verificar_romaneios_selados()   16 · 16 · 0                    ok
+```
+
+**O terceiro é o que prova a decisão inteira:** duas colunas novas em
+`entregas` e nenhum documento assinado se moveu. Se algum dia alguém
+trocar aquele `select` explícito por `to_jsonb(e)`, as colunas de busca
+entram no hash sozinhas — o aviso ficou na migration, que é onde
+alguém procuraria.
+
+### A trava contra o erro futuro previsível
+
+O caso (12) do `texto.spec.mts` afirma que, sobre a MESMA entrada, as
+duas funções discordam de propósito:
+
+```
+normalizarNome('Joao')       -> 'Joao'   não inventa
+normalizarParaBusca('Joao')  -> 'joao'   achata
+
+gravar a saída da busca DESTRUIRIA o nome
+```
+
+Ele existe porque daqui a alguns meses alguém vai pensar "já temos uma
+função que tira acento" e usá-la pra salvar. E `Luis` ≠ `Luiz` tem caso
+próprio: busca fonética inventa equivalência, e um cadastro que aparece
+porque "soa parecido" é pior que um que não aparece.
+
+No front, `casaComBusca` normaliza OS DOIS LADOS e existe pra nenhuma
+tela escrever `.includes()` esquecendo um deles — normalizar só a
+pesquisa faz "joao" não achar "João", com o mesmo sintoma de sempre.
+
+E o spec da fiação ganhou uma trava nova: **a chave derivada nunca
+entra num `select`**. Sem ela, alguém acabaria exibindo, e a tela
+mostraria "joao da silva" no lugar do nome da pessoa.
+
+**E1.1 FECHADO.** 62 asserções na biblioteca, 30 na fiação.
+
 ## Commits desta sessão
 
 
@@ -6603,201 +6828,123 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: o COMPONENTE da 2D.3
+### PRÓXIMA SESSÃO: o E2 da frente de produto
 
-> **Esta é a seção atual.** As de baixo ("2B.6 e depois a 2C", "etapa
-> 2B") são históricas: descrevem como "próximo" coisas que já foram
-> feitas.
+> **Esta é a seção atual.** As de baixo são históricas: descrevem como
+> "próximo" coisas que já foram feitas.
 
-**Onde a frente está, em 2026-08-20:**
+**A cadeia de custódia (2A–2D) está FECHADA e não deve ser reaberta sem
+necessidade.** O que corre agora é uma frente de produto/UX de nove
+itens, decidida em 2026-08-25, que roda ANTES do corte pré-V1.
 
-```
-2A   ✓   canônico, golden vectors, verificador
-2B   ✓   selar_romaneio_retorno + bloco `d` + verificador do retorno
-2C   ✓   as OITO sub-etapas, todas aplicadas e medidas
-2D.1 ✓   desenho da tela (CLAUDE.md, seção "A 2D")
-2D.2 ✓   contexto do retorno: migration + cache Dexie v6 + conferido
-2D.3 ├─ servidor        ✓  invariante do pagamento, provada
-     ├─ congelamento    ✓  src/lib/congelarRetorno.ts, 19 casos
-     ├─ máquina         ✓  src/lib/custodiaDoRetorno.ts, 5066 transições
-     ├─ porta online    ✓  selarRomaneioRetorno (faltava no cliente)
-     ├─ proteção local  ✓  corrida com retorno pendente não é oferecida
-     ├─ política pós-   ✓  regra 4: falha_selo_online
-     │  falha online
-     └─ COMPONENTE      ✓  escrito em 2026-08-21
-2D.4                     ✓  as duas portas, dentro do componente
-2D.5   online            ✓  R-000023 e R-000025, em 2026-08-25
-       offline           ✓  R-000026, no mesmo dia
-2D.6                     ←  AQUI. As regressões históricas
-```
-
-**O placar saiu de `retorno 0 · 0 · 0` e hoje diz:**
+#### Onde a frente de produto está
 
 ```
-saida    13 · 13 · 0    52 camadas
-retorno   3 ·  3 · 0    15 camadas — online (2) e offline (1)
+E1   normalização central          ✓  itens 84 e 85
+E1.1 busca sem acento              ✓  migration aplicada, 16·16·0
+E2   estados visuais de consulta   <-  AQUI
+E3   id próprio do pagamento previsto
+E4   duas formas de pagamento no cadastro
+E5   login por username
+E6   React Router + /notificacoes e /auditoria
+E7   divergência/regularização de valores
+E8   portal da agência (RLS antes da tela)
+E9   endereço estruturado
 ```
 
-**A máquina MUDOU em 2026-08-21, e o item 79 é leitura obrigatória antes
-do JSX.** A primeira integração achou uma impossibilidade no contrato da
-2D.1: o envelope não é construível no passo do PIN, porque o
-`offlineEventHash` que vai dentro dele amarra os dois traços. Hoje:
+**A auditoria das nove frentes está na conversa, não num arquivo** — o
+que sobreviveu dela em forma durável são as decisões abaixo e os cinco
+achados que mudaram o plano.
+
+#### As decisões já fechadas, que não se rediscutem
+
+- **React Router ENTRA na stack** (decisão explícita do usuário,
+  2026-08-25). O `useState<View>` do `Painel` passou do tamanho em que
+  compensa. A migração é GRADUAL: o E6 instala e move o shell, e as
+  telas existentes viram rota aos poucos.
+- **Login por username usa a arquitetura A**: o username mapeia pra um
+  identificador técnico interno do Supabase Auth, invisível ao usuário.
+  Sem RPC pública que enumere usernames, sem autenticação caseira.
+  `auth.uid` continua sendo a identidade; o username é credencial
+  humana e PODE MUDAR, então nunca entra em hash nem em auditoria.
+  **Username é globalmente único na V1** — antes de autenticar não há
+  tenant pra desempatar.
+- **E9 não pode obrigar DCR2.** A trava: campos estruturados de entrada
+  → composição determinística → `cliente_endereco` → snapshot. O DCR1
+  continua assinando `cliente_endereco`; as colunas novas entram na
+  trigger de imutabilidade mas NÃO no canônico. Só se isso se mostrar
+  impossível é que se discute DCR2.
+
+#### Os cinco achados da auditoria que mudam o plano
+
+1. **E4 está bloqueado por colisão de chave primária.**
+   `criarPagamentoPrevisto` usa `id: entregaId` ("relação é 1:1"). Duas
+   formas previstas colidem na PK e a segunda não entra. É migration de
+   comportamento, não ajuste de UI — daí o E3 vir antes do E4.
+2. **E9 toca o DCR1 e a trigger.** `cliente_endereco` está no canônico
+   assinado (`canonico.ts:96`) e na lista congelada
+   (`schema_inicial.sql:344`). Colunas novas precisam entrar na trigger,
+   senão viram porta dos fundos.
+3. **E8 é a frente maior.** `profiles.papel` aceita `'agencia'` desde o
+   schema inicial e existem ZERO policies pra ele. É RLS nova em ~8
+   tabelas, e RLS vem antes da tela.
+4. **E2 não tem padrão central hoje** — a Nova Corrida tem 13 usos de
+   `ocupado`/`pinConferido` construídos à mão. É de lá que sai o
+   vocabulário.
+5. **E7 precisa de tabela nova** (regularizações append-only), e o
+   projeto exige SQL aprovado antes.
+
+#### O contrato do E2, que é o próximo a escrever
 
 ```
-evento offline      SEGREDOS_CAPTURADOS   (não `PIN_SELADO`)
-estado offline      segredos_capturados   (não `custodia_autorizada`)
-PIN e token         em ref efêmera do componente, NUNCA no estado
-permissão pra isso  podeGuardarSegredos(estado) — derivada, não lembrada
-online              PIN sai da memória ao autenticar; SEM envelope
-CONCLUIR            tipo discriminado: envelope só no ramo offline
-selo online falhou  falha_selo_online — preserva documento, descarta
-por rede            autorização e as DUAS assinaturas. Nunca "tentar
-                    novamente" com as antigas.
+idle -> loading -> success | not_found/invalid | error
 ```
 
-**Nenhuma migration pendente.** A última, `20260825120000`, foi aplicada
-em 2026-08-25 e conferida NA TELA — sem ela o retorno não abria
-(`permission denied for function romaneio_documentos_esperados`, 42501).
-Ver o item 80, que é também onde está a lição: as conferências anteriores
-rodaram no SQL Editor, como `postgres`, que ignora grant.
+A regra do usuário: **não mostrar "não encontrado" enquanto a query
+ainda está carregando**, e o operador nunca deve clicar de novo por não
+saber se o sistema consultou ou travou. Sem migration, e sem tocar o
+caminho rápido do caixa.
 
-**O que já rodou com dado real, logado:** a tela abre, o contexto vem do
-snapshot da saída, o congelamento funciona (e recunha os ids a cada
-tentativa — medido), o cache offline aquece (7 contextos, `CTXR1`), e o
-teste de transporte do item 66 passou pela primeira vez
-(`TRANSPORTE PRESERVA — 9 cenários`).
+Ele é pré-requisito do E5: o "verificando usuário…" do login novo é
+exatamente esse componente.
 
-**O que falta é do cartão pra frente:** bipar, PIN, as duas assinaturas e
-o selo. Isso é a 2D.5, e exige o cartão físico.
-
-Pro caminho OFFLINE existe
-`scripts/conferir-retorno-offline-no-console.js` — **três blocos que
-cercam o trecho manual**: (1) pré-condições e ficar offline, (2) com a
-fila ainda parada, o que foi ASSINADO, (3) depois de religar, o que o
-servidor SELOU. Pré-condições conferidas aqui em 2026-08-25: envelope
-disponível, 7 contextos `CTXR1` em cache, fila vazia.
-
-O bloco 2 é o que nenhuma tela responde — ele reconstrói o canônico a
-partir do jsonb CONGELADO e exige o mesmo `documentHash` que as duas
-partes assinaram, mais: nenhum `pin`/`credentialToken` em claro no item,
-`responsavelStrokes` e nunca `caixaStrokes`, `dependeDeChave` sem
-`chave`, e nenhum `pagamento_id` igual ao `entrega_id`. O bloco 3 checa
-o `modo = offline_sincronizada`, que é a única coisa que distingue esta
-via de um selo online.
-
----
-
-#### O que a próxima sessão vai fazer
-
-`RetornoCorrida.tsx` deixa de enfileirar `fechamento_corrida` e passa a:
+#### O que fica DEPOIS de toda a frente
 
 ```
-useContextoRetorno(corridaId)     ← fatos antigos, do documento assinado
-      ↓
-preenchimento (desfecho, pagamento realizado, documentos)
-      ↓
-congelarRetorno(...)              ← ids novos, guard de colisão, hash
-      ↓
-reduzirCustodia(...)              ← cartão, PIN, duas assinaturas
-      ↓
-online → selar_romaneio_retorno   |  offline → fila `romaneio_retorno`
+corte pré-V1        scripts/corte-pre-v1.sql (nada executado)
+Dexie v7            escrita, não executada
+regressão pós-corte
+deploy/infra        não existe conta na Cloudflare
 ```
 
-Tudo que está antes e depois já existe e está medido. **A sessão é de
-montar a tela sobre peças prontas**, não de decidir contrato.
-
-#### LEIA ANTES DE ESCREVER O PRIMEIRO COMPONENTE
-
-1. **CLAUDE.md, seção "A 2D"** — inteira. A regra do CONGELAMENTO é a
-   invariante de UI mais importante da etapa, e é ela que impede a tela
-   de assinar um documento e mandar outro.
-2. **A armadilha do `pagamento_id`** (CLAUDE.md, dentro de "A 2D"):
-   pré-preencher o realizado com o previsto COPIA forma, valor e troco,
-   **nunca o `pagamentoId`**. O id do previsto é o uuid da entrega, e
-   copiá-lo faz o documento selar afirmando um pagamento que não existe.
-   As duas camadas já barram isso; a tela não deve chegar lá.
-3. **Os três módulos de `lib/`**, que já carregam as regras:
-   `congelarRetorno.ts`, `custodiaDoRetorno.ts`, `corridasBloqueadas.ts`.
-
-#### As invariantes de UI que a máquina já garante
-
-Não precisam ser reimplementadas no componente — ele só precisa **não
-contorná-las**:
-
-- a máquina começa em `documento_congelado` e não monta nem altera fato;
-- editar, cancelar, trocar motoboy ou a autorização expirar recolhem
-  autorização, envelope e **as duas assinaturas**, com motivo dito;
-- offline nunca diz "autenticado" — `credencial.validadaPeloServidor`
-  fica `false`, e a tela lê esse campo;
-- o CTA trava em `selando`/`enfileirando`;
-- `conflito` é terminal, não erro retryable: mostra o número do romaneio
-  e para.
-
-#### O que continua NÃO provado, e só a 2D fecha
-
-```
-DCRR1 online real        ✗  o verificador do retorno segue em 0 · 0 · 0
-DCRR1 offline real       ✗  depende da tela coletar cartão e PIN
-saída offline LEGADA     ~  formato provado (2C.6), sincronização não
-fechamento legado × DCRR1 ~ trigger provado; o handler do cliente
-                            NUNCA EXECUTOU — precisa de um DCRR1 real
-```
-
-A 2D.5 é quem move o placar de `retorno 0 · 0 · 0` para `1 · 1 · 0`, e é
-a primeira vez que as cinco camadas do verificador do retorno rodam
-contra um retorno de verdade.
-
-#### Uma coisa que vai assustar, e não é problema — MEDIDA em 2026-08-25
-
-As conferências da 2C e da 2D **queimaram vários números de romaneio**
-(cada bloco que exercita recusa insere e faz rollback, e a sequência não
-volta atrás). Até 20/08 a aritmética ingênua ainda fechava, porque
-nenhuma linha tinha nascido depois das queimas:
-
-```
-11 selados + 3 conflitos = 14 = maior R- existente     ← fechava
-```
-
-**Ela quebrou no primeiro selo real seguinte**, exatamente como previsto.
-O censo de 2026-08-25, depois de o `R-000022` nascer de uma corrida de
-teste:
-
-```
-15 linhas   →  selado 12 · conflito 3   (R-000002, 04, 09)
-tipo        →  saida × 15   ← nenhum retorno, nem em conflito
-maior       →  R-000022
-buracos     →  R-000015 … R-000021   (7 números queimados)
-
-12 + 3 = 15  ≠  22
-```
-
-**Isso não é documento perdido**, e a forma robusta de dizer isso é a do
-item 69 — ela não depende da sequência, só de nenhuma linha estar em
-limbo:
-
-```sql
-select count(*) = count(*) filter (where status in ('selado','conflito'))
-  from public.romaneios;
-```
-
-Hoje: `15 = 15`, verdadeiro.
-
-**O placar de integridade, no mesmo dia: `12 · 12 · 0`**, quatro camadas
-cada. Ele subiu de 11 pra 12 por causa do `R-000022` e de mais nada — as
-onze que verificavam continuam verificando. E `porTipo: saida × 15` é a
-outra metade da leitura: **o caminho do retorno nunca executou**, nem
-para produzir um conflito.
+E o **bloco 4** do corte (sementes) está fechado pra São Gabriel — oito
+lojas a R$ 9,00 e a agência Gabrielense —, esperando só **os convênios**
+(informação de dentro) e a criação do primeiro admin no Auth.
 
 #### Credencial e ambiente
 
 - Node em `C:\Program Files\nodejs`, **fora do PATH**. Prefixe
   `export PATH="/c/Program Files/nodejs:$PATH"`.
-- Os specs que valem rodar antes de mexer em qualquer coisa desta frente:
-  `custodia-do-retorno`, `congelar-retorno`, `canonico-retorno`,
-  `dcrr1-vetores`, `envelope`, `offline-hash`, `despacho-sync-romaneio`,
-  `dependencia-da-fila`, `corridas-bloqueadas`.
-- A Edge Function `sync-romaneio` está publicada na versão da **2C.6**
-  (despacho por tipo), confirmada contra a função no ar em 13 casos.
+- Os specs desta frente: `texto`, `fiacao-texto`. Os da cadeia de
+  custódia continuam sendo o gate de regressão: `canonico`,
+  `canonico-retorno`, `dcrr1-vetores`, `congelar-retorno`,
+  `custodia-do-retorno`, `envelope`, `offline-hash`,
+  `despacho-sync-romaneio`, `dependencia-da-fila`,
+  `corridas-bloqueadas`, `romaneio-pdf`.
+- **O verificador é o gate de tudo que toca `entregas` ou `romaneios`:**
+
+```
+select count(*) as verificados,
+       count(*) filter (where divergencias = 0) as validos,
+       coalesce(sum(divergencias), 0) as divergencias
+  from public.verificar_romaneios_selados();
+```
+
+  Hoje: **16 · 16 · 0** (13 saídas + 3 retornos). Rode como ADMIN,
+  senão a RLS devolve baseline parcial sem avisar.
+- **O que eu NÃO consigo fazer daqui:** entrar no app (não digito
+  senha) e rodar SQL. Conferência no banco e cronômetro no balcão são
+  clique do usuário.
 
 ### (histórico) A retomada de antes da 2C
 
