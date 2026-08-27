@@ -28,16 +28,32 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { Consulta, AvisoDaConsulta } from '@/components/Consulta'
+import { apresentar, derivarEstado } from '@/lib/estadoDeConsulta'
 
 // eslint-disable-next-line @typescript-eslint/no-unused-vars
 export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfile }) {
-  const { data: motoboys, isLoading, isError, error } = useMototaxistasCadastro()
-  const { data: agencias } = useAgenciasCadastro()
-  // O erro desta query precisa aparecer na tela, e não é zelo: sem isso,
-  // uma falha (permissão, tabela fora do ar) renderiza "Sem cartão" em
-  // todas as linhas — idêntico a "ninguém tem cartão". Numa tela de
-  // segurança, os dois estados não podem se parecer.
-  const { data: credenciais, isError: credenciaisComErro, error: erroCredenciais } = useCredenciais()
+  // TRÊS CONSULTAS, TRÊS ESTADOS. Numa tela de segurança isso pesa mais
+  // que nas outras: cada uma responde a uma pergunta diferente, e a
+  // ignorância de qualquer uma delas não pode virar afirmação sobre as
+  // outras duas.
+  const consultaMotoboys = useMototaxistasCadastro()
+  const consultaAgencias = useAgenciasCadastro()
+  // O não-responder DESTA precisa aparecer na tela, e não é zelo: sem
+  // isso, uma falha (permissão, tabela fora do ar, ou simplesmente sem
+  // rede) renderiza "Sem cartão" em todas as linhas — idêntico a
+  // "ninguém tem cartão". Os dois estados não podem se parecer.
+  //
+  // O comentário original dizia isso só do ERRO. O caso pausado tem
+  // exatamente a mesma consequência e não estava coberto.
+  const consultaCredenciais = useCredenciais()
+
+  const estadoMotoboys = derivarEstado(consultaMotoboys)
+  const estadoAgencias = derivarEstado(consultaAgencias)
+  const estadoCredenciais = derivarEstado(consultaCredenciais)
+
+  const agencias = estadoAgencias.estado === 'ready' ? estadoAgencias.dados : undefined
+  const credenciais = estadoCredenciais.estado === 'ready' ? estadoCredenciais.dados : undefined
 
   const emitir = useEmitirCredencial()
   const revogar = useRevogarCredencial()
@@ -53,12 +69,17 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
   >(null)
 
   const credencialDe = (motoboyId: string) => credenciais?.find((c) => c.motoboyId === motoboyId)
-  const nomeAgencia = (agenciaId: string | null) =>
-    agencias?.find((a) => a.id === agenciaId)?.nome ?? '—'
 
-  // Só motoboy ativo: emitir cartão pra quem está desativado seria
-  // imprimir papel que o próprio banco recusa (emitir_credencial barra).
-  const ativos = motoboys?.filter((m) => m.ativo) ?? []
+  // "Não tem agência" e "não sei qual é" eram os dois o mesmo `—`.
+  const nomeAgencia = (agenciaId: string | null) => {
+    if (agenciaId === null) return '—'
+    if (!agencias) return '…'
+    return agencias.find((a) => a.id === agenciaId)?.nome ?? '—'
+  }
+
+  // A lista de credenciais respondeu? Só com isso "Sem cartão" é uma
+  // afirmação, e não um chute.
+  const sabeDasCredenciais = estadoCredenciais.estado === 'ready'
 
   // A agência entra aqui porque ela aparece IMPRESSA na credencial. Vem
   // do cadastro do motoboy, resolvida no mesmo lugar que a coluna da
@@ -75,21 +96,39 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
         primeiro uso do cartão — ninguém aqui escolhe nem consegue ver.
       </p>
 
-      {isLoading && <Carregando />}
-      {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
-      {credenciaisComErro && (
-        <p className="text-sm text-destructive">
-          Não consegui ler as credenciais: {(erroCredenciais as Error).message} — a coluna “Cartão”
-          abaixo não está confiável até isso resolver.
-        </p>
-      )}
-      {!isLoading && !isError && ativos.length === 0 && (
-        <p className="text-sm text-muted-foreground">
-          Nenhum motoboy ativo. Cadastra um em Mototaxistas primeiro.
-        </p>
+      {/* A COLUNA "CARTÃO" DEPENDE DE OUTRA CONSULTA, e quando ela não
+          responde a tela avisa — antes isso só acontecia no erro, e o
+          caso pausado (offline) passava calado dizendo "Sem cartão". */}
+      {!sabeDasCredenciais && estadoCredenciais.estado !== 'inactive' && (
+        <div className="flex flex-col gap-1">
+          <AvisoDaConsulta
+            apresentacao={apresentar(estadoCredenciais)}
+            aoRecarregar={() => void consultaCredenciais.refetch()}
+          />
+          <p className="text-xs text-foreground/70">
+            A coluna “Cartão” abaixo não está confiável até isso resolver.
+          </p>
+        </div>
       )}
 
-      {ativos.length > 0 && (
+      <Consulta
+        estado={estadoMotoboys}
+        // Só motoboy ativo: emitir cartão pra quem está desativado seria
+        // imprimir papel que o próprio banco recusa (emitir_credencial
+        // barra). O filtro entrou no `estaVazio` junto com a lista, pra
+        // "nenhum ativo" continuar sendo uma afirmação sobre o que o
+        // servidor respondeu.
+        estaVazio={(ms) => ms.filter((m) => m.ativo).length === 0}
+        vazio={
+          <p className="text-sm text-muted-foreground">
+            Nenhum motoboy ativo. Cadastra um em Mototaxistas primeiro.
+          </p>
+        }
+        aoRecarregar={() => void consultaMotoboys.refetch()}
+      >
+        {(motoboys) => {
+          const ativos = motoboys.filter((m) => m.ativo)
+          return (
         <Table>
           <TableHeader>
             <TableRow>
@@ -119,8 +158,15 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
                       <span className="font-mono text-xs">
                         ••••{credencial.publicId.slice(-4)}
                       </span>
-                    ) : (
+                    ) : sabeDasCredenciais ? (
                       <span className="text-sm text-muted-foreground">Sem cartão</span>
+                    ) : (
+                      // A consulta das credenciais não respondeu. "Sem
+                      // cartão" aqui seria a tela concluindo, a partir da
+                      // própria ignorância, que o motoboy não tem
+                      // credencial — numa tela onde isso decide se alguém
+                      // vai imprimir um cartão que já existe.
+                      <span className="text-sm text-muted-foreground">…</span>
                     )}
                   </TableCell>
 
@@ -201,7 +247,9 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
             })}
           </TableBody>
         </Table>
-      )}
+          )
+        }}
+      </Consulta>
 
       {emitir.isError && (
         <p className="text-sm text-destructive">

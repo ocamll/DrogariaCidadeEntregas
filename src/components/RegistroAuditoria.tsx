@@ -15,7 +15,8 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Carregando } from '@/components/EmAndamento'
+import { Consulta } from '@/components/Consulta'
+import { derivarEstado } from '@/lib/estadoDeConsulta'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -38,10 +39,20 @@ export function RegistroAuditoria({ profile }: { profile: AuthProfile }) {
   // página pra quem nunca abre o registro.
   const [aberto, setAberto] = useState(false)
 
-  const { data, isLoading, isError, error } = useEventosAuditoria(filtro, aberto)
+  const consulta = useEventosAuditoria(filtro, aberto)
+  const estado = derivarEstado(consulta)
   const { data: lojas } = useLojas()
 
-  const eventos = (data ?? []).filter((e) => !lojaId || e.lojaId === lojaId)
+  // O filtro de filial é CLIENT-SIDE, sobre o período já carregado — e
+  // por isso ele só pode rodar depois de haver o que filtrar. Antes era
+  // `(data ?? []).filter(...)`, e o `?? []` produzia "nenhum evento" a
+  // partir de uma consulta que nunca respondeu.
+  //
+  // Numa tela de AUDITORIA isso é o pior tipo de mentira: "nenhum evento
+  // no período" é exatamente a conclusão que alguém usaria pra afirmar
+  // que nada aconteceu.
+  const filtrarPorLoja = (todos: NonNullable<typeof consulta.data>) =>
+    todos.filter((e) => !lojaId || e.lojaId === lojaId)
 
   function aplicarHoje() {
     const h = localDateStr(new Date())
@@ -127,12 +138,15 @@ export function RegistroAuditoria({ profile }: { profile: AuthProfile }) {
           )}
         </div>
 
-        {isLoading && <Carregando />}
-        {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
-        {!isLoading && !isError && eventos.length === 0 && (
-          <p className="text-sm text-muted-foreground">Nenhum evento no período.</p>
-        )}
-        {!isLoading && !isError && eventos.length > 0 && (
+        <Consulta
+          estado={estado}
+          estaVazio={(todos) => filtrarPorLoja(todos).length === 0}
+          vazio={<p className="text-sm text-muted-foreground">Nenhum evento no período.</p>}
+          aoRecarregar={() => void consulta.refetch()}
+        >
+          {(todos) => {
+            const eventos = filtrarPorLoja(todos)
+            return (
           <div className="max-h-[60vh] overflow-y-auto">
             <Table>
               <TableHeader>
@@ -175,7 +189,9 @@ export function RegistroAuditoria({ profile }: { profile: AuthProfile }) {
               </TableBody>
             </Table>
           </div>
-        )}
+            )
+          }}
+        </Consulta>
       </DialogContent>
     </Dialog>
   )

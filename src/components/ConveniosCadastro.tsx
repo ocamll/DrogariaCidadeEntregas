@@ -18,11 +18,16 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { EmAndamento } from '@/components/EmAndamento'
+import { Consulta } from '@/components/Consulta'
+import { derivarEstado } from '@/lib/estadoDeConsulta'
 import { normalizarNome } from '@/lib/texto'
 
 export function ConveniosCadastro({ profile }: { profile: AuthProfile }) {
-  const { data, isLoading, isError, error } = useConveniosCadastro()
+  // Mesmo grupo "acidental" da AgenciasCadastro: escapava por sintaxe,
+  // não por decisão, e o que fazia de verdade era ficar em branco.
+  const consulta = useConveniosCadastro()
+  const estado = derivarEstado(consulta)
   const [editando, setEditando] = useState<ConvenioCadastro | null>(null)
   const [dialogAberto, setDialogAberto] = useState(false)
   const alternarAtivo = useAlternarAtivoConvenio()
@@ -43,12 +48,12 @@ export function ConveniosCadastro({ profile }: { profile: AuthProfile }) {
         <Button onClick={abrirNovo}>Novo convênio</Button>
       </div>
 
-      {isLoading && <Carregando />}
-      {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
-      {!isLoading && !isError && data?.length === 0 && (
-        <p className="text-sm text-muted-foreground">Nenhum convênio cadastrado ainda.</p>
-      )}
-      {!isLoading && !isError && data && data.length > 0 && (
+      <Consulta
+        estado={estado}
+        vazio={<p className="text-sm text-muted-foreground">Nenhum convênio cadastrado ainda.</p>}
+        aoRecarregar={() => void consulta.refetch()}
+      >
+        {(convenios) => (
         <Table>
           <TableHeader>
             <TableRow>
@@ -60,7 +65,7 @@ export function ConveniosCadastro({ profile }: { profile: AuthProfile }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.map((convenio) => (
+            {convenios.map((convenio) => (
               <TableRow key={convenio.id}>
                 <TableCell>{convenio.nome}</TableCell>
                 <TableCell>{convenio.cnpj ?? '—'}</TableCell>
@@ -85,7 +90,8 @@ export function ConveniosCadastro({ profile }: { profile: AuthProfile }) {
             ))}
           </TableBody>
         </Table>
-      )}
+        )}
+      </Consulta>
 
       <ConvenioFormDialog
         key={editando?.id ?? 'novo'}

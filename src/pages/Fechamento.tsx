@@ -22,7 +22,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { EmAndamento } from '@/components/EmAndamento'
+import { Consulta } from '@/components/Consulta'
+import { derivarEstado } from '@/lib/estadoDeConsulta'
 
 const SELECT_CLASSNAME =
   'h-9 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -37,7 +39,11 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
   const [lojaId, setLojaId] = useState(profile.papel === 'admin' ? '' : (profile.lojaId ?? ''))
   const [aviso, setAviso] = useState<string | null>(null)
 
-  const { data: fechamento, isLoading, isError, error } = useFechamento({ data, lojaId })
+  // Estava no grupo "mudo": não mentia, mas com a consulta pausada a
+  // tela ficava EM BRANCO, sem uma palavra. O caixa às 20h com a gaveta
+  // aberta não tem como distinguir isso de "o dia não teve nada".
+  const consulta = useFechamento({ data, lojaId })
+  const estado = derivarEstado(consulta)
   const { data: lojas } = useLojas()
   const conferir = useMarcarDiaConferido()
 
@@ -109,10 +115,8 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
         vindo do Trier. O que esta tela responde é <strong>o que, da tele, explica uma diferença</strong>.
       </p>
 
-      {isLoading && <Carregando />}
-      {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
-
-      {fechamento && (
+      <Consulta estado={estado} aoRecarregar={() => void consulta.refetch()}>
+        {(fechamento) => (
         <>
           {fechamento.truncado && (
             <p className="text-sm text-destructive">
@@ -246,7 +250,8 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
             </CardContent>
           </Card>
         </>
-      )}
+        )}
+      </Consulta>
 
       {/* Fora do `fechamento &&` de propósito: a sangria não depende dos
           vales terem carregado. Se a consulta do fechamento falhar, ainda

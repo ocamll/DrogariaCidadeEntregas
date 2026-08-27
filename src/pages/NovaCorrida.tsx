@@ -32,6 +32,7 @@ import {
   useFilaOperacoesPendentes,
 } from '@/data/filaOffline'
 import type { EntradaCanonica, ValeCanonico } from '@/lib/canonico'
+import { mensagemDeErro } from '@/lib/supabase'
 import { uuidv7 } from '@/lib/uuid'
 import { formatBRL } from '@/lib/money'
 import { Button } from '@/components/ui/button'
@@ -40,6 +41,16 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Badge } from '@/components/ui/badge'
 import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { Consulta, AvisoDaConsulta } from '@/components/Consulta'
+import {
+  apresentar,
+  derivarEstado,
+  aceito,
+  recusado,
+  type ConsultaComVeredito,
+  type Veredito,
+  type Procedencia,
+} from '@/lib/estadoDeConsulta'
 import { CampoAssinatura } from '@/components/CampoAssinatura'
 
 export function NovaCorrida({ profile, onVoltar }: { profile: AuthProfile; onVoltar: () => void }) {
@@ -72,6 +83,58 @@ type Resultado =
   | { kind: 'conflito'; numero: string | null; detalhe: unknown }
   | { kind: 'erro'; texto: string }
 
+// ---------------------------------------------------------------------
+// AS DUAS CONSULTAS DESTA TELA — e só elas.
+//
+// `bipar cartão` e `conferir PIN` perguntam algo e recebem uma resposta.
+// `criar PIN` e `confirmar saída` ESCREVEM, e continuam com `ocupado`:
+// transformar `EstadoDeConsulta` num estado genérico de qualquer async
+// só pra zerar ocorrências de `ocupado` apagaria a distinção que ele
+// existe pra marcar.
+//
+// Elas não vêm de `useQuery` — são imperativas, com `try/finally`. O
+// vocabulário é o mesmo; o que muda é quem o produz. `derivarEstado` é
+// UM produtor (o do TanStack), não o único.
+// ---------------------------------------------------------------------
+
+/**
+ * Por que um cartão foi recusado. Todos são RESPOSTA — o sistema sabe e
+ * está dizendo. O que NÃO está aqui é "não consegui perguntar", que é
+ * `unavailable`, e "a tentativa falhou", que é `error`.
+ */
+type MotivoDoCartao =
+  /** Nem chegou a consultar: não tem a cara de um cartão nosso. */
+  | 'formato_invalido'
+  /** O servidor respondeu: esse token não existe. */
+  | 'nao_reconhecida'
+  /** Existe, mas está bloqueada por tentativas de PIN. */
+  | 'bloqueada'
+  /** Existe, mas é de uma agência que não atende esta filial. */
+  | 'fora_de_escopo'
+
+/** Idem para o PIN. `error` continua sendo outra coisa — ver o handler. */
+type MotivoDoPin = 'pin_incorreto' | 'bloqueado' | 'nao_autenticado'
+
+type EstadoDoCartao = ConsultaComVeredito<Credencial, MotivoDoCartao>
+type EstadoDoPin = ConsultaComVeredito<true, MotivoDoPin>
+
+/**
+ * Embrulha um veredito em `ready`. Existe porque o veredito de domínio
+ * só é alcançável DENTRO de uma resposta — e escrever isso à mão em cada
+ * ramo convidaria alguém a criar um `recusado` solto.
+ *
+ * A `procedencia` fica honesta mesmo sem ser exibida hoje: o cartão
+ * resolvido pelo cache offline não veio do servidor, e o dia em que
+ * alguém quiser mostrar isso vai encontrar o dado certo em vez de um
+ * `'servidor'` que nunca foi verdade.
+ */
+function prontoCom<T, M extends string>(
+  veredito: Veredito<T, M>,
+  procedencia: Procedencia = 'servidor'
+): ConsultaComVeredito<T, M> {
+  return { estado: 'ready', dados: veredito, procedencia }
+}
+
 function NovaCorridaFluxo({
   profile,
   lojaId,
@@ -81,7 +144,9 @@ function NovaCorridaFluxo({
   lojaId: string
   onVoltar: () => void
 }) {
-  const { data: vales, isLoading, isError } = useValesParaSaida(lojaId)
+  const consultaVales = useValesParaSaida(lojaId)
+  const estadoVales = derivarEstado(consultaVales)
+  const vales = estadoVales.estado === 'ready' ? estadoVales.dados : undefined
   const cidadeId = useCidadeDaLoja(lojaId)
   const { data: agenciasDaCidade } = useAgenciasDaCidade(cidadeId)
   const pendentesDaFila = useFilaOperacoesPendentes()
@@ -89,7 +154,16 @@ function NovaCorridaFluxo({
 
   const [selecionadas, setSelecionadas] = useState<Set<string>>(new Set())
   const [token, setToken] = useState('')
-  const [credencial, setCredencial] = useState<Credencial | null>(null)
+
+  // A credencial deixou de ser estado próprio: ela é o que a consulta do
+  // cartão devolveu quando ACEITOU. Assim não há como existir credencial
+  // sem que tenha havido resposta — o que antes dependia de os dois
+  // `setState` andarem sempre juntos.
+  const [estadoCartao, setEstadoCartao] = useState<EstadoDoCartao>({ estado: 'inactive' })
+  const credencial =
+    estadoCartao.estado === 'ready' && estadoCartao.dados.veredito === 'aceito'
+      ? estadoCartao.dados.valor
+      : null
   // Só pra EXIBIÇÃO. Quem decide o caminho (handleConfirmar, criar PIN,
   // conferir identidade) continua lendo `navigator.onLine` na hora da
   // ação — entre o render e o clique a rede pode ter mudado, e ali o que
@@ -107,10 +181,42 @@ function NovaCorridaFluxo({
   // errado depois de colher as duas assinaturas. Pra quem está no balcão
   // isso é indistinguível de "qualquer PIN é aceito", e com razão.
   //
-  //   null      → ainda não conferido
-  //   'ok'      → servidor confirmou a identidade
-  //   'offline' → sem rede; vai ser conferido só na sincronização
-  const [pinConferido, setPinConferido] = useState<null | 'ok' | 'offline'>(null)
+  // ISTO ERA `null | 'ok' | 'offline'`, E OS TRÊS ESTAVAM MISTURADOS.
+  // O `null` significava ao mesmo tempo "ainda não perguntei", "o
+  // servidor recusou" e "a rede caiu no meio" — as três terminavam em
+  // `setPinConferido(null)` + uma string vermelha, então a tela voltava
+  // a oferecer "Confirmar identidade" nos três casos. Certo pro PIN
+  // errado; errado pro timeout, onde o operador não errou nada e
+  // repetir nem chega a contar no bloqueio progressivo.
+  const [estadoPin, setEstadoPin] = useState<EstadoDoPin>({ estado: 'inactive' })
+
+  // O RAMO OFFLINE É CUSTÓDIA, NÃO CONSULTA — e por isso mora fora do
+  // vocabulário acima. Sem rede ninguém RESPONDE nada sobre este PIN:
+  // ele é capturado, vai selado no envelope e é conferido na
+  // sincronização. Chamar isso de `ready` seria inventar uma resposta;
+  // de `unavailable`, seria dizer que o fluxo não pode seguir — e ele
+  // pode, é justamente o caminho que o projeto passou dias provando.
+  const [pinCapturadoOffline, setPinCapturadoOffline] = useState(false)
+
+  const pinConfirmado = estadoPin.estado === 'ready' && estadoPin.dados.veredito === 'aceito'
+  /**
+   * As assinaturas liberam por DOIS caminhos, e eles não se confundem:
+   * o servidor confirmou (online) ou o PIN foi capturado pra validação
+   * posterior (offline). A tela diz qual foi, com todas as letras — o
+   * que ela não pode é tratar os dois como a mesma afirmação.
+   */
+  const custodiaPronta = pinConfirmado || pinCapturadoOffline
+
+  /** Recolhe TUDO que dependia da identidade. Trocar de cartão, mexer nos
+   *  vales ou limpar a tela passam por aqui — nunca por um `setState`
+   *  solto que esqueça um dos três. */
+  function recolherCustodia() {
+    setEstadoCartao({ estado: 'inactive' })
+    setEstadoPin({ estado: 'inactive' })
+    setPinCapturadoOffline(false)
+    setToken('')
+    setPin('')
+  }
   const [erro, setErro] = useState<string | null>(null)
   const [ocupado, setOcupado] = useState<string | null>(null)
   const [resultado, setResultado] = useState<Resultado | null>(null)
@@ -174,10 +280,7 @@ function NovaCorridaFluxo({
     // Mexer nos vales muda o document_hash, e com ele qualquer autorização
     // já emitida deixa de valer. Limpar aqui evita a tela dizer "confirmado"
     // sobre um documento que não é mais o mesmo.
-    setCredencial(null)
-    setToken('')
-    setPin('')
-    setPinConferido(null)
+    recolherCustodia()
   }
 
   function montarEntrada(): EntradaCanonica {
@@ -194,12 +297,16 @@ function NovaCorridaFluxo({
   async function handleBipar(valor: string) {
     setErro(null)
     const limpo = valor.trim()
+
+    // RECUSA, e não erro: nós SABEMOS que isto não é um cartão nosso —
+    // a regra é local e não precisou perguntar a ninguém. Uma resposta
+    // autoritativa negativa continua sendo uma resposta.
     if (!publicIdDoToken(limpo)) {
-      setErro('Isso não parece um cartão do sistema. Bipa de novo.')
+      setEstadoCartao(prontoCom(recusado('formato_invalido', 'Isso não parece um cartão do sistema. Bipa de novo.')))
       return
     }
     setToken(limpo)
-    setOcupado('bipando')
+    setEstadoCartao({ estado: 'loading' })
 
     try {
       let achada: Credencial | null = null
@@ -216,56 +323,72 @@ function NovaCorridaFluxo({
             verificada: true,
           }
           if (online.bloqueadoAte && new Date(online.bloqueadoAte) > new Date()) {
-            setErro(
-              `Credencial bloqueada até ${new Date(online.bloqueadoAte).toLocaleTimeString('pt-BR')} por tentativas de PIN.`
+            setEstadoCartao(
+              prontoCom(
+                recusado(
+                  'bloqueada',
+                  `Credencial bloqueada até ${new Date(online.bloqueadoAte).toLocaleTimeString('pt-BR')} por tentativas de PIN.`
+                )
+              )
             )
-            setOcupado(null)
             return
           }
         }
+        if (!achada) {
+          // O servidor respondeu, e a resposta é "não existe".
+          setEstadoCartao(prontoCom(recusado('nao_reconhecida', 'Credencial não reconhecida.')))
+          setToken('')
+          return
+        }
       } else {
         const local = await identificarNoCache(limpo)
-        if (local) {
-          achada = {
-            motoboyId: local.motoboyId,
-            motoboyNome: local.motoboyNome,
-            agenciaId: local.agenciaId,
-            agenciaNome: local.agenciaNome,
-            temPin: local.temPin,
-            verificada: false,
-          }
+        if (!local) {
+          // NÃO É RECUSA. Offline, o cache local é a única fonte, e ele
+          // não saber deste cartão não significa que ele não exista —
+          // significa que não há a quem perguntar. Dizer "credencial não
+          // reconhecida" aqui seria acusar um cartão possivelmente
+          // válido a partir da própria ignorância.
+          setEstadoCartao({ estado: 'unavailable' })
+          setToken('')
+          return
         }
-      }
-
-      if (!achada) {
-        setErro(
-          navigator.onLine
-            ? 'Credencial não reconhecida.'
-            : 'Cartão desconhecido neste computador. Sem internet, só dá pra reconhecer cartões que já apareceram aqui antes.'
-        )
-        setToken('')
-        setOcupado(null)
-        return
+        achada = {
+          motoboyId: local.motoboyId,
+          motoboyNome: local.motoboyNome,
+          agenciaId: local.agenciaId,
+          agenciaNome: local.agenciaNome,
+          temPin: local.temPin,
+          // INFORMADA, não reconhecida — o cache resolveu o nome, o HMAC
+          // não foi conferido por ninguém. A tela diz qual das duas é.
+          verificada: false,
+        }
       }
 
       // Uma agência de outra cidade não atende esta filial. É a mesma
       // regra do dropdown antigo, agora aplicada ao que o cartão trouxe.
       const permitida = agenciasDaCidade?.some((a) => a.id === achada.agenciaId)
       if (agenciasDaCidade && !permitida) {
-        setErro(
-          `${achada.motoboyNome} é de ${achada.agenciaNome ?? 'uma agência sem cidade'}, que não atende esta filial.`
+        setEstadoCartao(
+          prontoCom(
+            recusado(
+              'fora_de_escopo',
+              `${achada.motoboyNome} é de ${achada.agenciaNome ?? 'uma agência sem cidade'}, que não atende esta filial.`
+            )
+          )
         )
         setToken('')
-        setOcupado(null)
         return
       }
 
-      setCredencial(achada)
+      setEstadoCartao(
+        prontoCom(aceito(achada), achada.verificada ? 'servidor' : 'cache_sem_rede')
+      )
     } catch (e) {
-      setErro(e instanceof Error ? e.message : String(e))
+      // A TENTATIVA FALHOU — e isso não é uma afirmação sobre o cartão.
+      // Antes caía no mesmo `setErro` das recusas, com a mesma cor, e o
+      // caixa concluía que o cartão do motoboy tinha problema.
+      setEstadoCartao({ estado: 'error', erro: e })
       setToken('')
-    } finally {
-      setOcupado(null)
     }
   }
 
@@ -281,15 +404,23 @@ function NovaCorridaFluxo({
     setOcupado('pin')
     try {
       await definirPin(token, pin)
-      setCredencial((c) => (c ? { ...c, temPin: true } : c))
+      // A credencial agora tem PIN. Ela vive DENTRO do veredito da
+      // consulta do cartão, então a atualização entra lá — sem sair de
+      // `ready`, porque a resposta sobre o cartão continua valendo.
+      setEstadoCartao((atual) =>
+        atual.estado === 'ready' && atual.dados.veredito === 'aceito'
+          ? prontoCom(aceito({ ...atual.dados.valor, temPin: true }), atual.procedencia)
+          : atual
+      )
       setPinConfirmacao('')
       // Zera o campo e NÃO marca como conferido: acabou de criar, mas
       // ainda tem que digitar de novo e passar pelo servidor — é o que
       // prova que quem digitou lembra do que escolheu.
       setPin('')
-      setPinConferido(null)
+      setEstadoPin({ estado: 'inactive' })
+      setPinCapturadoOffline(false)
     } catch (e) {
-      setErro(e instanceof Error ? e.message : String(e))
+      setErro(mensagemDeErro(e))
     } finally {
       setOcupado(null)
     }
@@ -308,29 +439,46 @@ function NovaCorridaFluxo({
     const problema = pinAceitavel(pin)
     if (problema) return setErro(problema)
 
+    // O RAMO OFFLINE PREVISTO. Não passa pelo vocabulário de consulta —
+    // ninguém respondeu, e ninguém vai responder agora. O PIN é
+    // CAPTURADO e validado na sincronização.
     if (!navigator.onLine) {
-      setPinConferido('offline')
+      setPinCapturadoOffline(true)
+      setEstadoPin({ estado: 'inactive' })
       return
     }
 
-    setOcupado('conferindo')
+    setEstadoPin({ estado: 'loading' })
     try {
       const r = await autenticarCredencial(token, pin)
       if (r.ok) {
-        setPinConferido('ok')
+        setEstadoPin(prontoCom(aceito(true as const)))
         return
       }
-      setPinConferido(null)
-      setErro(
-        r.motivo === 'bloqueado' && r.bloqueadoAte
-          ? `${MOTIVO_FALHA_PIN_LABEL.bloqueado} Libera às ${new Date(r.bloqueadoAte).toLocaleTimeString('pt-BR')}.`
-          : MOTIVO_FALHA_PIN_LABEL[r.motivo]
+      // RECUSA: o servidor conferiu e disse não. Aqui repetir faz
+      // sentido, e cada tentativa conta no bloqueio progressivo.
+      setEstadoPin(
+        prontoCom(
+          recusado(
+            r.motivo === 'bloqueado' ? 'bloqueado' : r.motivo === 'pin_incorreto' ? 'pin_incorreto' : 'nao_autenticado',
+            r.motivo === 'bloqueado' && r.bloqueadoAte
+              ? `${MOTIVO_FALHA_PIN_LABEL.bloqueado} Libera às ${new Date(r.bloqueadoAte).toLocaleTimeString('pt-BR')}.`
+              : MOTIVO_FALHA_PIN_LABEL[r.motivo]
+          )
+        )
       )
     } catch (e) {
-      setPinConferido(null)
-      setErro(e instanceof Error ? e.message : String(e))
-    } finally {
-      setOcupado(null)
+      // ERRO, E ISTO É O CONSERTO DE COMPORTAMENTO DO LOTE C.
+      //
+      // Antes este `catch` e a recusa acima terminavam os dois em
+      // `setPinConferido(null)` + string vermelha: a tela voltava ao
+      // início e reoferecia "Confirmar identidade" nos dois casos, sem
+      // dizer qual tinha sido. O caixa relia o PIN no papel do motoboy
+      // procurando um erro que podia não existir.
+      //
+      // Falha de rede NÃO é PIN errado, e a tela não pode sugerir que o
+      // operador errou.
+      setEstadoPin({ estado: 'error', erro: e })
     }
   }
 
@@ -343,7 +491,7 @@ function NovaCorridaFluxo({
     // Redundante com `podeConfirmar` (o botão já estaria desabilitado),
     // e fica de propósito: é a última barreira antes de gastar as
     // assinaturas, e formato válido nunca substituiu identidade.
-    if (pinConferido === null) return setErro('Confirma a identidade do motoboy antes.')
+    if (!custodiaPronta) return setErro('Confirma a identidade do motoboy antes.')
     if (!caixaPad.current || caixaPad.current.isEmpty()) return setErro('Falta a sua assinatura.')
     if (!motoboyPad.current || motoboyPad.current.isEmpty()) {
       return setErro('Falta a assinatura do motoboy.')
@@ -503,7 +651,7 @@ function NovaCorridaFluxo({
       setResultado({ kind: 'offline' })
       limpar()
     } catch (e) {
-      setResultado({ kind: 'erro', texto: e instanceof Error ? e.message : String(e) })
+      setResultado({ kind: 'erro', texto: mensagemDeErro(e) })
     } finally {
       setOcupado(null)
     }
@@ -511,21 +659,22 @@ function NovaCorridaFluxo({
 
   function limpar() {
     setSelecionadas(new Set())
-    setToken('')
-    setCredencial(null)
-    setPin('')
     setPinConfirmacao('')
-    setPinConferido(null)
+    recolherCustodia()
     caixaPad.current?.clear()
     motoboyPad.current?.clear()
   }
 
-  // `pinConferido` e não `pinAceitavel(pin)`: formato bem escrito não é
-  // identidade confirmada. Offline o valor é 'offline', que também
-  // libera — mas aí a tela diz, com todas as letras, que a verificação
-  // ficou pra sincronização.
+  // `custodiaPronta` e não `pinAceitavel(pin)`: formato bem escrito não é
+  // identidade confirmada. O caminho offline também libera — mas aí a
+  // tela diz, com todas as letras, que a verificação ficou pra
+  // sincronização.
+  //
+  // E repare no que NÃO libera: `unavailable` e `error`. Uma consulta
+  // que não respondeu nunca vira autorização — se virasse, a tela
+  // estaria trocando "não consegui conferir" por "conferi".
   const podeConfirmar =
-    escolhidos.length > 0 && credencial !== null && credencial.temPin && pinConferido !== null
+    escolhidos.length > 0 && credencial !== null && credencial.temPin && custodiaPronta
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -541,43 +690,59 @@ function NovaCorridaFluxo({
         </CardHeader>
         <CardContent className="flex flex-col gap-6">
           <Secao numero={1} titulo="Vales">
-            {isLoading && <Carregando />}
-            {!isLoading && disponiveis.length === 0 && (
-              // "Nenhum vale pendente" é uma AFIRMAÇÃO sobre o estoque de
-              // vales, e sem lista carregada ela é mentira. Sem rede e sem
-              // dado, o certo é dizer que não deu pra saber.
-              <p className="text-sm text-muted-foreground">
-                {vales === undefined || isError
-                  ? online
-                    ? 'Não consegui carregar os vales. Tenta de novo em instantes.'
-                    : 'Sem internet e sem a lista carregada — a lista de vales vem do servidor e não fica salva neste computador. Abra esta tela com internet antes de precisar dela offline.'
-                  : 'Nenhum vale pendente pra sair agora.'}
-              </p>
-            )}
+            {/* ESTA TELA JÁ TRATAVA O CASO À MÃO, e certo — foi ela que
+                pagou o §50.2. O que ela tinha era a REGRA duplicada: o
+                mesmo raciocínio de "não carregou ≠ não há", escrito aqui
+                e agora escrito no derivador. Duas cópias, e a próxima
+                correção precisaria ser feita nas duas por quem lembrasse
+                das duas.
+
+                O `estaVazio` é próprio porque "nenhum vale disponível"
+                aqui não é `vales.length === 0`: um vale que já está numa
+                operação da fila some da lista sem a consulta ter mudado. */}
+            <Consulta
+              estado={estadoVales}
+              estaVazio={(todos) => todos.filter((v) => !jaNaFila.has(v.entregaId)).length === 0}
+              vazio={
+                <p className="text-sm text-muted-foreground">
+                  Nenhum vale pendente pra sair agora.
+                </p>
+              }
+              aoRecarregar={() => void consultaVales.refetch()}
+            >
+              {(todos) => {
+                const lista = todos.filter((v) => !jaNaFila.has(v.entregaId))
+                return (
+                  <div className="flex max-h-64 flex-col gap-1 overflow-y-auto rounded-lg border p-2">
+                    {lista.map((vale) => (
+                      <label key={vale.entregaId} className="flex items-center gap-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={selecionadas.has(vale.entregaId)}
+                          onChange={() => toggle(vale.entregaId)}
+                        />
+                        <span>
+                          <strong>{vale.numeroVale}</strong> — {vale.clienteNome} (
+                          {vale.clienteEndereco})
+                          {vale.quantidadeVales > 1 && ` · ${vale.quantidadeVales} vales`}
+                        </span>
+                      </label>
+                    ))}
+                  </div>
+                )
+              }}
+            </Consulta>
+
+            {/* Fora do `<Consulta>`: isto não fala da consulta, fala da
+                FILA local — e continua verdadeiro mesmo sem resposta do
+                servidor. Vale criado offline não tem `numero_vale`, que é
+                gerado pelo banco e entra no documento assinado. */}
             {criadosNaFila > 0 && (
               <p className="text-xs text-amber-700 dark:text-amber-400">
                 {criadosNaFila} vale(s) lançado(s) sem internet ainda não aparecem aqui. O número do
                 vale é gerado pelo servidor e faz parte do documento assinado, então eles só podem
                 sair depois de sincronizar.
               </p>
-            )}
-            {disponiveis.length > 0 && (
-              <div className="flex max-h-64 flex-col gap-1 overflow-y-auto rounded-lg border p-2">
-                {disponiveis.map((vale) => (
-                  <label key={vale.entregaId} className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={selecionadas.has(vale.entregaId)}
-                      onChange={() => toggle(vale.entregaId)}
-                    />
-                    <span>
-                      <strong>{vale.numeroVale}</strong> — {vale.clienteNome} ({vale.clienteEndereco}
-                      )
-                      {vale.quantidadeVales > 1 && ` · ${vale.quantidadeVales} vales`}
-                    </span>
-                  </label>
-                ))}
-              </div>
             )}
           </Secao>
 
@@ -590,7 +755,7 @@ function NovaCorridaFluxo({
                   autoFocus
                   placeholder="Passe o cartão no leitor…"
                   value={token}
-                  disabled={escolhidos.length === 0 || ocupado === 'bipando'}
+                  disabled={escolhidos.length === 0 || estadoCartao.estado === 'loading'}
                   onChange={(e) => setToken(e.target.value)}
                   // O leitor age como teclado e manda Enter no fim. Digitar
                   // à mão também funciona — é a saída quando o leitor falha.
@@ -598,6 +763,32 @@ function NovaCorridaFluxo({
                     if (e.key === 'Enter') void handleBipar(e.currentTarget.value)
                   }}
                 />
+                {/* CADA DESFECHO NO SEU CANAL, e a cor dizendo qual é:
+                    recusa acusa o cartão (vermelho), indisponível e erro
+                    não (âmbar / vermelho de falha, com o texto certo).
+                    Antes os três saíam do mesmo `setErro`, com a mesma
+                    cor, e "não consegui perguntar" ficava idêntico a
+                    "esse cartão não presta". */}
+                {estadoCartao.estado === 'loading' && <Carregando texto="Consultando credencial" />}
+                {estadoCartao.estado === 'ready' &&
+                  estadoCartao.dados.veredito === 'recusado' && (
+                    <p className="text-sm text-destructive">{estadoCartao.dados.mensagem}</p>
+                  )}
+                {estadoCartao.estado === 'unavailable' && (
+                  <div className="flex flex-col gap-1">
+                    <AvisoDaConsulta apresentacao={apresentar(estadoCartao, 'verificacao')} />
+                    <p className="text-xs text-foreground/70">
+                      Sem internet, só dá pra reconhecer cartões que já apareceram neste computador
+                      antes — isso não quer dizer que o cartão seja inválido.
+                    </p>
+                  </div>
+                )}
+                {estadoCartao.estado === 'error' && (
+                  <AvisoDaConsulta
+                    apresentacao={apresentar(estadoCartao, 'verificacao')}
+                    aoRecarregar={() => void handleBipar(token)}
+                  />
+                )}
               </div>
             )}
 
@@ -614,12 +805,7 @@ function NovaCorridaFluxo({
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() => {
-                      setCredencial(null)
-                      setToken('')
-                      setPin('')
-                      setPinConferido(null)
-                    }}
+                    onClick={recolherCustodia}
                   >
                     Trocar
                   </Button>
@@ -665,10 +851,13 @@ function NovaCorridaFluxo({
                         placeholder="••••••"
                         className="max-w-40 tracking-[0.5em]"
                         value={pin}
-                        disabled={pinConferido !== null}
+                        // Trava só quando a custódia está estabelecida.
+                        // `unavailable` e `error` NÃO travam: neles o
+                        // operador precisa poder tentar de novo.
+                        disabled={custodiaPronta}
                         onChange={(e) => {
                           setPin(e.target.value.replace(/\D/g, ''))
-                          setPinConferido(null)
+                          setEstadoPin({ estado: 'inactive' })
                         }}
                         // Enter confirma: o motoboy digita e aperta, sem
                         // procurar botão com o caixa esperando.
@@ -676,7 +865,7 @@ function NovaCorridaFluxo({
                           if (e.key === 'Enter') void handleConferirPin()
                         }}
                       />
-                      {pinConferido === null ? (
+                      {!custodiaPronta ? (
                         // Botão explícito, e não verificação automática ao
                         // completar 6 dígitos: cada tentativa errada conta
                         // pro bloqueio progressivo, e quem se atrapalha
@@ -685,10 +874,14 @@ function NovaCorridaFluxo({
                         <Button
                           type="button"
                           variant="outline"
-                          disabled={!!pinAceitavel(pin) || ocupado === 'conferindo'}
+                          disabled={!!pinAceitavel(pin) || estadoPin.estado === 'loading'}
                           onClick={() => void handleConferirPin()}
                         >
-                          {ocupado === 'conferindo' ? <EmAndamento>Conferindo</EmAndamento> : 'Confirmar identidade'}
+                          {estadoPin.estado === 'loading' ? (
+                            <EmAndamento>Conferindo</EmAndamento>
+                          ) : (
+                            'Confirmar identidade'
+                          )}
                         </Button>
                       ) : (
                         <Button
@@ -697,7 +890,8 @@ function NovaCorridaFluxo({
                           size="sm"
                           onClick={() => {
                             setPin('')
-                            setPinConferido(null)
+                            setEstadoPin({ estado: 'inactive' })
+                            setPinCapturadoOffline(false)
                           }}
                         >
                           Trocar PIN
@@ -705,17 +899,44 @@ function NovaCorridaFluxo({
                       )}
                     </div>
 
-                    {pinConferido === 'ok' && (
+                    {pinConfirmado && (
                       <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
                         ✓ Identidade confirmada — {credencial.motoboyNome}
                       </p>
                     )}
+
+                    {/* RECUSA: o servidor conferiu e disse não. Repetir faz
+                        sentido, e cada tentativa conta no bloqueio. */}
+                    {estadoPin.estado === 'ready' && estadoPin.dados.veredito === 'recusado' && (
+                      <p className="text-sm text-destructive">{estadoPin.dados.mensagem}</p>
+                    )}
+
+                    {/* ERRO: a tentativa falhou. NÃO é PIN errado, e a tela
+                        não pode deixar o operador achar que errou — era o
+                        que acontecia quando este caso e a recusa acima
+                        terminavam os dois em `null` + string vermelha. */}
+                    {estadoPin.estado === 'error' && (
+                      <div className="flex flex-col gap-1">
+                        <AvisoDaConsulta
+                          apresentacao={apresentar(estadoPin, 'verificacao')}
+                          aoRecarregar={() => void handleConferirPin()}
+                        />
+                        <p className="text-xs text-foreground/70">
+                          O PIN <strong>não</strong> foi recusado — não deu pra conferir. Tentar de
+                          novo não conta como erro pro motoboy.
+                        </p>
+                      </div>
+                    )}
+
                     {/* Sem rede não há como conferir: o HMAC e o bcrypt
                         vivem no servidor. O PIN vai selado no envelope e é
                         validado na sincronização — se estiver errado, a
                         saída não sela e vira ocorrência pra gestão. A tela
-                        precisa dizer isso antes, não depois. */}
-                    {pinConferido === 'offline' && (
+                        precisa dizer isso antes, não depois.
+
+                        Isto NÃO é `unavailable`: o fluxo previsto segue,
+                        e chamá-lo de indisponível diria que não segue. */}
+                    {pinCapturadoOffline && (
                       <p className="text-sm text-amber-700 dark:text-amber-400">
                         PIN guardado, mas <strong>não conferido</strong> — sem internet não dá pra
                         validar agora. Se estiver errado, a saída não vai ser selada e a gestão

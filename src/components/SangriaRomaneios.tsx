@@ -4,7 +4,9 @@ import { driveConfigurado, prepararDrive } from '@/lib/googleDrive'
 import { dataLocal } from '@/lib/datas'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
-import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { EmAndamento } from '@/components/EmAndamento'
+import { Consulta } from '@/components/Consulta'
+import { derivarEstado } from '@/lib/estadoDeConsulta'
 
 // A sangria dos romaneios: no fim do dia, uma passada que arquiva no
 // Drive tudo que saiu.
@@ -34,7 +36,16 @@ import { Carregando, EmAndamento } from '@/components/EmAndamento'
 // no décimo não desperdiça os nove que já estão lá.
 
 export function SangriaRomaneios({ data, lojaId }: { data: string; lojaId: string }) {
-  const { data: romaneios, isLoading, isError, error } = useRomaneiosRecebidosEm({ data, lojaId })
+  // Estava no grupo "mudo": o bloco inteiro ficava dentro de
+  // `{romaneios && …}`, então sem resposta a sangria simplesmente não
+  // aparecia. Quem vem aqui às 20h pra arquivar o dia não tinha como
+  // saber se não havia saída ou se a consulta não voltou.
+  //
+  // O `romaneios` continua sendo lido aqui fora porque o `enviar()`
+  // precisa dele — e ele já tem a própria guarda.
+  const consulta = useRomaneiosRecebidosEm({ data, lojaId })
+  const estado = derivarEstado(consulta)
+  const romaneios = estado.estado === 'ready' ? estado.dados : undefined
   const [enviando, setEnviando] = useState(false)
   const [progresso, setProgresso] = useState<{ feitos: number; total: number } | null>(null)
   const [resultado, setResultado] = useState<string | null>(null)
@@ -122,8 +133,6 @@ export function SangriaRomaneios({ data, lojaId }: { data: string; lojaId: strin
     }
   }
 
-  const quantos = romaneios?.length ?? 0
-
   return (
     <Card>
       <CardHeader>
@@ -136,21 +145,24 @@ export function SangriaRomaneios({ data, lojaId }: { data: string; lojaId: strin
           não duplica: um arquivo que já está lá é substituído.
         </p>
 
-        {isLoading && <Carregando />}
-        {isError && (
-          <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>
-        )}
-
-        {romaneios && quantos === TETO_SANGRIA && (
+        <Consulta
+          estado={estado}
+          // Sem `vazio`: "Nenhuma saída registrada nesta data" já é dita
+          // ao lado do botão, e ali ela convive com a contagem. Duplicar
+          // aqui daria duas frases pro mesmo fato.
+          aoRecarregar={() => void consulta.refetch()}
+        >
+          {(lista) => (
+          <>
+        {lista.length === TETO_SANGRIA && (
           <p className="text-sm text-destructive">
             Esse dia bateu o teto de {TETO_SANGRIA} romaneios — filtra por filial pra alcançar
             todos.
           </p>
         )}
 
-        {romaneios && (
           <div className="flex flex-wrap items-center gap-3">
-            <Button onClick={() => void enviar()} disabled={enviando || quantos === 0}>
+            <Button onClick={() => void enviar()} disabled={enviando || lista.length === 0}>
               {progresso ? (
                 <EmAndamento>
                   Enviando {progresso.feitos} de {progresso.total}
@@ -160,12 +172,14 @@ export function SangriaRomaneios({ data, lojaId }: { data: string; lojaId: strin
               )}
             </Button>
             <span className="text-sm text-foreground/70">
-              {quantos === 0
+              {lista.length === 0
                 ? 'Nenhuma saída registrada nesta data.'
-                : `${quantos} romaneio(s) — ${quantos * 2} arquivos.`}
+                : `${lista.length} romaneio(s) — ${lista.length * 2} arquivos.`}
             </span>
           </div>
-        )}
+          </>
+          )}
+        </Consulta>
 
         {resultado && <p className="text-sm text-foreground/70">{resultado}</p>}
         {erro && <p className="text-sm text-destructive">{erro}</p>}

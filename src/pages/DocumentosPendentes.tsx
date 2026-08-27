@@ -22,7 +22,9 @@ import {
   DialogDescription,
 } from '@/components/ui/dialog'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { EmAndamento } from '@/components/EmAndamento'
+import { Consulta } from '@/components/Consulta'
+import { derivarEstado } from '@/lib/estadoDeConsulta'
 import { normalizarParagrafo } from '@/lib/texto'
 
 function formatarData(iso: string): string {
@@ -228,18 +230,31 @@ function Secao({ titulo, children }: { titulo: string; children: ReactNode }) {
   )
 }
 
+// PENDÊNCIA DE PAPEL É O PIOR LUGAR PRA AFIRMAR "NADA PENDENTE".
+//
+// Quem abre esta aba está conferindo a fila do que precisa voltar — um
+// convênio que sumiu, uma receita que não veio. Dizer "nenhuma pendência"
+// sem ter perguntado ao servidor encerra a conferência com a conclusão
+// oposta à verdadeira.
+//
+// O dado é `{ itens, temMais }`, então o vazio não é reconhecível pelo
+// padrão (que só sabe array) — daí o `estaVazio` explícito.
 function DocumentosConvenio({ profile }: { profile: AuthProfile }) {
-  const { data, isLoading, isError, error } = useDocumentosConvenioPendentes()
+  const consulta = useDocumentosConvenioPendentes()
+  const estado = derivarEstado(consulta)
   const marcarRecebido = useMarcarDocumentoConvenioRecebido()
   const naoVoltou = useNaoVoltou(profile, useNotificarDocumentoConvenio())
 
-  if (isLoading) return <Carregando />
-  if (isError) return <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>
-  if (!data || data.itens.length === 0) {
-    return <p className="text-sm text-muted-foreground">Nenhum documento de convênio pendente.</p>
-  }
-
   return (
+    <Consulta
+      estado={estado}
+      estaVazio={(d) => d.itens.length === 0}
+      vazio={
+        <p className="text-sm text-muted-foreground">Nenhum documento de convênio pendente.</p>
+      }
+      aoRecarregar={() => void consulta.refetch()}
+    >
+      {(data) => (
     <>
       <AvisoTemMais mostrar={data.temMais} />
       <TabelaPendencias
@@ -270,21 +285,28 @@ function DocumentosConvenio({ profile }: { profile: AuthProfile }) {
         descricao="Registra a ocorrência pra gestão. O vale continua na lista de pendências — se o documento aparecer depois, é só marcar como recebido."
       />
     </>
+      )}
+    </Consulta>
   )
 }
 
+// Mesma história da fila de convênio, e o mesmo `estaVazio`.
 function ReceitasPendentes({ profile }: { profile: AuthProfile }) {
-  const { data, isLoading, isError, error } = useReceitasPendentes()
+  const consulta = useReceitasPendentes()
+  const estado = derivarEstado(consulta)
   const marcarRecebida = useMarcarReceitaRecebida()
   const naoVoltou = useNaoVoltou(profile, useNotificarFaltaReceita())
 
-  if (isLoading) return <Carregando />
-  if (isError) return <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>
-  if (!data || data.itens.length === 0) {
-    return <p className="text-sm text-muted-foreground">Nenhuma receita pendente de devolução.</p>
-  }
-
   return (
+    <Consulta
+      estado={estado}
+      estaVazio={(d) => d.itens.length === 0}
+      vazio={
+        <p className="text-sm text-muted-foreground">Nenhuma receita pendente de devolução.</p>
+      }
+      aoRecarregar={() => void consulta.refetch()}
+    >
+      {(data) => (
     <>
       <AvisoTemMais mostrar={data.temMais} />
       <TabelaPendencias
@@ -317,6 +339,8 @@ function ReceitasPendentes({ profile }: { profile: AuthProfile }) {
         descricao="Registra a ocorrência pra gestão. O vale continua na lista de pendências — se a receita aparecer depois, é só marcar como devolvida."
       />
     </>
+      )}
+    </Consulta>
   )
 }
 

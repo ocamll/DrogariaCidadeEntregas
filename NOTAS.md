@@ -105,9 +105,18 @@ invariantes já construídas.
 ```
 E1   normalização de texto livre     ✓  itens 84 e 85
 E1.1 busca sem acento                ✓  migration aplicada
-E2   estados visuais de consulta     ←  próximo
-E3..E9  pagamento, login, router, divergência, agência, endereço
+E2   estados visuais de consulta     ✓  item 86 — 18 de 18 migrados
+E3   id próprio do pagamento previsto  ←  próximo
+E4..E9  formas de pagamento, login, router, divergência, agência, endereço
 ```
+
+**O E2 não foi padronização de markup.** Ele achou um defeito de
+comportamento em nove telas: com a query PAUSADA (offline sem cache) o
+`isLoading` do TanStack vem `false`, e a cadeia
+`if (isLoading) … if (!data) → "nenhum registro"` cai no último ramo e
+AFIRMA vazio sem ter havido resposta. O pior deles negava um documento
+de custódia selado; o segundo era a tela pós-login do caixa. Ver o item
+86 — inclusive as três vezes em que o gate reprovou o próprio autor.
 
 **O que ainda NÃO existe, e é fácil supor errado:** não há deploy — nem
 conta na Cloudflare, nem projeto do Pages, nem site no ar. Isso não é
@@ -6512,6 +6521,406 @@ mostraria "joao da silva" no lugar do nome da pessoa.
 
 **E1.1 FECHADO.** 62 asserções na biblioteca, 30 na fiação.
 
+## 86. E2 — estados visuais de consulta, e o `isLoading` que mente
+
+O pedido era "estados visuais de consulta", e parecia padronização de
+markup. O levantamento achou um defeito de comportamento com nove telas
+mentindo, e a migração achou outros quatro — três deles meus.
+
+### O DEFEITO, medido no fonte antes de qualquer código
+
+```js
+// @tanstack/query-core, queryObserver.js:307-310
+const isFetching = newState.fetchStatus === "fetching"
+const isPending  = status === "pending"
+const isLoading  = isPending && isFetching
+
+// retryer.js:11 — networkMode default
+return (networkMode ?? "online") === "online" ? onlineManager.isOnline() : true
+```
+
+Offline e sem cache, a query **pausa**: `fetchStatus: 'paused'`, logo
+`isFetching: false`, logo **`isLoading: false`**. `isError` também é
+`false`, e `data` é `undefined`. Então toda cadeia escrita como
+
+```
+if (isLoading) …; if (isError) …; if (!data) → "nenhum registro"
+```
+
+cai no último ramo e AFIRMA vazio sobre uma consulta que nunca
+respondeu. O app tinha 55 usos de `isLoading` em 18 arquivos e **zero**
+de `isPending`/`fetchStatus`.
+
+### O inventário, arquivo por arquivo
+
+Não foi glob: cada um foi lido e classificado pela frase que ele põe no
+ar com a query pausada.
+
+| categoria | quantos | o que faziam |
+|---|---|---|
+| `defeituoso` | 9 | afirmavam vazio sem saber |
+| `mudo` | 5 | não mentiam, e também não explicavam — tela em branco |
+| `acidental` | 2 | corretos só porque `data?.length === 0` dá `undefined === 0` → `false` |
+| `deliberado` | 2 | já tratavam à mão, com comentário (§50.2) |
+
+**Meu primeiro número estava errado**, e vale registrar: reportei "6
+defeituosos" tendo inspecionado 9 dos 18 arquivos. Os três que faltavam
+eram os piores:
+
+```
+Romaneio.tsx          "Romaneio não encontrado."   sobre um documento SELADO
+ListaEntregas.tsx     "Nenhum vale encontrado."    tela pós-login do caixa
+HistoricoEntregas.tsx "Nenhum vale encontrado."    reabrindo o defeito do E1.1
+```
+
+O terceiro é o mais irônico: o E1.1 existe porque "resultado vazio é
+indistinguível de *não existe cadastro*, a pior forma de errar numa
+busca" — e offline a mesma tela voltava a dizer isso, agora por falta de
+resposta em vez de por acento.
+
+E os `acidental` mostram por que "está funcionando" não basta: eles
+escapavam por um acidente de sintaxe que ninguém decidiu, e bastaria
+alguém trocar por `(data ?? []).length === 0`, achando que é a mesma
+coisa, pra a tela passar a mentir.
+
+### AS DUAS PERGUNTAS, que estavam misturadas
+
+```
+1. TRANSPORTE   a consulta conseguiu responder?
+                inactive · loading · ready · unavailable · error
+
+2. DOMÍNIO      se respondeu, qual foi o veredito?
+                aceito · recusado(motivo)
+```
+
+`nao_encontrado` **não é falha de consulta**. É uma consulta
+bem-sucedida cujo resultado de domínio foi negativo — e por isso ele só
+existe DENTRO de `ready`, nunca ao lado dele:
+
+```ts
+EstadoDeConsulta<Veredito<Credencial, MotivoDoCartao>>
+```
+
+Assim "cartão não existe" fica inalcançável sem ter havido resposta
+confiável. É o §59 de novo: tornar o erro impossível de representar vale
+mais que rejeitá-lo.
+
+**A mistura de idiomas é deliberada**, e diz de que camada cada palavra
+fala: `loading`/`ready`/`unavailable` são o estado técnico da OBTENÇÃO
+do dado; `aceito`/`recusado` são o significado da resposta PARA A
+FARMÁCIA.
+
+**E chama-se `inactive`, não `idle`**, porque o TanStack já usa
+`fetchStatus: 'idle'` no mesmo ecossistema com outro sentido — lá quer
+dizer "não está buscando agora", o que inclui uma consulta que já
+terminou e tem dado. Dois `'idle'` a duas linhas um do outro produziriam
+leitura errada num arquivo que ninguém abre há meses. A tradução
+`TanStack: idle → nosso: inactive` é visível justamente porque as
+palavras diferem.
+
+### O CONTRATO DE APRESENTAÇÃO, congelado com o usuário
+
+```
+inactive                sem mensagem, sem CTA
+loading                 indicador; CTA que depende da resposta travado
+ready                   renderiza o dado — e SÓ aqui pode afirmar vazio
+ready · cache_sem_rede   dado VISÍVEL + "podem estar desatualizados", sem retry
+ready · cache_apos_falha dado VISÍVEL + "não foi possível atualizar" + [Atualizar]
+unavailable             informa, tom de AVISO, SEM botão
+error                   acusa a falha, tom de FALHA, + [Tentar novamente]
+```
+
+**A ausência de botão no `unavailable` é a decisão central.** Não há a
+quem perguntar, então um botão só produziria o mesmo resultado — e
+ensinaria o operador a martelar uma consulta que o próprio sistema sabe
+que não pode executar, que é o comportamento que o E2 veio matar. A
+recuperação é automática, e isso foi MEDIDO: religando a rede, as telas
+voltaram sozinhas sem nenhum clique.
+
+E `ready` com cache é o que impede trocar um defeito por outro: com dado
+utilizável a tela CONTINUA mostrando, e o aviso vai ao lado. Sem essa
+regra, "offline parece vazio" viraria "offline esconde o que já temos".
+
+### A polaridade, que é o defeito numa frase
+
+```
+desconhecido  ≠  vazio
+```
+
+E ela é estrutural, não disciplina: o `children` do `<Consulta>` é
+função e só roda com dado; o `vazio` só é consultado dentro do ramo
+`ready`. Não há como uma tela afirmar vazio sem ter havido resposta —
+não porque alguém lembrou de checar, mas porque o galho onde a frase
+mora fica pendurado no `ready`.
+
+### Três specs, e cada um fecha um buraco que os outros deixam
+
+```
+estado-de-consulta         a decisão está certa          (apresentar puro)
+fiacao-estado-de-consulta  o componente é CASCA          (lê o fonte)
+consulta-render            a casca RENDERIZA o que a decisão diz
+```
+
+O terceiro não é redundante: os dois primeiros juntos ainda deixariam
+passar uma casca que chama `apresentar()` e ignora o resultado. Ele roda
+o componente de verdade por `react-dom/server`, sem navegador — e
+**precisa de `--tsconfig tsconfig.app.json`**, senão o esbuild do `tsx`
+compila JSX no runtime clássico e quebra com `React is not defined`.
+
+A asserção que mais importa passa `aoRecarregar` de propósito:
+
+```
+ok   NÃO tem botão, mesmo com aoRecarregar passado
+```
+
+Uma casca descuidada desenharia o botão só por ter callback em mãos.
+
+### O gate é lista EXPLÍCITA e FECHADA
+
+A lista nomeia os 18 alvos; a varredura exige que TODO arquivo que use
+`isLoading` esteja nela. Glob aceitaria tela nova em silêncio; lista
+sozinha não a veria. Com as duas, tela nova quebra o gate e alguém tem
+que decidir o que ela afirma quando não sabe.
+
+### AS TRÊS VEZES EM QUE O GATE PEGOU O PRÓPRIO AUTOR
+
+Isso é mais importante do que parece: prova que eles não são decorativos.
+
+1. **A biblioteca caiu na própria regra.** `estadoDeConsulta.ts` cita
+   `isLoading` no cabeçalho pra explicar por que não o usa, e a checagem
+   lia o fonte cru. A regra passou a ignorar comentários — contar prosa
+   acusa justamente quem documentou o conserto. O mesmo falso positivo
+   voltou em `ListaEntregas` uma etapa depois, porque um dos checks
+   ainda lia o cru; uniformizei.
+
+2. **O `CampoDependente` violou a regra da casca.** Ele montava o título
+   "Filiais indisponíveis" dentro do componente, e o gate reprovou:
+   escolher texto é decidir. O rótulo virou variante (`{ campo: string }`)
+   e `apresentar()` voltou a ser o único que escreve frase.
+
+3. **Marquei dois arquivos como migrados sem migrar.** `NovaCorrida` e
+   `RetornoCorrida` ainda tinham a consulta de LISTA à mão, e o gate
+   acusou "não lê mais `isLoading`" nos dois.
+
+### Consultas independentes, verdades independentes
+
+`MototaxistasCadastro` era o único defeito que falhava **até online**:
+
+```js
+{!isLoading && !isError && (!agencias || agencias.length === 0) && (
+  <p>Cadastra uma agência primeiro…</p>
+)}
+```
+
+As flags são da query de MOTOBOYS; o `data` é da de AGÊNCIAS. Bastava a
+de motoboys responder primeiro — requisições independentes, isso
+acontece sempre — pra a tela mandar o admin cadastrar uma agência que já
+existe. Offline era permanente.
+
+Medido no app, com as duas pausadas:
+
+```
+["agencias-cadastro"]      pending · paused · sem dado
+["mototaxistas-cadastro"]  pending · paused · sem dado
+→ "Dados indisponíveis no momento."   botão Novo motoboy travado COM explicação
+→ nenhum "Cadastra uma agência primeiro"
+```
+
+E o mesmo defeito apareceu numa CÉLULA, três vezes: `nomeAgencia` e
+`rotuloCidade` devolviam `'—'` tanto para "não tem" quanto para "não
+sei" — a ignorância de uma consulta virando afirmação de ausência sobre
+o dado de outra. Hoje `'—'` só sai quando o id é nulo; sem a lista sai
+`'…'`.
+
+### Campo dependente: o formulário fica, só a dependência trava
+
+Sete sítios têm select alimentado por consulta. Numa lista o
+`<Consulta>` domina a área de conteúdo; num formulário ele NÃO pode,
+porque o operador está no meio de um lançamento.
+
+Duas regras, congeladas com o usuário:
+
+1. **não limpar o resto do formulário** — o que ficou indisponível foi a
+   filial, não o que o caixa já digitou;
+2. **não apagar uma seleção que já existia** — transformar
+   indisponibilidade em perda de trabalho é pior que o problema. Quem
+   revalida é o submit.
+
+Medido nos dois cenários:
+
+```
+formulário aberto do ZERO, offline, sem cache
+  "Filiais indisponíveis no momento."   select DESABILITADO, form montado
+
+a rede CAINDO com o formulário aberto   ← o caso que acontece no balcão
+  query: success · paused · temDado=true
+  select HABILITADO, 8 opções, seleção PRESERVADA ("Filial 02")
+  "Exibindo dados disponíveis offline; podem estar desatualizados."
+```
+
+O segundo é `ready + cache_sem_rede`, não `unavailable` — as filiais
+ainda são conhecidas, então o campo continua utilizável. É a distinção
+funcionando onde ela importa.
+
+E o submit passou a separar duas frases que pediam coisas opostas: "não
+sei quais são as filiais" e "você não escolheu uma" davam a mesma.
+
+### NovaCorrida: as duas CONSULTAS, e só elas
+
+O alvo não era "sumir com `ocupado`". `bipar cartão` e `conferir PIN`
+perguntam e recebem resposta; `criar PIN` e `confirmar saída` ESCREVEM,
+e ficaram com a mecânica delas — esticar `EstadoDeConsulta` para
+qualquer async só pra zerar ocorrências apagaria a distinção que ele
+existe pra marcar. **O gate afirma as duas metades**, porque sem a
+segunda alguém "terminaria o trabalho" removendo o que foi mantido de
+propósito.
+
+O conserto de comportamento estava no PIN: `r.ok === false` e o `catch`
+terminavam os dois em `setPinConferido(null)` + string vermelha. A tela
+voltava ao início e reoferecia "Confirmar identidade" nos dois casos, e
+o caixa relia o PIN no papel do motoboy procurando um erro que podia não
+existir.
+
+Medido no app:
+
+```
+formato inválido      "Isso não parece um cartão do sistema."     recusa
+não reconhecida       "Credencial não reconhecida."               recusa
+erro de rede          "Não foi possível carregar os dados."       falha + retry
+offline sem cache     "Não foi possível verificar agora."         AVISO, sem botão
+                      + "isso não quer dizer que o cartão seja inválido"
+offline com cache     badge "Credencial informada"
+PIN offline           "PIN guardado, mas não conferido"           custódia liberada
+PIN recusado          motivo do servidor                          custódia NÃO liberada
+erro de rede no PIN   "Não foi possível concluir a verificação."  custódia NÃO liberada
+                      + "O PIN não foi recusado — não deu pra conferir.
+                         Tentar de novo não conta como erro pro motoboy."
+```
+
+**O ramo offline do PIN ficou FORA do vocabulário de consulta.** Sem
+rede ninguém RESPONDE nada sobre aquele PIN: ele é capturado e validado
+na sincronização. Chamar isso de `ready` seria inventar uma resposta; de
+`unavailable`, seria dizer que o fluxo não pode seguir — e ele pode, é o
+caminho que o projeto passou dias provando. Virou
+`pinCapturadoOffline`, e a custódia libera por dois caminhos que a tela
+nomeia separadamente.
+
+E `credencial` deixou de ser estado próprio: é o que a consulta devolveu
+quando ACEITOU. Não há mais como existir credencial sem ter havido
+resposta — antes isso dependia de dois `setState` andarem sempre juntos.
+
+### RetornoCorrida: a máquina dizia uma coisa, a string dizia outra
+
+Aqui `custodiaDoRetorno.ts` já separava `cartao_recusado`,
+`pin_recusado`, `erro_rede` e `conflito` corretamente. O que faltava era
+o MOTIVO viajar com ela: ele vivia num `erro: string | null` paralelo, e
+**o `catch` dos handlers escrevia a string SEM despachar nada** — a
+máquina ficava em `aguardando_cartao`, como se nada tivesse sido
+tentado, com um texto de erro no ar. Duas fontes descrevendo momentos
+diferentes, e nenhuma delas a autoridade.
+
+Hoje a mensagem é campo do estado, e carrega texto E natureza juntos:
+
+```ts
+mensagem: { texto: string; tipo: 'recusa' | 'falha' } | null
+```
+
+O `erro` paralelo sobreviveu servindo só **validação local** — formato
+do PIN, assinatura faltando, chave de ambiente ausente. Nada disso é
+resposta de ninguém: são conferências anteriores a qualquer transição, e
+a máquina nem chega a ser tocada.
+
+#### O BECO SEM SAÍDA que eu criei, e que só a medição achou
+
+Rotear o `catch` do cartão para `ERRO_REDE` parecia óbvio. Mas:
+
+```
+CARTAO_LIDO é aceito de:  aguardando_cartao · cartao_recusado · falha_selo_online
+erro_rede                 NÃO está na lista
+```
+
+Depois de uma falha de rede ao bipar, **o caixa não conseguia bipar de
+novo**. Antes o `catch` não despachava nada, então a máquina ficava em
+`aguardando_cartao` e rebipar funcionava — troquei "canal errado" por
+"travou", que é pior.
+
+A raiz: `ERRO_REDE` foi desenhado pro passo de CONCLUIR. **Uma consulta
+que falha não descobriu nada e não move custódia.** Daí
+`FALHA_NA_CONSULTA`, que muda só a mensagem e deixa o `nome` intacto — o
+próximo passo continua sendo o mesmo de antes.
+
+Isso só apareceu porque o roteiro de verificação tinha DUAS perguntas
+por cenário: *o texto/cor/CTA estão certos?* e *a máquina permite
+exatamente os próximos passos esperados?*. A primeira sozinha teria
+passado — o texto e a cor estavam corretos.
+
+Consequência de desenho: **a cor sai do TIPO DA MENSAGEM, não do nome do
+estado**. Pelo nome, uma consulta falha (que não move a máquina) seria
+pintada como se nada tivesse acontecido.
+
+#### `useContextoRetorno` já era o vocabulário, com outros nomes
+
+```
+carregando            →  loading
+pronto + servidor     →  ready + procedencia 'servidor'
+pronto + cache        →  ready + cache_sem_rede / cache_apos_falha
+nao_encontrado        →  ready + recusado('nao_encontrado')
+indisponivel_offline  →  unavailable
+erro                  →  error
+```
+
+Inventado independentemente, incluindo um `origem: 'servidor' | 'cache'`
+que é o `Procedencia`. Migrar **ganhou precisão** em dois pontos:
+`nao_encontrado` era irmão de `erro` quando na verdade é o oposto deles
+— uma RESPOSTA, e das boas —, e o `origem: 'cache'` colapsava dois casos
+que a própria função já distinguia (offline × depois de falhar). Hoje a
+tela diz qual foi.
+
+### Dois defeitos de UX que só a medição no app achou
+
+**`[object Object]`** — o §80 de novo, reintroduzido por mim. O erro do
+PostgREST não é um `Error`, então `String(e)` o apagava. Trocado por
+`mensagemDeErro` em seis pontos, `NovaCorrida` inclusa.
+
+**Stack trace no balcão** — e este é o par do anterior:
+`mensagemDeErro` junta `message` + `details`, e num erro de rede do
+supabase o `details` É A STACK. O caixa via isso na tela. Agora o
+técnico vai pro `console.error` e o balcão recebe uma frase; perder o
+detalhe seria o §80 outra vez, então ele continua existindo — só que
+onde se depura.
+
+**E a mensagem da falha ficava no ar** depois de o cartão ser lido com
+sucesso. Um passo bem-sucedido agora apaga o que o anterior disse.
+
+### Uma asserção minha que era teatro
+
+Escrevi um bloco varrendo os quatro estados de motoboys pra provar que a
+afirmação sobre agências não depende deles. Passava verde e não provava
+nada: o predicado NÃO RECEBE o estado de motoboys, então varrê-los não
+podia falhar nem se ele estivesse errado por outro motivo. Trocado pela
+afirmação honesta — a independência é estrutural, e o que se prova é a
+assinatura.
+
+### O placar
+
+```
+família B — consultas          18 arquivos
+  defeituoso   0     (eram 9)
+  mudo         0     (eram 5)
+  acidental    0     (eram 2)
+  deliberado   0     (eram 2)
+  migrado     18
+
+família A — ações               4 operações
+  migradas     2     as duas CONSULTAS; as duas escritas ficam com `ocupado`
+
+regressão   cadeia de custódia 11 · E1 2 · E2 3   todos verdes
+            tsc -b ok · oxlint 9 avisos, os pré-existentes
+```
+
+**E2 FECHADO.** O que ele mudou não foi a aparência: foi o app parar de
+afirmar sobre o mundo o que só sabe sobre a própria consulta.
+
 ## Commits desta sessão
 
 
@@ -6828,7 +7237,7 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: o E2 da frente de produto
+### PRÓXIMA SESSÃO: o E3 da frente de produto
 
 > **Esta é a seção atual.** As de baixo são históricas: descrevem como
 > "próximo" coisas que já foram feitas.
@@ -6842,8 +7251,8 @@ itens, decidida em 2026-08-25, que roda ANTES do corte pré-V1.
 ```
 E1   normalização central          ✓  itens 84 e 85
 E1.1 busca sem acento              ✓  migration aplicada, 16·16·0
-E2   estados visuais de consulta   <-  AQUI
-E3   id próprio do pagamento previsto
+E2   estados visuais de consulta   ✓  item 86 — 18 de 18
+E3   id próprio do pagamento previsto   <-  AQUI
 E4   duas formas de pagamento no cadastro
 E5   login por username
 E6   React Router + /notificacoes e /auditoria
@@ -6851,6 +7260,19 @@ E7   divergência/regularização de valores
 E8   portal da agência (RLS antes da tela)
 E9   endereço estruturado
 ```
+
+**O E3 MUDA A NATUREZA DA FRENTE, e vale saber antes de começar.** De E1
+a E2 o trabalho foi de UI e de estado, sem tocar em dado gravado. O E3
+volta a mexer em IDENTIDADE DE PAGAMENTO no banco — é migration de
+comportamento, não ajuste de tela. Daí o commit de checkpoint entre os
+dois: E1+E2 fecham um bloco que não encosta em `entregas` nem em
+`romaneios`, e o verificador de integridade volta a ser obrigatório a
+partir do E3.
+
+**O que o E2 deixou pronto pro E5**, e que já está construído: o
+"verificando usuário…" do login novo é o `<Consulta>` com a variante
+`verificacao`, e a distinção `recusado` × `unavailable` × `error` já
+está congelada e testada. O E5 não precisa inventar nada disso.
 
 **A auditoria das nove frentes está na conversa, não num arquivo** — o
 que sobreviveu dela em forma durável são as decisões abaixo e os cinco
@@ -6888,25 +7310,41 @@ achados que mudaram o plano.
 3. **E8 é a frente maior.** `profiles.papel` aceita `'agencia'` desde o
    schema inicial e existem ZERO policies pra ele. É RLS nova em ~8
    tabelas, e RLS vem antes da tela.
-4. **E2 não tem padrão central hoje** — a Nova Corrida tem 13 usos de
-   `ocupado`/`pinConferido` construídos à mão. É de lá que sai o
-   vocabulário.
+4. ~~**E2 não tem padrão central hoje**~~ — **resolvido no item 86.** E
+   o levantamento corrigiu o número: são **12** leituras, não 13, e elas
+   se resolvem em 4 operações — duas consultas (que migraram) e duas
+   escritas (que ficaram com `ocupado`, de propósito).
 5. **E7 precisa de tabela nova** (regularizações append-only), e o
    projeto exige SQL aprovado antes.
 
-#### O contrato do E2, que é o próximo a escrever
+#### (feito) O contrato do E2
 
-```
-idle -> loading -> success | not_found/invalid | error
-```
+Foi escrito como `idle → loading → success | not_found/invalid | error`
+e o levantamento **mudou duas coisas**, as duas registradas no item 86:
 
-A regra do usuário: **não mostrar "não encontrado" enquanto a query
-ainda está carregando**, e o operador nunca deve clicar de novo por não
-saber se o sistema consultou ou travou. Sem migration, e sem tocar o
-caminho rápido do caixa.
+- `not_found` e `invalid` COLAPSARAM em `recusado(motivo)` — os dois
+  produzem a mesma consequência de UI, e o código já votava assim em
+  `custodiaDoRetorno.ts`, que separa por QUAL credencial falhou e não
+  por razão da recusa;
+- entrou `unavailable`, que não estava no desenho: "não há resposta
+  autoritativa e não há dado local" é diferente de "a tentativa falhou",
+  e era a metade que faltava pro defeito das nove telas.
 
-Ele é pré-requisito do E5: o "verificando usuário…" do login novo é
-exatamente esse componente.
+Contrato final: `inactive · loading · ready · unavailable · error`, com
+`aceito`/`recusado` só DENTRO de `ready`.
+
+#### O contrato do E3, que é o próximo a escrever
+
+O achado que o bloqueia está no item 4 dos achados da auditoria:
+`criarPagamentoPrevisto` usa `id: entregaId` ("relação é 1:1"), então
+duas formas previstas colidiriam na PK e a segunda não entraria. É
+migration de comportamento, e é ela que destrava o E4.
+
+E há uma armadilha já documentada que o E3 toca de perto — a do §78: o
+`pagamento_id` do PREVISTO é o mesmo uuid da entrega, e copiá-lo pro
+realizado faz um romaneio de retorno SELAR afirmando um pagamento que
+não existe, porque o `on conflict (id) do nothing` engole o insert. Ler
+aquilo antes de mexer nos ids.
 
 #### O que fica DEPOIS de toda a frente
 
@@ -6925,12 +7363,22 @@ lojas a R$ 9,00 e a agência Gabrielense —, esperando só **os convênios**
 
 - Node em `C:\Program Files\nodejs`, **fora do PATH**. Prefixe
   `export PATH="/c/Program Files/nodejs:$PATH"`.
-- Os specs desta frente: `texto`, `fiacao-texto`. Os da cadeia de
-  custódia continuam sendo o gate de regressão: `canonico`,
-  `canonico-retorno`, `dcrr1-vetores`, `congelar-retorno`,
+- Os specs desta frente: `texto` e `fiacao-texto` (E1);
+  `estado-de-consulta`, `fiacao-estado-de-consulta` e `consulta-render`
+  (E2). Os da cadeia de custódia continuam sendo o gate de regressão:
+  `canonico`, `canonico-retorno`, `dcrr1-vetores`, `congelar-retorno`,
   `custodia-do-retorno`, `envelope`, `offline-hash`,
   `despacho-sync-romaneio`, `dependencia-da-fila`,
   `corridas-bloqueadas`, `romaneio-pdf`.
+- **`consulta-render` é o único spec que precisa de `--tsconfig`**, e
+  sem ele o erro não é óbvio (`React is not defined`): o esbuild do
+  `tsx` compila JSX no runtime clássico, e quem tem `"jsx": "react-jsx"`
+  é o tsconfig do app.
+
+```bash
+npx tsx --tsconfig tsconfig.app.json scripts/consulta-render.spec.mts
+```
+
 - **O verificador é o gate de tudo que toca `entregas` ou `romaneios`:**
 
 ```

@@ -20,18 +20,56 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
-import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { EmAndamento } from '@/components/EmAndamento'
+import { Consulta, AvisoDaConsulta } from '@/components/Consulta'
+import { apresentar, derivarEstado, vazioConfirmado } from '@/lib/estadoDeConsulta'
 import { normalizarNome } from '@/lib/texto'
 
+// DUAS CONSULTAS, DUAS VERDADES — e este arquivo é o caso de prova.
+//
+// Ele tinha o defeito mais teimoso do inventário, e o único que falhava
+// ATÉ ONLINE: a frase "Cadastra uma agência primeiro" era guardada por
+// `!isLoading && !isError`, flags da query de MOTOBOYS, pra decidir
+// sobre o `data` da query de AGÊNCIAS.
+//
+// Bastava a de motoboys responder primeiro — o que acontece a toda hora,
+// são requisições independentes — pra a tela mandar o admin cadastrar
+// uma agência que já existe. Offline era permanente.
+//
+// A regra que substitui: cada consulta carrega a própria verdade, e
+// nenhuma decide a semântica da outra. Daí os dois `derivarEstado`.
+//
+// E a distinção que isso preserva é semântica, não cosmética:
+//
+//     não há agência          ≠   há agência, mas não há motoboy
+//     (agências ready, vazio)     (agências ready c/ 1+, motoboys vazio)
+//
+// A primeira só pode ser dita com `vazioConfirmado(estadoAgencias)`.
 export function MototaxistasCadastro({ profile }: { profile: AuthProfile }) {
-  const { data, isLoading, isError, error } = useMototaxistasCadastro()
-  const { data: agencias } = useAgenciasCadastro()
+  const consultaMotoboys = useMototaxistasCadastro()
+  const consultaAgencias = useAgenciasCadastro()
+  const estadoMotoboys = derivarEstado(consultaMotoboys)
+  const estadoAgencias = derivarEstado(consultaAgencias)
+
   const [editando, setEditando] = useState<MototaxistaCadastro | null>(null)
   const [dialogAberto, setDialogAberto] = useState(false)
   const alternarAtivo = useAlternarAtivoMototaxista()
 
-  const nomeAgencia = (agenciaId: string | null) =>
-    agencias?.find((a) => a.id === agenciaId)?.nome ?? '—'
+  const agencias = estadoAgencias.estado === 'ready' ? estadoAgencias.dados : undefined
+
+  // NÃO HÁ AGÊNCIA e NÃO SEI QUAL É são coisas diferentes, e o `—` dizia
+  // as duas. Um motoboy com agência aparecendo como "—" é a tabela
+  // afirmando ausência a partir da ignorância de OUTRA consulta.
+  const nomeAgencia = (agenciaId: string | null) => {
+    if (agenciaId === null) return '—'
+    if (!agencias) return '…'
+    return agencias.find((a) => a.id === agenciaId)?.nome ?? '—'
+  }
+
+  // Só libera o cadastro quando SABEMOS que há agência. Sem resposta o
+  // botão continua travado — mas agora a tela diz por quê, logo abaixo,
+  // em vez de deixar um botão morto sem explicação.
+  const temAgencia = agencias !== undefined && agencias.length > 0
 
   function abrirNovo() {
     setEditando(null)
@@ -46,66 +84,81 @@ export function MototaxistasCadastro({ profile }: { profile: AuthProfile }) {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex justify-end">
-        <Button onClick={abrirNovo} disabled={!agencias || agencias.length === 0}>
+        <Button onClick={abrirNovo} disabled={!temAgencia}>
           Novo motoboy
         </Button>
       </div>
 
-      {!isLoading && !isError && (!agencias || agencias.length === 0) && (
+      {/* A AFIRMAÇÃO SOBRE AGÊNCIAS SAI DO ESTADO DE AGÊNCIAS, e de mais
+          nada. `vazioConfirmado` só é verdadeiro em `ready` com lista
+          vazia — então loading, unavailable e error nunca chegam aqui. */}
+      {vazioConfirmado(estadoAgencias) && (
         <p className="text-sm text-muted-foreground">
           Cadastra uma agência primeiro — todo motoboy precisa estar associado a uma.
         </p>
       )}
 
-      {isLoading && <Carregando />}
-      {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
-      {!isLoading && !isError && data?.length === 0 && (
-        <p className="text-sm text-muted-foreground">Nenhum motoboy cadastrado ainda.</p>
-      )}
-      {!isLoading && !isError && data && data.length > 0 && (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Nome</TableHead>
-              <TableHead>Agência</TableHead>
-              <TableHead>CPF</TableHead>
-              <TableHead>Telefone</TableHead>
-              <TableHead>Status</TableHead>
-              <TableHead />
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {data.map((mototaxista) => (
-              <TableRow key={mototaxista.id}>
-                <TableCell>{mototaxista.nome}</TableCell>
-                <TableCell>{nomeAgencia(mototaxista.agenciaId)}</TableCell>
-                <TableCell>{mototaxista.cpf ?? '—'}</TableCell>
-                <TableCell>{mototaxista.telefone ?? '—'}</TableCell>
-                <TableCell>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      alternarAtivo.mutate({ id: mototaxista.id, ativo: !mototaxista.ativo })
-                    }
-                    title={mototaxista.ativo ? 'Clica pra desativar' : 'Clica pra reativar'}
-                  >
-                    <Badge variant={mototaxista.ativo ? 'secondary' : 'destructive'}>
-                      {mototaxista.ativo ? 'Ativo' : 'Inativo'}
-                    </Badge>
-                  </button>
-                </TableCell>
-                <TableCell>
-                  <Button variant="ghost" size="sm" onClick={() => abrirEditar(mototaxista)}>
-                    Editar
-                  </Button>
-                </TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+      {/* E quando a consulta de agências não respondeu, a tela diz ISSO —
+          que é outra frase, e a verdadeira. Sem ela o botão acima ficaria
+          desabilitado sem motivo visível, trocando a afirmação falsa por
+          um estado mudo. */}
+      {estadoAgencias.estado !== 'ready' && estadoAgencias.estado !== 'inactive' && (
+        <AvisoDaConsulta
+          apresentacao={apresentar(estadoAgencias)}
+          aoRecarregar={() => void consultaAgencias.refetch()}
+        />
       )}
 
-      {agencias && agencias.length > 0 && (
+      <Consulta
+        estado={estadoMotoboys}
+        vazio={<p className="text-sm text-muted-foreground">Nenhum motoboy cadastrado ainda.</p>}
+        aoRecarregar={() => void consultaMotoboys.refetch()}
+      >
+        {(motoboys) => (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Nome</TableHead>
+                <TableHead>Agência</TableHead>
+                <TableHead>CPF</TableHead>
+                <TableHead>Telefone</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead />
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {motoboys.map((mototaxista) => (
+                <TableRow key={mototaxista.id}>
+                  <TableCell>{mototaxista.nome}</TableCell>
+                  <TableCell>{nomeAgencia(mototaxista.agenciaId)}</TableCell>
+                  <TableCell>{mototaxista.cpf ?? '—'}</TableCell>
+                  <TableCell>{mototaxista.telefone ?? '—'}</TableCell>
+                  <TableCell>
+                    <button
+                      type="button"
+                      onClick={() =>
+                        alternarAtivo.mutate({ id: mototaxista.id, ativo: !mototaxista.ativo })
+                      }
+                      title={mototaxista.ativo ? 'Clica pra desativar' : 'Clica pra reativar'}
+                    >
+                      <Badge variant={mototaxista.ativo ? 'secondary' : 'destructive'}>
+                        {mototaxista.ativo ? 'Ativo' : 'Inativo'}
+                      </Badge>
+                    </button>
+                  </TableCell>
+                  <TableCell>
+                    <Button variant="ghost" size="sm" onClick={() => abrirEditar(mototaxista)}>
+                      Editar
+                    </Button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </Consulta>
+
+      {temAgencia && agencias && (
         <MototaxistaFormDialog
           key={editando?.id ?? 'novo'}
           mototaxista={editando}

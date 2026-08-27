@@ -24,14 +24,21 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { EmAndamento } from '@/components/EmAndamento'
+import { Consulta } from '@/components/Consulta'
+import { derivarEstado } from '@/lib/estadoDeConsulta'
 import { normalizarNome } from '@/lib/texto'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
 
+// Estava no grupo "mudo", e era o mais silencioso de todos: nem sequer
+// tinha frase de vazio — sem resposta, a tabela simplesmente não
+// aparecia. Numa tela onde o admin gerencia quem tem acesso ao sistema,
+// "não há usuários" e "não consegui perguntar" precisam se distinguir.
 export function UsuariosCadastro({ profile }: { profile: AuthProfile }) {
-  const { data, isLoading, isError, error } = useUsuarios()
+  const consulta = useUsuarios()
+  const estado = derivarEstado(consulta)
   const [editando, setEditando] = useState<Usuario | null>(null)
   const [dialogAberto, setDialogAberto] = useState(false)
   const alternarAtivo = useAlternarAtivoUsuario()
@@ -56,11 +63,14 @@ export function UsuariosCadastro({ profile }: { profile: AuthProfile }) {
         <Button onClick={abrirNovo}>Novo usuário</Button>
       </div>
 
-      {isLoading && <Carregando />}
-      {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
       {erroToggle && <p className="text-sm text-destructive">{erroToggle}</p>}
 
-      {!isLoading && !isError && data && data.length > 0 && (
+      <Consulta
+        estado={estado}
+        vazio={<p className="text-sm text-muted-foreground">Nenhum usuário cadastrado ainda.</p>}
+        aoRecarregar={() => void consulta.refetch()}
+      >
+        {(usuarios) => (
         <Table>
           <TableHeader>
             <TableRow>
@@ -73,7 +83,7 @@ export function UsuariosCadastro({ profile }: { profile: AuthProfile }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.map((usuario) => {
+            {usuarios.map((usuario) => {
               const euMesmo = usuario.id === profile.id
               return (
                 <TableRow key={usuario.id}>
@@ -122,7 +132,8 @@ export function UsuariosCadastro({ profile }: { profile: AuthProfile }) {
             })}
           </TableBody>
         </Table>
-      )}
+        )}
+      </Consulta>
 
       <UsuarioFormDialog
         key={editando?.id ?? 'novo'}
