@@ -170,9 +170,30 @@ console.log('\n--- (7) E3.C — o id do previsto vem do PAYLOAD, nunca de dentro
   checa('e não o cunha lá dentro',
     !/criarPagamentoPrevisto[\s\S]{0,600}?uuidv7\(\)/.test(pagamentos))
 
+  /**
+   * TODA asserção de fiação lê o CÓDIGO, nunca a prosa.
+   *
+   * Isto entrou depois de a asserção abaixo PASSAR FALSAMENTE: o E4
+   * removeu `pagamentoPrevistoId` de `NovaEntrega` e deixou o nome antigo
+   * num comentário explicando a troca — e o regex casou com o
+   * comentário. Falso positivo é pior que falso negativo: o teste
+   * afirmava que um campo existia depois de ele ter saído.
+   *
+   * A armadilha é da família inteira: quanto melhor documentada a
+   * mudança, mais provável o falso positivo.
+   */
+  const semComentarios = (fonte: string) =>
+    fonte.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+
   const entregas = ler('src/data/entregas.ts')
-  checa('`NovaEntrega` carrega `pagamentoPrevistoId`',
-    /pagamentoPrevistoId: string/.test(entregas))
+  // E4 — `NovaEntrega` passou a carregar a LISTA. O id de cada previsto
+  // continua vindo do payload (que é o que o E3.C garantiu), agora um
+  // por linha.
+  checa('`NovaEntrega` carrega a lista de previstos, com id por linha',
+    /formasPrevistas: FormaPrevistaDoCadastro\[\]/.test(semComentarios(entregas)) &&
+      /pagamentoId: string/.test(semComentarios(entregas)))
+  checa('e o campo escalar do E3.C não sobrou no tipo',
+    !/^\s*pagamentoPrevistoId: string$/m.test(semComentarios(entregas)))
   // A janela: item enfileirado antes do E3.C não traz o campo, e a
   // ausência significa "legado" — igual à do `tipo` no envelope (2C.5).
   checa('e `criarEntrega` tolera a ausência (fila antiga)',
@@ -180,11 +201,19 @@ console.log('\n--- (7) E3.C — o id do previsto vem do PAYLOAD, nunca de dentro
   checa('idem no previsto retroativo da divergência',
     /pagamentoPrevistoId \?\? input\.entregaId/.test(pagamentos))
 
+  // ATUALIZADO NO E4, e a invariante é a MESMA — o que mudou foi a
+  // forma. O id do previsto deixou de ser um `useState` solto e passou a
+  // morar em cada linha de `formas`, porque agora são de uma a três.
+  //
+  // Continua valendo, e é isto que estas duas asserções guardam:
+  //   1. o id é cunhado NA TELA, separado do id da entrega;
+  //   2. e é reciclado no reset, senão o segundo vale do dia colidiria
+  //      na PK com o primeiro.
   const cadastro = ler('src/pages/CadastroEntrega.tsx')
   checa('a tela cunha um id SEPARADO do da entrega',
-    /const \[pagamentoPrevistoId, setPagamentoPrevistoId\] = useState\(\(\) => uuidv7\(\)\)/.test(cadastro))
+    /function linhaNova\(\): LinhaForma \{\s*\n\s*return \{ pagamentoId: uuidv7\(\)/.test(cadastro))
   checa('e recicla os dois juntos no reset',
-    /setId\(uuidv7\(\)\)\s*\n\s*setPagamentoPrevistoId\(uuidv7\(\)\)/.test(cadastro))
+    /setId\(uuidv7\(\)\)[\s\S]{0,600}?setFormas\(\[linhaNova\(\)\]\)/.test(cadastro))
 
   // E o que NÃO pode voltar: o id derivado da entrega. É ele que fazia
   // duas formas previstas colidirem na PK — a segunda batia no `23505`,

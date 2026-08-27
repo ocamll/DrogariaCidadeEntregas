@@ -14,6 +14,12 @@ export {
   FORMA_PAGAMENTO_OPTIONS,
   formasDoEvento,
   textoDoPagamentoAlterado,
+  // E4 — as duas regras do previsto 1:N. Moram em `lib/` pelo mesmo
+  // motivo das de cima, e são reexportadas aqui pra as telas
+  // continuarem com um import só.
+  MAX_FORMAS_PREVISTAS,
+  validarFormasPrevistas,
+  divergiuDoPrevisto,
 } from '@/lib/formasDePagamento'
 export type {
   FormaPagamento,
@@ -21,7 +27,7 @@ export type {
   LadoDoPagamentoAlterado,
 } from '@/lib/formasDePagamento'
 
-import type { FormaPagamento } from '@/lib/formasDePagamento'
+import type { FormaPagamento, FormaComValor } from '@/lib/formasDePagamento'
 
 export async function criarPagamentoPrevisto(input: {
   tenantId: string
@@ -75,7 +81,20 @@ export type PagamentoRealizado = { id: string; forma: FormaPagamento; valorCents
 export type MarcarDivergenciaInput = {
   tenantId: string
   entregaId: string
-  formaAnterior: FormaPagamento
+  /**
+   * TODOS os pagamentos previstos do vale — E4. Era
+   * `formaAnterior: FormaPagamento` mais `valorCentsPrevisto: number`,
+   * e os dois juntos só sabiam descrever UM previsto.
+   *
+   * Vira o `de` do evento `pagamento_alterado`. O E3.B corrigiu esse
+   * mesmo campo do lado do servidor (`limit 1` → agrega todos); aqui
+   * está o OUTRO escritor do mesmo tipo de evento, que ficou escalar.
+   *
+   * Quando `criarPrevisto` (vale legado, sem previsto nenhum), a lista
+   * traz exatamente uma linha: a forma que o caixa informou e o valor da
+   * compra. É ela que vira o previsto retroativo.
+   */
+  previstos: FormaComValor[]
   pagamentosRealizados: PagamentoRealizado[]
   justificativa: string
   registradoPor: string
@@ -85,7 +104,6 @@ export type MarcarDivergenciaInput = {
   // retroativo com a forma "esperada" que o caixa informou, antes de
   // gravar o(s) realizado(s).
   criarPrevisto: boolean
-  valorCentsPrevisto: number
   /**
    * O id do previsto retroativo — E3.C. Só é usado quando
    * `criarPrevisto`, mas vem SEMPRE no payload: cunhá-lo condicionalmente
@@ -109,6 +127,29 @@ export type MarcarDivergenciaInput = {
 // pix, metade dinheiro) — por isso pagamentosRealizados é uma lista, não
 // um valor só. Uma linha em `pagamentos` por forma.
 export async function marcarDivergencia(input: MarcarDivergenciaInput) {
+  // A JANELA DA FILA — E4, e ela é só de desenvolvimento.
+  //
+  // Um item enfileirado ANTES do E4 traz `formaAnterior` +
+  // `valorCentsPrevisto` e não traz `previstos`. O tipo governa o que se
+  // escreve de agora em diante; o `??` tolera o que já está no
+  // IndexedDB de alguém. Mesma forma da janela do `pagamentoPrevistoId`
+  // (E3.C) e da do `tipo` no envelope (2C.5).
+  //
+  // Sem ela, esse item gravaria `de: undefined` num evento append-only —
+  // e perderia o previsto retroativo junto, porque é dali que sai o
+  // valor dele.
+  //
+  // Morre no corte pré-V1, que apaga a fila.
+  const legado = input as unknown as {
+    formaAnterior?: FormaPagamento
+    valorCentsPrevisto?: number
+  }
+  const previstos: FormaComValor[] =
+    input.previstos ??
+    (legado.formaAnterior
+      ? [{ forma: legado.formaAnterior, valor_cents: legado.valorCentsPrevisto ?? 0 }]
+      : [])
+
   if (input.criarPrevisto) {
     // Previsto RETROATIVO, pra vale antigo que nunca teve um gravado.
     //
@@ -118,13 +159,18 @@ export async function marcarDivergencia(input: MarcarDivergenciaInput) {
     //
     // Mesma janela do `criarEntrega`: item enfileirado antes do E3.C não
     // traz o campo, e aí o comportamento antigo vale.
+    //
+    // UMA linha, sempre — e é o dialog que garante isso: o retroativo
+    // descreve um vale de antes de o modelo aceitar N, e o caixa informa
+    // uma forma esperada só. `previstos[0]` não é "a primeira de várias",
+    // é "a única".
     await criarPagamentoPrevisto({
       id:
         (input as { pagamentoPrevistoId?: string }).pagamentoPrevistoId ?? input.entregaId,
       tenantId: input.tenantId,
       entregaId: input.entregaId,
-      forma: input.formaAnterior,
-      valorCents: input.valorCentsPrevisto,
+      forma: previstos[0].forma,
+      valorCents: previstos[0].valor_cents,
       registradoPor: input.registradoPor,
       registradoEmLocal: input.registradoEmLocal,
     })
@@ -165,7 +211,15 @@ export async function marcarDivergencia(input: MarcarDivergenciaInput) {
     tipo: 'pagamento_alterado',
     idempotencyKey: input.eventoIdempotencyKey,
     payload: {
-      de: input.formaAnterior,
+      // E4 — LISTA, não escalar. Ver `previstos` em
+      // `MarcarDivergenciaInput`: é o mesmo campo que o E3.B corrigiu do
+      // lado do servidor, e este é o outro escritor do evento.
+      //
+      // O leitor já sabia ler as duas formas desde o E3.A
+      // (`formasDoEvento`), então nenhum evento antigo deixa de ser
+      // legível — `eventos` é append-only, e os que já existem com `de`
+      // escalar ficam assim para sempre.
+      de: previstos,
       para: input.pagamentosRealizados.map((p) => ({ forma: p.forma, valor_cents: p.valorCents })),
       justificativa: input.justificativa,
       autor_nome: input.autorNome,

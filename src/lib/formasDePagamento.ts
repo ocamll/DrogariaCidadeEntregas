@@ -96,3 +96,122 @@ export function textoDoPagamentoAlterado(lado: LadoDoPagamentoAlterado): string 
     })
     .join(' + ')
 }
+
+// =====================================================================
+// E4 — O PAGAMENTO PREVISTO PASSA A SER 1:N
+//
+// Até aqui um vale tinha UMA forma prevista, e ela valia a compra
+// inteira. O E3 tirou a premissa do modelo (o id do previsto deixou de
+// ser derivado da entrega); o E4 é quem passa a usar.
+//
+// As duas regras abaixo moram aqui, e não na tela, pelo motivo de
+// sempre: **regra que decide o que a tela AFIRMA não pode depender de
+// navegador pra ser exercitada.** A primeira versão do helper do E3.A
+// nasceu em `data/pagamentos.ts` e morreu na primeira execução do spec,
+// porque aquele arquivo importa o cliente Supabase, que lê
+// `import.meta.env`.
+// =====================================================================
+
+/**
+ * Quantas formas o cadastro aceita prever.
+ *
+ * TRÊS, e o número vem do CLAUDE.md — *"o cliente pode pagar em até 3
+ * formas na porta"*.
+ *
+ * **O dialog de divergência aceita QUATRO, e a diferença é deliberada.**
+ * Não são o mesmo tipo de afirmação: aqui se PREVÊ o que vai acontecer,
+ * lá se REGISTRA o que aconteceu. Ser mais permissivo no registro é o
+ * lado seguro de errar — recusar um fato consumado empurraria a
+ * correção pra fora do sistema, que é o que a regra 7 existe pra
+ * impedir. Recusar uma previsão só custa um clique.
+ */
+export const MAX_FORMAS_PREVISTAS = 3
+
+/**
+ * Valida as formas previstas de um cadastro de entrega.
+ *
+ * Devolve a mensagem de erro, ou `null` quando está tudo certo — mesma
+ * convenção do resto do projeto (`romaneio_retorno_validar` no SQL faz
+ * igual).
+ *
+ * **FORMA REPETIDA É RECUSADA**, e não é preciosismo:
+ *
+ *   - `entregas.convenio_id` é UMA coluna. Duas linhas de convênio
+ *     seriam dois acordos diferentes disputando o mesmo campo, e o
+ *     sistema não teria como dizer qual deles vale;
+ *   - "dinheiro + dinheiro" não é pagamento em duas formas, é um
+ *     pagamento só — e viraria duas linhas `p` no DCR1 dizendo a mesma
+ *     coisa com ids diferentes, dentro de um documento assinado;
+ *   - o caso real que isso pega é banal: o caixa clica "+ outra forma",
+ *     não troca o select, e o padrão fica valendo duas vezes.
+ *
+ * A SOMA TEM QUE BATER com o valor da compra — mesma regra que o dialog
+ * de divergência já aplica, e a que o caixa já conhece.
+ */
+export function validarFormasPrevistas(
+  formas: FormaComValor[],
+  valorCompraCents: number
+): string | null {
+  if (formas.length === 0) return 'Informe ao menos uma forma de pagamento.'
+  if (formas.length > MAX_FORMAS_PREVISTAS) {
+    return `No máximo ${MAX_FORMAS_PREVISTAS} formas de pagamento.`
+  }
+  if (formas.some((f) => f.valor_cents <= 0)) {
+    return 'Toda forma precisa de um valor maior que zero.'
+  }
+
+  const vistas = new Set<FormaPagamento>()
+  for (const f of formas) {
+    if (vistas.has(f.forma)) {
+      return `${FORMA_PAGAMENTO_LABEL[f.forma] ?? f.forma} aparece duas vezes — use uma linha por forma.`
+    }
+    vistas.add(f.forma)
+  }
+
+  const soma = formas.reduce((acc, f) => acc + f.valor_cents, 0)
+  if (soma !== valorCompraCents) {
+    return `A soma (${formatBRL(soma)}) não bate com o valor da compra (${formatBRL(valorCompraCents)}).`
+  }
+
+  return null
+}
+
+/**
+ * O previsto e o realizado divergem?
+ *
+ * **ESTE É UM GÊMEO**, e o outro lado está em
+ * `selar_romaneio_retorno_interno`:
+ *
+ * ```sql
+ * select coalesce(array_agg(pg.forma || '|' || pg.valor_cents
+ *                           order by pg.forma || '|' || pg.valor_cents), '{}')
+ *   into v_previsto ...
+ * v_divergiu := v_previsto is distinct from v_realizado;
+ * ```
+ *
+ * Ele nasceu porque os dois lados DISCORDAVAM. O cliente decidia por
+ * contagem — `linhas.length > 1 || linhas[0].forma !== formaEsperada` —
+ * o que só estava certo enquanto existisse um previsto só. Com dois, um
+ * vale previsto `pix + dinheiro` e pago exatamente `pix + dinheiro`
+ * seria fiel para o servidor e divergente para a tela: os dois
+ * escritores do mesmo fato afirmando coisas diferentes.
+ *
+ * **A ordenação não precisa casar com a do Postgres, e isso merece ser
+ * dito** porque parece que precisa. Cada lado ordena os DOIS conjuntos
+ * dele com o MESMO comparador e compara um com o outro — nunca o array
+ * ordenado de um lado com o do outro. Igualdade de multiconjunto é
+ * independente da ordem total escolhida, então collation nenhuma muda o
+ * resultado. O que precisa casar é a CHAVE (`forma|valor_cents`) e o
+ * fato de duplicata contar (multiconjunto, não conjunto).
+ */
+export function divergiuDoPrevisto(
+  previstos: FormaComValor[],
+  realizados: FormaComValor[]
+): boolean {
+  const chaves = (lista: FormaComValor[]) =>
+    lista.map((f) => `${f.forma}|${f.valor_cents}`).sort()
+
+  const a = chaves(previstos)
+  const b = chaves(realizados)
+  return a.length !== b.length || a.some((chave, i) => chave !== b[i])
+}

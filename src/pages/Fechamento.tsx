@@ -6,7 +6,7 @@ import {
   type ValeFechamento,
 } from '@/data/fechamento'
 import { useLojas } from '@/data/lojas'
-import { FORMA_PAGAMENTO_LABEL } from '@/data/pagamentos'
+import { FORMA_PAGAMENTO_LABEL, textoDoPagamentoAlterado } from '@/data/pagamentos'
 import { SangriaRomaneios } from '@/components/SangriaRomaneios'
 import { formatBRL } from '@/lib/money'
 import { dataLocal } from '@/lib/datas'
@@ -172,7 +172,15 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
                             {formatBRL(vale.valorCompraCents)}
                           </TableCell>
                           <TableCell>
-                            {vale.formaPrevista ? FORMA_PAGAMENTO_LABEL[vale.formaPrevista] : '—'}
+                            {/* Só os rótulos — E4. É a coluna "Forma
+                                prevista" da lista de conferência, e o
+                                valor de cada forma já está na coluna ao
+                                lado somado. */}
+                            {vale.formasPrevistas.length > 0
+                              ? vale.formasPrevistas
+                                  .map((p) => FORMA_PAGAMENTO_LABEL[p.forma] ?? p.forma)
+                                  .join(' + ')
+                              : '—'}
                           </TableCell>
                         </TableRow>
                       ))}
@@ -209,7 +217,13 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
                 vales={fechamento.divergencias}
                 render={(v) => (
                   <>
-                    Era <strong>{v.formaPrevista ? FORMA_PAGAMENTO_LABEL[v.formaPrevista] : '—'}</strong>,
+                    {/* COM VALOR por forma — E4, e aqui ele importa: é
+                        a tela onde o gestor justifica uma diferença ao
+                        financeiro, e "Era Pix, virou Dinheiro" sem os
+                        números não explica diferença nenhuma.
+                        `textoDoPagamentoAlterado` é o mesmo formatador
+                        do Registro de Auditoria. */}
+                    Era <strong>{textoDoPagamentoAlterado(v.formasPrevistas)}</strong>,
                     virou{' '}
                     <strong>
                       {v.formasRealizadas

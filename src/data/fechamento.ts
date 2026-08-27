@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { buscarComTeto } from '@/lib/paginacao'
-import type { FormaPagamento } from '@/data/pagamentos'
+import type { FormaPagamento, FormaComValor } from '@/data/pagamentos'
 
 // Apoio ao fechamento de caixa — o lado TELE da história, e só ele.
 //
@@ -27,7 +27,11 @@ export type ValeFechamento = {
   valorCompraCents: number
   valorEntregaCents: number
   entregaPagaClienteCents: number
-  formaPrevista: FormaPagamento | null
+  // TODAS as previstas — E4. Era singular, e a segunda dívida que o E3
+  // registrou como BLOQUEANTE. Aqui ela apareceria na aba Fechamento
+  // dizendo "Era: Pix" num vale que era pix + dinheiro, bem na tela onde
+  // o gestor justifica uma diferença ao financeiro.
+  formasPrevistas: FormaComValor[]
   formasRealizadas: Array<{ forma: FormaPagamento; valorCents: number }>
   justificativa: string | null
   motivoCancelamento: string | null
@@ -97,7 +101,9 @@ function mapVale(row: ValeRow): ValeFechamento {
     valorCompraCents: row.valor_compra_cents,
     valorEntregaCents: row.valor_entrega_cents,
     entregaPagaClienteCents: row.entrega_paga_cliente_cents,
-    formaPrevista: row.pagamentos.find((p) => p.momento === 'previsto')?.forma ?? null,
+    formasPrevistas: row.pagamentos
+      .filter((p) => p.momento === 'previsto')
+      .map((p) => ({ forma: p.forma, valor_cents: p.valor_cents })),
     formasRealizadas: realizados.map((p) => ({ forma: p.forma, valorCents: p.valor_cents })),
     // a justificativa é a mesma em todas as linhas realizadas (foi
     // gravada uma vez por forma) — a primeira basta

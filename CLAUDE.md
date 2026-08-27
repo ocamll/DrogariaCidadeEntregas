@@ -166,10 +166,14 @@ fração delas. **Não colapse a tabela porque a tela é simples.**
 
 - **`pagamentos` é tabela separada, não coluna.** O cliente pode pagar em até 3 formas
   na porta, e a forma realizada diverge da prevista em ~1 a 2 de cada 30 entregas.
-  A v1 grava um único registro `previsto` e libera um ou mais `realizado` quando
-  o caixa marca "divergiu" — inclusive dividido em várias formas (ex: metade pix,
-  metade dinheiro), uma linha de `pagamentos` por forma. A cardinalidade é 1:N de
+  Uma linha de `pagamentos` por forma, dos **dois** lados: **o previsto também é
+  1:N desde o E4** (2026-08-27) — o cadastro aceita até 3 formas previstas, e o
+  realizado até 4 (ver "Duas formas de pagamento" abaixo). A cardinalidade é 1:N de
   verdade, não só previsto/realizado.
+
+  **`pagamentos` NUNCA teve unique em `(entrega_id, momento)`** — o banco sempre
+  aceitou N. O 1:1 vivia só num default do cliente (`id` do previsto derivado do
+  uuid da entrega), removido no E3. Não houve constraint a derrubar nem backfill.
 
 - **`corridas` existe acima de `entregas`.** O motoboy leva 3 pedidos numa saída e
   assina uma vez. Assinatura pendura na corrida, não na entrega. Corrida com um
@@ -619,6 +623,18 @@ derivação, e desmarcar o convênio depois reescreveria o passado).
 
 Nunca comparar nome de convênio com `'Minerva'` no código — a regra é a flag.
 
+**Convênio pode compor o pagamento com outra forma, e a regra do integral
+continua valendo mesmo assim** (decidido em 2026-08-27, no E4). Metade
+convênio, metade dinheiro: se o convênio escolhido tem
+`farmacia_paga_entrega_integral`, a farmácia banca a entrega inteira. Quem
+banca a entrega é o convênio, e isso não depende de quanto da **compra**
+ele cobriu. Em código: `formas.some(f => f.forma === 'convenio')`, nunca
+uma comparação com a forma única.
+
+**Mas só UMA linha pode ser convênio** — `entregas.convenio_id` é uma
+coluna só, e duas seriam dois acordos disputando o mesmo campo, sem o
+sistema ter como dizer qual vale.
+
 **Transferência entre filiais paga a mesma tarifa, sempre 1 vale.**
 Confirmado na farmácia em 2026-08-11: quem leva o produto de uma filial
 pra outra é o motoboy da agência, e ela cobra por essa corrida como por
@@ -637,6 +653,60 @@ lida na hora do sync: se ela mudar enquanto o vale espera pra
 sincronizar, o certo é gravar a de quando o vale foi criado.
 
 ---
+
+## Duas formas de pagamento no cadastro
+
+Construído em 2026-08-27 (E4). O previsto passou a ser 1:N, como o
+realizado já era. Quase tudo que isso exigia **já estava pronto** — ver a
+tabela no item 88 do NOTAS: o canônico do DCR1 (e o gêmeo TypeScript), o
+payload, `romaneio_documentos_esperados`, o contexto do retorno e o
+pré-preenchimento do Romaneio de Retorno já varriam N previstos. **Nenhuma
+migration.**
+
+- **O caminho de UMA forma não mudou um passo.** Com uma linha, o valor
+  previsto **é** o da compra e o campo de valor nem existe na tela: mesmo
+  número de teclas, mesma cadeia de Enter, mesmo orçamento de 25
+  segundos. A segunda forma vem de um botão "+ outra forma" **fora da
+  cadeia de Enter** — o custo cai só sobre o caso que o pede, 1 ou 2 em
+  cada 30. Pôr "dividir" como opção do próprio select cobraria uma linha
+  a mais do dropdown em toda entrega.
+- **A soma tem que bater com o valor da compra**, e **forma repetida é
+  recusada** — uma linha por forma. O caso real que a segunda regra pega
+  é banal: o caixa clica "+ outra forma", não troca o select, e
+  "Dinheiro" fica valendo duas vezes. Sem ela o DCR1 sairia com duas
+  linhas `p` idênticas em conteúdo dentro de um documento assinado.
+- **O teto do cadastro é 3; o do dialog de divergência é 4, e a diferença
+  é deliberada.** Não são o mesmo tipo de afirmação: aqui se **prevê** o
+  que vai acontecer, lá se **registra** o que aconteceu. Ser mais
+  permissivo no registro é o lado seguro de errar — recusar um fato
+  consumado empurraria a correção pra fora do sistema. Recusar uma
+  previsão custa um clique.
+- **`status_documental` olha TODAS as formas** (`.some()`, nunca
+  `.includes()` de uma só): basta uma prever convênio ou crediário pra o
+  vale nascer com pendência de papel. É a mesma regra que
+  `romaneio_documentos_esperados` aplica no servidor varrendo todas as
+  linhas `p` — divergirem faria o retorno recusar
+  `documentos_nao_conferem` **depois** de colhidas as duas assinaturas.
+- **A validação acontece na TELA, antes de enfileirar — nunca em
+  `criarEntrega`.** Revalidar na sincronização poderia recusar uma
+  operação já aceita no balcão, e o item iria pra `erro` e pro backoff
+  pra sempre, que é o pior sintoma conhecido do projeto.
+
+**`divergiuDoPrevisto` é um GÊMEO, e ele nasceu de uma discordância
+medida.** O servidor compara conjuntos de `forma|valor`
+(`selar_romaneio_retorno_interno`); o cliente decidia por **contagem**
+(`linhas.length > 1 || linhas[0].forma !== esperada`). Enquanto existia um
+previsto só os dois concordavam por acidente — com dois, um vale previsto
+`pix + dinheiro` e pago exatamente `pix + dinheiro` seria fiel pro
+servidor e divergente pra tela. A ordenação dos dois lados **não** precisa
+casar: cada um ordena os próprios conjuntos com o próprio comparador, e
+igualdade de multiconjunto independe da ordem total escolhida. O que
+precisa casar é a chave e o fato de duplicata contar.
+
+**`pagamento_alterado` tem DOIS escritores**, e é fácil consertar um só. O
+E3.B corrigiu o do servidor (`limit 1` → agrega todos); `marcarDivergencia`
+ficou escalar até o E4. Quem mexer no `de` desse evento tem que mexer nos
+dois — `eventos` é append-only, e evento errado não se corrige depois.
 
 ## Cidade, filial e agência
 
@@ -3131,6 +3201,14 @@ duas vias do mesmo vale. Entrega distante multiplica os dois.
 cadastro continua sendo avaliada contra os 25 s, e campo novo ali continua
 exigindo justificativa explícita. A diferença é que agora dá pra medir de novo
 em vez de discutir no achismo — e uma regressão que coma a folga é visível.
+
+**O E4 é o exemplo de como gastar zero** (2026-08-27): as duas formas de
+pagamento entraram sem tocar no caminho de uma forma. Nenhum campo novo,
+nenhuma tecla a mais, a mesma cadeia de Enter — só um botão fora dela. O
+teste da regra: *"o que muda pra quem NÃO usa a feature?"* Se a resposta
+não for "nada", o desenho ainda não está pronto. **O cronômetro não foi
+rodado de novo**, e pela mesma razão não precisou: não há passo novo a
+medir no caminho medido.
 
 Requisitos derivados:
 - Foco automático no primeiro campo ao abrir

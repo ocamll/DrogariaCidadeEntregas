@@ -33,7 +33,7 @@ function checa(nome: string, condicao: boolean, extra = '') {
   if (!condicao) falhas++
 }
 
-const ler = (caminho: string) => readFileSync(caminho, 'utf8')
+const lerBruto = (caminho: string) => readFileSync(caminho, 'utf8')
 const LIB = 'src/lib/estadoDeConsulta.ts'
 
 /**
@@ -44,6 +44,29 @@ const LIB = 'src/lib/estadoDeConsulta.ts'
  */
 const codigo = (fonte: string) =>
   fonte.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+
+/**
+ * `ler` DEVOLVE CÓDIGO, e é essa a mudança do E4 (2026-08-27).
+ *
+ * O `codigo()` acima já existia — este spec aprendeu a lição na primeira
+ * rodada dele. Só que ele era aplicado NO CALL SITE, e um call site
+ * esquecido não dá erro: dá uma asserção que lê prosa sem ninguém notar.
+ * Era o caso do bloco (1), que lia cru e afirmava coisas como
+ * `/export type LeituraDeConsulta/` — um comentário citando o tipo faria
+ * a asserção passar sem o tipo existir.
+ *
+ * A diferença entre as duas formas é o padrão: com `codigo()` no call
+ * site, o seguro exige lembrar; com `ler` já limpo, o seguro é o que
+ * acontece sozinho. Os `codigo(ler(...))` que sobraram continuam
+ * corretos — a limpeza é idempotente — e valem como documentação.
+ *
+ * Motivada por duas mordidas no E4, e a pior foi um FALSO POSITIVO: uma
+ * asserção do E3.C continuou passando depois de o campo que ela protegia
+ * ter sido removido, casando com o comentário que explicava a remoção.
+ *
+ * Quem precisar da prosa de propósito usa `lerBruto` e diz por quê.
+ */
+const ler = (caminho: string) => codigo(lerBruto(caminho))
 const usa = (caminho: string, agulha: RegExp) => agulha.test(codigo(ler(caminho)))
 
 /**
