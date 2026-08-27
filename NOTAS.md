@@ -106,7 +106,7 @@ invariantes já construídas.
 E1   normalização de texto livre     ✓  itens 84 e 85
 E1.1 busca sem acento                ✓  migration aplicada
 E2   estados visuais de consulta     ✓  item 86 — 18 de 18 migrados
-E3   id próprio do pagamento previsto  ✓  item 87 — migration aplicada
+E3   id próprio do pagamento previsto  ✓  item 87 — aplicada e conferida
 E4   duas formas de pagamento no cadastro  ←  próximo
 E5..E9  login, router, divergência, agência, endereço
 ```
@@ -117,9 +117,20 @@ olharia: o evento `pagamento_alterado` escolhia UM previsto com
 existir qualquer caminho capaz de criar o segundo — que é a diferença
 entre consertar um defeito e descobri-lo depois de selar um documento.
 
-**Falta UMA conferência do E3**, e ela é clique: o verificador DEPOIS da
-migration, com o gate `antes == depois` (o baseline antes foi
-`16 · 16 · 0`). Ver o fim do item 87.
+**⚠️ O E3 ESTÁ NUMA BRANCH, não na `main`:**
+
+```
+main                            f2fe300  E1
+                                9b5afcc  E2      ← último estado na main
+feat/e3-pagamentos-previstos    220e6c9  E3
+                                ???????  E3: conferência pós-migration
+```
+
+**Mas a MIGRATION já está aplicada no banco de desenvolvimento** — git
+não isola Supabase. Então a `main` sozinha já não corresponde ao banco:
+ela não tem os leitores bicompatíveis do E3.A, e o evento novo escreve
+`de` como lista. Na prática, **trabalhe a partir da branch**, e faça o
+merge quando quiser — ele não tem conflito com nada.
 
 **O E2 não foi padronização de markup.** Ele achou um defeito de
 comportamento em nove telas: com a query PAUSADA (offline sem cache) o
@@ -135,10 +146,21 @@ configuração pendente, é infra inteira, e os passos 5 e 6 do roteiro do
 corte dependem dela.
 
 **Se você está retomando, comece por "PRÓXIMA SESSÃO", perto do fim deste
-arquivo.** É lá que está o trabalho combinado — hoje o **E2**, com as
+arquivo.** É lá que está o trabalho combinado — hoje o **E4**, com as
 decisões já fechadas (React Router entra na stack; username usa
-identificador técnico interno) e os cinco achados da auditoria que
-mudaram a ordem das etapas. **O trabalho vive na `main`.**
+identificador técnico interno) e os achados da auditoria que mudaram a
+ordem das etapas.
+
+**ONDE O TRABALHO VIVE MUDOU NO E3.** Até o E2 era tudo na `main`; o E3
+foi para uma branch porque passou a mexer em banco:
+
+```
+git checkout feat/e3-pagamentos-previstos
+```
+
+A `main` está no E2 (`9b5afcc`) e **já não corresponde ao banco** — a
+migration do E3 foi aplicada no mesmo Supabase de desenvolvimento, e
+branch do git não isola banco. Merge quando quiser: não há conflito.
 
 ## 1. Fila offline nas outras 4 escritas
 
@@ -7170,35 +7192,41 @@ operacional capaz de criar dois previstos.** Ele torna o modelo capaz de
 ### O que foi medido
 
 ```
-baseline ANTES da migration, como admin
-  16 · 16 · 0        (13 saídas + 3 retornos)
-
+baseline ANTES da migration, como admin     16 · 16 · 0   (13 saídas + 3 retornos)
 migration aplicada pelo usuário em 2026-08-26
+verificador DEPOIS                          16 · 16 · 0   ← IDÊNTICO
 
 specs   custódia 11 · E1 2 · E2 3 · E3 1 (30 asserções) · patch 11
         tsc -b ok · oxlint 9 avisos, os pré-existentes
 ```
 
-**PENDENTE, e é o único:** o verificador DEPOIS da migration. O gate não
-é "tem que dar 16" — é `antes == depois`. Esta migration não toca em
-hash nenhum, então qualquer movimento ali é sinal de que outra coisa
-mudou.
+**O GATE ERA `antes == depois`, e não "tem que dar 16".** A distinção
+importa porque o baseline SOBE a cada saída nova (§64: era 9, virou 10,
+virou 11) — um número maior não seria regressão. O que se prova aqui é
+que as mesmas 16 que verificavam continuam verificando, e que nenhuma
+sumiu.
 
-```sql
-select count(*)                                  as verificados,
-       count(*) filter (where divergencias = 0)  as validos,
-       coalesce(sum(divergencias), 0)            as divergencias
-  from public.verificar_romaneios_selados();
-```
+E era o esperado por construção: a migration troca um `select` dentro de
+um `jsonb_build_object` de evento, e não encosta em nenhuma das quatro
+expressões `digest(...)` — isso foi provado por diff antes de o arquivo
+existir. A medição não é redundante com a prova: ela é o mesmo método do
+§22 e do §49, onde medir o "antes" e o "depois" no MESMO instrumento foi
+o que impediu concluir certo por sorte.
 
-E os cinco casos da escrita nova (0 previstos → NULL; 1 legado; 2; ordem
+Os cinco casos da escrita nova (0 previstos → NULL; 1 legado; 2; ordem
 de inserção invertida → JSON idêntico; mesma forma duas vezes →
 desempate por uuid) estão como SQL rodável no rodapé da migration,
 dentro de `begin; … rollback;` — o rollback é obrigatório, porque
 `pagamentos` não tem policy de DELETE e a regra 4 proíbe apagar.
 
-**E3.A e E3.B FECHADOS. E3.C FECHADO em código.** Falta a conferência
-pós-migration, que é clique do usuário.
+**E3 FECHADO** — A, B e C, com a conferência pós-migration medida.
+
+O que continua sem exercício, e é honesto dizer: **nenhum retorno foi
+selado depois da migration**, então a escrita nova do evento
+(`de` como lista) ainda não aconteceu com dado real. Os cinco casos do
+rodapé cobrem a QUERY isolada; o evento inteiro só sai quando houver um
+retorno novo pra fechar. O primeiro que acontecer serve de conferência —
+a consulta está no item (4) do rodapé da migration.
 
 ## Commits desta sessão
 
@@ -7319,8 +7347,10 @@ Cada um apareceu porque o usuário mandou o resultado COMPLETO em vez de
 (E3.B, 2026-08-26). Quinta definição de
 `selar_romaneio_retorno_interno`, obtida por patch da quarta — o evento
 `pagamento_alterado` deixou de escolher UM previsto com `limit 1` e
-passou a agregar todos, com ordem total. Baseline ANTES: `16 · 16 · 0`.
-**A conferência DEPOIS ainda não foi rodada** — ver o fim do item 87.
+passou a agregar todos, com ordem total.
+
+**Verificador: `16 · 16 · 0` antes e `16 · 16 · 0` depois.** O gate era
+`antes == depois`, e ele fechou.
 
 7. `20260809190000_eventos_idempotency_key.sql`
 8. `20260809210000_receita_custodia.sql` (`tem_receita`,
@@ -7496,9 +7526,16 @@ conferidas no banco** pelo usuário, na ordem:
     zero linhas, porque nenhum vale de crediário foi lançado ainda.
 
 **Atenção pra quem for reescrever `selar_romaneio_retorno_interno`:** ela
-já tem DUAS definições no repositório (`20260820130000` e
-`20260820160000`). Parta da mais recente, mesma regra da
-`selar_romaneio_interno`.
+já tem **CINCO** definições no repositório — `20260820130000`,
+`20260820160000`, `20260820200000` e `20260826120000`. Parta da mais
+recente, mesma regra da `selar_romaneio_interno`.
+
+E não reescreva à mão: as duas últimas foram feitas por PATCH via script
+(`scripts/patch-selar-retorno-e3b.mts` é o do E3), com o diff conferido
+e as invariantes provadas antes de a migration existir. O risco que esse
+método evita é específico — mover sem querer uma das quatro expressões
+`digest(...)`, que não dá erro nenhum e só aparece meses depois como
+romaneio que deixou de verificar.
 
 **Atenção pra quem for reescrever `selar_romaneio_interno` de novo:** há
 TRÊS definições dela no repositório agora — a original de
@@ -7702,6 +7739,23 @@ select count(*) as verificados,
 - **O que eu NÃO consigo fazer daqui:** entrar no app (não digito
   senha) e rodar SQL. Conferência no banco e cronômetro no balcão são
   clique do usuário.
+
+  **Mas em 26/08 o usuário logou**, e isso mudou o que dá pra provar: a
+  verificação do E2 passou a ser medida no app rodando, com controle
+  negativo no mesmo instante (telas migradas dizendo `unavailable`
+  enquanto as ainda-antigas mentiam "nenhum…"). O roteiro que funcionou
+  está no item 86; o resumo é `javascript_tool` disparando a sequência
+  completa de eventos de ponteiro, e leitura do DOM em vez de
+  screenshot — o pane do navegador segue não compondo frames de forma
+  confiável.
+
+  Duas armadilhas medidas no caminho, e as duas voltam se alguém
+  repetir: `queryClient.clear()` esvazia o cache mas **não
+  re-renderiza**, então o DOM antigo fica no ar e parece que a migração
+  falhou (navegue pra uma tela ainda não buscada em vez disso); e montar
+  componente por fora da árvore exige importar os deps com o `?v=<hash>`
+  que o Vite serve, senão o `QueryClientProvider` é de outra instância e
+  os hooks não o enxergam.
 
 ### (histórico) A retomada de antes da 2C
 
