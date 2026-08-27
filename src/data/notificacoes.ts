@@ -1,7 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { FORMA_PAGAMENTO_LABEL, type FormaPagamento } from '@/data/pagamentos'
-import { formatBRL } from '@/lib/money'
+import { textoDoPagamentoAlterado, type LadoDoPagamentoAlterado } from '@/data/pagamentos'
 
 // Leitura agregada dos eventos que viram "notificação" pra gestão — 4
 // tipos hoje (pagamento_alterado, falta_receita, falta_documento_convenio,
@@ -28,8 +27,9 @@ export type Notificacao = {
 }
 
 type PayloadPagamentoAlterado = {
-  de: FormaPagamento
-  para: FormaPagamento | Array<{ forma: FormaPagamento; valor_cents: number }>
+  // `LadoDoPagamentoAlterado` nos DOIS: string no histórico, lista hoje.
+  de: LadoDoPagamentoAlterado
+  para: LadoDoPagamentoAlterado
   justificativa: string
   autor_nome: string
 }
@@ -60,12 +60,17 @@ function resumoEJustificativa(row: EventoNotificacaoRow): { resumo: string; just
   switch (row.tipo) {
     case 'pagamento_alterado': {
       const payload = row.payload as PayloadPagamentoAlterado
-      const de = FORMA_PAGAMENTO_LABEL[payload.de]
-      // eventos antigos (antes da divisão em várias formas) gravaram
-      // `para` como string única — normaliza pra sempre tratar como lista.
-      const paraTexto = Array.isArray(payload.para)
-        ? payload.para.map((p) => `${FORMA_PAGAMENTO_LABEL[p.forma]} (${formatBRL(p.valor_cents)})`).join(' + ')
-        : FORMA_PAGAMENTO_LABEL[payload.para]
+      // OS DOIS LADOS SÃO BICOMPATÍVEIS, e por razões diferentes:
+      //
+      //   `para`  virou lista quando a divergência passou a aceitar mais
+      //           de uma forma na porta;
+      //   `de`    vira lista no E3, porque um vale pode ter mais de um
+      //           pagamento previsto.
+      //
+      // Os antigos nunca vão ser reescritos — `eventos` é append-only
+      // (regra 6) —, então isto não é janela: é o histórico.
+      const de = textoDoPagamentoAlterado(payload.de)
+      const paraTexto = textoDoPagamentoAlterado(payload.para)
       return {
         resumo: `Divergência de pagamento — era ${de}, virou ${paraTexto}.`,
         justificativa: payload.justificativa,

@@ -48,6 +48,10 @@ function CadastroEntregaForm({
   onVoltar: () => void
 }) {
   const [id, setId] = useState(() => uuidv7())
+  // Cunhado JUNTO com o id da entrega e reciclado junto no reset: os dois
+  // viajam no mesmo payload, e o previsto precisa do seu próprio pra o
+  // reenvio da fila continuar idempotente (E3.C).
+  const [pagamentoPrevistoId, setPagamentoPrevistoId] = useState(() => uuidv7())
   const [nome, setNome] = useState('')
   const [endereco, setEndereco] = useState('')
   // dígitos crus da máscara de centavos ('' = vazio, '12345' = R$ 123,45)
@@ -96,6 +100,7 @@ function CadastroEntregaForm({
 
   function resetForm() {
     setId(uuidv7())
+    setPagamentoPrevistoId(uuidv7())
     setNome('')
     setEndereco('')
     setValorCompra('')
@@ -129,6 +134,7 @@ function CadastroEntregaForm({
 
     const payload: NovaEntrega = {
       id,
+      pagamentoPrevistoId,
       tenantId: profile.tenantId,
       lojaId,
       criadoPor: profile.id,

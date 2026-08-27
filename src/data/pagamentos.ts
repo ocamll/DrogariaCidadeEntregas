@@ -1,30 +1,27 @@
 import { supabase, isDuplicateKeyError } from '@/lib/supabase'
 import { inserirEventoIdempotente } from '@/data/eventos'
 
-export type FormaPagamento =
-  | 'dinheiro'
-  | 'credito'
-  | 'debito'
-  | 'pix'
-  | 'convenio'
-  | 'convcard'
-  | 'crediario'
-  | 'outro'
+// O VOCABULÁRIO DAS FORMAS mora em `lib/formasDePagamento.ts`, e é
+// reexportado aqui pra nenhum importador ter mudado.
+//
+// Ele saiu daqui no E3.A por um motivo concreto: este arquivo importa o
+// cliente Supabase, que lê `import.meta.env`, e isso não existe sob
+// `tsx`. Enquanto a leitura do evento `pagamento_alterado` morava neste
+// módulo, ela não tinha como ser exercitada fora do navegador — e é
+// justamente uma regra que decide o que a tela AFIRMA.
+export {
+  FORMA_PAGAMENTO_LABEL,
+  FORMA_PAGAMENTO_OPTIONS,
+  formasDoEvento,
+  textoDoPagamentoAlterado,
+} from '@/lib/formasDePagamento'
+export type {
+  FormaPagamento,
+  FormaComValor,
+  LadoDoPagamentoAlterado,
+} from '@/lib/formasDePagamento'
 
-export const FORMA_PAGAMENTO_LABEL: Record<FormaPagamento, string> = {
-  dinheiro: 'Dinheiro',
-  credito: 'Crédito',
-  debito: 'Débito',
-  pix: 'Pix',
-  convenio: 'Convênio',
-  convcard: 'ConvCard',
-  crediario: 'Crediário',
-  outro: 'Outro',
-}
-
-export const FORMA_PAGAMENTO_OPTIONS = Object.entries(FORMA_PAGAMENTO_LABEL) as Array<
-  [FormaPagamento, string]
->
+import type { FormaPagamento } from '@/lib/formasDePagamento'
 
 export async function criarPagamentoPrevisto(input: {
   tenantId: string
@@ -36,12 +33,29 @@ export async function criarPagamentoPrevisto(input: {
   // mesmo instante de ocorrido_em_local da entrega/divergência que gerou
   // este pagamento (dois relógios, regra 8).
   registradoEmLocal: string
-  // id determinístico (default: mesmo uuid da entrega, relação é 1:1),
-  // gerado por quem chama — nunca aqui dentro. pagamentos não tem policy de
-  // UPDATE (correção é registro novo, não alteração do previsto), então um
-  // reenvio da fila offline não pode contar com upsert: insere, e se a
-  // linha já existir (23505) trata como sucesso, não como erro.
-  id?: string
+  /**
+   * IDENTIDADE PRÓPRIA — E3.C. Era `id?`, com default = uuid da entrega,
+   * porque "a relação é 1:1".
+   *
+   * Ela não é. `pagamentos` nunca teve unique em `(entrega_id, momento)`
+   * — o banco sempre aceitou N. O 1:1 vivia só neste default, e ele
+   * fazia duas formas previstas colidirem na PK: a segunda batia no
+   * `23505`, era tratada como sucesso, e sumia em silêncio.
+   *
+   * OBRIGATÓRIO de propósito — mas o `?` não enumerou nada, e vale
+   * registrar: os dois chamadores JÁ passavam `id` explicitamente, com
+   * o valor errado. Quem os achou foi o levantamento, não o compilador.
+   * O que a obrigatoriedade compra é o FUTURO: um chamador novo não
+   * consegue mais omitir o id e herdar a premissa 1:1 sem perceber.
+   *
+   * Continua vindo de QUEM CHAMA, nunca daqui: `pagamentos` não tem
+   * policy de UPDATE (correção é registro novo, não alteração do
+   * previsto), então o reenvio da fila offline não pode contar com
+   * upsert. Ele insere e trata `23505` como sucesso — e isso só é
+   * idempotente se o id for o MESMO a cada tentativa. Cunhar aqui
+   * dentro geraria um id novo por reenvio e duplicaria o previsto.
+   */
+  id: string
 }) {
   const { error } = await supabase.from('pagamentos').insert({
     id: input.id,
@@ -72,6 +86,15 @@ export type MarcarDivergenciaInput = {
   // gravar o(s) realizado(s).
   criarPrevisto: boolean
   valorCentsPrevisto: number
+  /**
+   * O id do previsto retroativo — E3.C. Só é usado quando
+   * `criarPrevisto`, mas vem SEMPRE no payload: cunhá-lo condicionalmente
+   * deixaria a forma do item da fila depender de um booleano, e um
+   * reenvio que reavaliasse a condição cunharia outro id.
+   *
+   * Era `input.entregaId`, o mesmo default de `criarEntrega`.
+   */
+  pagamentoPrevistoId: string
   // chave gerada uma única vez por quem monta o payload (antes de
   // enfileirar) — é isso que torna o insert do evento seguro pra reenviar
   // depois de uma falha parcial, sem duplicar log.
@@ -87,11 +110,17 @@ export type MarcarDivergenciaInput = {
 // um valor só. Uma linha em `pagamentos` por forma.
 export async function marcarDivergencia(input: MarcarDivergenciaInput) {
   if (input.criarPrevisto) {
-    // mesmo id da entrega, mesmo padrão do criarEntrega — a relação
-    // pagamento-previsto:entrega é 1:1, e isso só roda quando ainda não
-    // existe previsto nenhum pra essa entrega (ver comentário do campo).
+    // Previsto RETROATIVO, pra vale antigo que nunca teve um gravado.
+    //
+    // Era `id: input.entregaId`, o mesmo default do `criarEntrega` — e o
+    // mesmo motivo de ele sair: a relação não é 1:1, e o id derivado
+    // fazia a segunda forma colidir na PK.
+    //
+    // Mesma janela do `criarEntrega`: item enfileirado antes do E3.C não
+    // traz o campo, e aí o comportamento antigo vale.
     await criarPagamentoPrevisto({
-      id: input.entregaId,
+      id:
+        (input as { pagamentoPrevistoId?: string }).pagamentoPrevistoId ?? input.entregaId,
       tenantId: input.tenantId,
       entregaId: input.entregaId,
       forma: input.formaAnterior,

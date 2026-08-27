@@ -106,9 +106,20 @@ invariantes já construídas.
 E1   normalização de texto livre     ✓  itens 84 e 85
 E1.1 busca sem acento                ✓  migration aplicada
 E2   estados visuais de consulta     ✓  item 86 — 18 de 18 migrados
-E3   id próprio do pagamento previsto  ←  próximo
-E4..E9  formas de pagamento, login, router, divergência, agência, endereço
+E3   id próprio do pagamento previsto  ✓  item 87 — migration aplicada
+E4   duas formas de pagamento no cadastro  ←  próximo
+E5..E9  login, router, divergência, agência, endereço
 ```
+
+**O E3 achou uma SEGUNDA suposição 1:1**, escondida onde ninguém
+olharia: o evento `pagamento_alterado` escolhia UM previsto com
+`limit 1`, e com dois teria gravado auditoria errada. Corrigido antes de
+existir qualquer caminho capaz de criar o segundo — que é a diferença
+entre consertar um defeito e descobri-lo depois de selar um documento.
+
+**Falta UMA conferência do E3**, e ela é clique: o verificador DEPOIS da
+migration, com o gate `antes == depois` (o baseline antes foi
+`16 · 16 · 0`). Ver o fim do item 87.
 
 **O E2 não foi padronização de markup.** Ele achou um defeito de
 comportamento em nove telas: com a query PAUSADA (offline sem cache) o
@@ -6921,6 +6932,274 @@ regressão   cadeia de custódia 11 · E1 2 · E2 3   todos verdes
 **E2 FECHADO.** O que ele mudou não foi a aparência: foi o app parar de
 afirmar sobre o mundo o que só sabe sobre a própria consulta.
 
+## 87. E3 — identidade do pagamento previsto, e a segunda suposição 1:1
+
+O achado nº 1 da auditoria das nove frentes dizia que o E4 estava
+bloqueado: `criarPagamentoPrevisto` usa `id: entregaId` ("relação é
+1:1"), então duas formas previstas colidiriam na PK e a segunda não
+entraria. Parecia um ajuste de uma linha.
+
+O levantamento — feito ANTES da migration, a pedido do usuário — achou
+que o perigo era outro.
+
+### O levantamento, e a notícia boa que ele deu primeiro
+
+`romaneio_canonico` **lê ao vivo** de `public.pagamentos` e põe `pg.id`
+na linha `p` do DCR1:
+
+```sql
+'p' || e'\t' || v_registro.entrega_id::text
+    || e'\t' || v_registro.id::text        -- ← o id do previsto
+```
+
+Ou seja: **todo romaneio de saída selado tem o id do previsto dentro do
+`document_hash`**. Se o verificador recomputasse o canônico, trocar essa
+identidade acusaria divergência em documentos que ninguém tocou.
+
+Não recompõe:
+
+```sql
+-- verificador_de_hash.sql:135
+-- Note que NÃO se recalcula o canônico a partir de `entregas`.
+v_recalc := encode(digest(r.canonico, 'sha256'), 'hex')
+```
+
+Ele prova que **os bytes assinados produzem o hash assinado**, usando
+`romaneios.canonico` gravado. Isso já estava certo por outro motivo (a
+regra 7 — o vale pode ter sido corrigido depois), e nos salvou aqui de
+graça. O `romaneios.payload` também congela o `pagamento_id`.
+
+### A SEGUNDA SUPOSIÇÃO 1:1, escondida, e que grava auditoria
+
+Em `selar_romaneio_retorno_interno`, o evento `pagamento_alterado`:
+
+```sql
+'de', (select pg.forma from public.pagamentos pg
+        where pg.entrega_id = v_entrega_id and pg.momento = 'previsto'
+        order by pg.id::text collate "C" limit 1),
+```
+
+**`limit 1`.** Com dois previstos — que é exatamente o que o E4 vai criar
+— o evento afirma que a divergência foi de UMA das formas e descarta a
+outra em silêncio. Não é registro incompleto: é registro **errado**, num
+evento de auditoria.
+
+E o que torna isso traiçoeiro é o contraste: a checagem da invariante do
+§78, **vinte linhas acima**, já é multi-consciente (`array_agg` de
+`forma|valor`). Quem lesse aquele bloco concluiria que a função inteira
+lida com N.
+
+O usuário tinha previsto exatamente esta classe: *"o perigo do E3 não é
+só duas formas colidirem. É existir uma segunda suposição 1:1 escondida
+em outro ponto e descobrir só depois de selar um documento."*
+
+### O inventário completo, e o que ele desarmou
+
+| ponto | assumia | desfecho |
+|---|---|---|
+| `criarPagamentoPrevisto` | `id?` default = `entregaId` | a premissa, removida no E3.C |
+| `entregas.ts` · `pagamentos.ts` | passam `id: entregaId` | os dois chamadores |
+| `selar_romaneio_retorno_interno` | `limit 1` no evento | **corrigido no E3.B** |
+| `entregas.ts:310` · `fechamento.ts:100` | `.find(previsto)?.forma` | **dívida BLOQUEANTE do E4** |
+| guard do §78 · `congelarRetorno` | "realizado ≠ id do previsto" | ficam integralmente |
+| `romaneio_canonico` · `payload` | leem `pg.id` ao vivo | seguros |
+| `documentos_esperados_do_retorno` | faz parse da linha `p` | seguro: lê texto gravado |
+| tabela `pagamentos` | — | **nunca impôs 1:1** |
+
+O último achado é o que encolheu a frente: **não existe unique em
+`(entrega_id, momento)`**. O banco sempre aceitou N; o 1:1 vivia só no
+default do cliente. Não houve constraint a derrubar, nem backfill.
+
+### A ordem READER-FIRST, e por que ela não é burocracia
+
+O usuário corrigiu o contrato aqui, e a correção é conceitual: o banco
+aceitar as duas formas (o `payload` é `jsonb`, sem constraint) torna a
+migration **estruturalmente** compatível, não **comportamentalmente**.
+Um leitor que só saiba interpretar `"pix"` quebra ao receber
+`[{forma,valor_cents}]`.
+
+```
+E3.A  os leitores aceitam string E lista
+E3.B  o SQL passa a ESCREVER lista
+E3.C  o cliente cunha id próprio
+```
+
+É protocolo distribuído: todo mundo aprende a LER o formato novo antes
+de alguém começar a escrevê-lo. Inverter faria o sintoma aparecer no
+Registro de Auditoria, que é onde menos se pode errar.
+
+### E3.A — e o helper que estava no lugar errado
+
+O `para` do evento JÁ era bicompatível nos dois leitores, com comentário
+explicando ("eventos antigos gravaram `para` como string única"). Fazer o
+`de` do mesmo jeito daria QUATRO cópias da mesma normalização.
+
+Extraído para um lugar só — e a primeira tentativa **falhou na primeira
+execução do spec**:
+
+```
+TypeError: Cannot read properties of undefined (reading 'VITE_SUPABASE_URL')
+```
+
+Eu tinha posto o helper em `data/pagamentos.ts`, que importa o cliente
+Supabase, que lê `import.meta.env` — inexistente sob `tsx`. É a
+disciplina que o projeto já tem e eu furei: **regra que decide o que a
+tela AFIRMA mora em `lib/` e não importa nada.** Movido para
+`src/lib/formasDePagamento.ts`, com `data/pagamentos.ts` reexportando —
+nenhum importador mudou, e agora existe teste onde antes só havia a
+esperança de que as duas cópias concordassem.
+
+**A decisão de leitura que vale guardar:** a string legada NÃO carrega
+valor, e o helper marca isso em vez de inventar.
+
+```
+'pix'                             →  "Pix"
+[{forma:'pix',valor_cents:1000}]  →  "Pix (R$ 10,00)"
+```
+
+Fabricar um `valor_cents` faria o Registro de Auditoria afirmar um
+número que ninguém gravou. E forma fora do enum (`'vale'`, que saiu do
+banco no §64) sai **crua** em vez de sumir.
+
+**O NBSP de novo.** Quatro casos falharam mostrando strings visualmente
+idênticas. `formatBRL` usa `toLocaleString('pt-BR')`, que põe U+00A0
+depois do `R$` — medido: `82,36,160,49,48,44,48,48`. As expectativas
+passaram a ser construídas com o próprio `formatBRL`, porque digitar o
+espaço à mão é o erro que qualquer um repete. É o §84 outra vez, noutro
+arquivo.
+
+### E3.B — a quinta definição, por patch da quarta
+
+Mesmo método da quarta (§78), e ele existe porque reescrever à mão a
+função mais crítica do projeto é a forma mais provável de mover sem
+querer uma linha de `digest(...)` — e fórmula de hash alterada por
+acidente não dá erro, dá romaneio que deixa de verificar meses depois.
+
+`scripts/patch-selar-retorno-e3b.mts`: extrai a 4ª, aplica um patch
+mínimo, imprime o diff, e **prova as invariantes antes de o arquivo da
+migration existir**.
+
+```
+2 linhas removidas, 23 acrescentadas (19 delas comentário)
+
+ok  há 4 expressões digest()
+ok  e elas continuam byte a byte idênticas
+ok  nenhum insert em assinaturas alterado
+ok  nenhum trecho do DCRR1 alterado
+ok  o guard do §78 intacto
+ok  nenhum ON CONFLICT alterado
+ok  o número de queries de pagamentos não mudou   2 → 2
+ok  e EXATAMENTE UMA delas mudou
+ok  e a que mudou é a do evento `pagamento_alterado`
+```
+
+**A ordem é TOTAL, e isso é do usuário:**
+
+```sql
+order by pg.forma, pg.id::text collate "C"
+```
+
+`order by pg.forma` sozinho deixa empate entre dois previstos da MESMA
+forma, e o Postgres não promete ordem útil aí. Mesmo não entrando em
+hash nenhum, é evento de auditoria: mesmos fatos têm que produzir a
+mesma representação.
+
+**E NULL, não `[]`:** sem previsto o `jsonb_agg` devolve NULL, e o
+escalar de antes também acabava em NULL. Um `coalesce(..., '[]')` diria
+"havia previsto, e ele estava vazio", que é outro fato.
+
+#### Um check meu que estava errado
+
+A primeira versão de "nenhuma OUTRA query de pagamentos alterada" falhou
+por defeito meu: a janela de 160 caracteres começa DEPOIS do `from`,
+então o `valor_cents` da query nova cai fora dela e meu filtro por
+conteúdo não a excluía — o script acusava a própria query patcheada.
+
+Trocado por uma afirmação mais simples e que prova mais: **"exatamente
+uma mudou, e é a do evento"**, comparando posicionalmente.
+
+### E3.C — e o `?` que não enumerou nada
+
+`criarPagamentoPrevisto` passou a EXIGIR o `id`. A intenção era o método
+da 2D.6 — deixar o compilador enumerar quem dependia do default. **Não
+enumerou nada**: os dois chamadores já passavam `id` explicitamente, só
+que com o valor errado. Quem os achou foi o levantamento.
+
+Fica registrado porque a lição não é "funcionou": o que a
+obrigatoriedade compra aqui é o FUTURO — um chamador novo não consegue
+mais omitir o id e herdar a premissa 1:1 sem perceber.
+
+**A janela da fila**, igual à do `tipo` no envelope (2C.5):
+
+```
+NovaEntrega ganha  pagamentoPrevistoId: string      ← o que nasce agora
+handler aceita     pagamentoPrevistoId ?? id        ← o que já está guardado
+```
+
+O tipo governa o que se escreve; o `??` tolera o item que já está no
+IndexedDB de alguém. Sem ele, esse item gravaria `undefined`, o banco
+cunharia um id aleatório A CADA REENVIO, e o previsto duplicaria — a
+fila reenvia sempre que a rede oscila. Morre no corte pré-V1.
+
+**O id é cunhado antes de enfileirar, nunca dentro da função.**
+`criarPagamentoPrevisto` insere e trata `23505` como sucesso, e isso só
+é idempotente se o id for O MESMO a cada tentativa.
+
+E na divergência ele é cunhado **sempre**, mesmo quando `criarPrevisto`
+é falso: forma de payload não deve depender de booleano, e um reenvio
+que reavaliasse a condição cunharia outro id.
+
+### A dívida BLOQUEANTE do E4, registrada aqui de propósito
+
+```
+E4 NÃO fecha enquanto:
+  src/data/entregas.ts:310    .find(p => p.momento === 'previsto')?.forma
+  src/data/fechamento.ts:100  idem
+ainda exibirem APENAS um previsto.
+```
+
+Elas ficaram fora do E3 por decisão conjunta: só passam a mentir quando
+existirem dois previstos, e **quem cria o segundo é o E4**. Mexer agora
+seria alterar coluna de lista sem ter o caso que a justifica — e no E4
+dá pra testar a UI contra um caso real.
+
+A condição que torna isso seguro: **o E3 não habilita nenhum caminho
+operacional capaz de criar dois previstos.** Ele torna o modelo capaz de
+1:N; o E4 passa a usar.
+
+### O que foi medido
+
+```
+baseline ANTES da migration, como admin
+  16 · 16 · 0        (13 saídas + 3 retornos)
+
+migration aplicada pelo usuário em 2026-08-26
+
+specs   custódia 11 · E1 2 · E2 3 · E3 1 (30 asserções) · patch 11
+        tsc -b ok · oxlint 9 avisos, os pré-existentes
+```
+
+**PENDENTE, e é o único:** o verificador DEPOIS da migration. O gate não
+é "tem que dar 16" — é `antes == depois`. Esta migration não toca em
+hash nenhum, então qualquer movimento ali é sinal de que outra coisa
+mudou.
+
+```sql
+select count(*)                                  as verificados,
+       count(*) filter (where divergencias = 0)  as validos,
+       coalesce(sum(divergencias), 0)            as divergencias
+  from public.verificar_romaneios_selados();
+```
+
+E os cinco casos da escrita nova (0 previstos → NULL; 1 legado; 2; ordem
+de inserção invertida → JSON idêntico; mesma forma duas vezes →
+desempate por uuid) estão como SQL rodável no rodapé da migration,
+dentro de `begin; … rollback;` — o rollback é obrigatório, porque
+`pagamentos` não tem policy de DELETE e a regra 4 proíbe apagar.
+
+**E3.A e E3.B FECHADOS. E3.C FECHADO em código.** Falta a conferência
+pós-migration, que é clique do usuário.
+
 ## Commits desta sessão
 
 
@@ -7035,6 +7314,13 @@ Cada um apareceu porque o usuário mandou o resultado COMPLETO em vez de
 "passou" — e três deles eram cobertura que eu tinha declarado sem ter.
 
 ## Migrations aplicadas nesta sessão
+
+**Última aplicada: `20260826120000_pagamento_alterado_todos_previstos.sql`**
+(E3.B, 2026-08-26). Quinta definição de
+`selar_romaneio_retorno_interno`, obtida por patch da quarta — o evento
+`pagamento_alterado` deixou de escolher UM previsto com `limit 1` e
+passou a agregar todos, com ordem total. Baseline ANTES: `16 · 16 · 0`.
+**A conferência DEPOIS ainda não foi rodada** — ver o fim do item 87.
 
 7. `20260809190000_eventos_idempotency_key.sql`
 8. `20260809210000_receita_custodia.sql` (`tem_receita`,
@@ -7237,7 +7523,7 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: o E3 da frente de produto
+### PRÓXIMA SESSÃO: o E4 da frente de produto
 
 > **Esta é a seção atual.** As de baixo são históricas: descrevem como
 > "próximo" coisas que já foram feitas.
@@ -7252,8 +7538,8 @@ itens, decidida em 2026-08-25, que roda ANTES do corte pré-V1.
 E1   normalização central          ✓  itens 84 e 85
 E1.1 busca sem acento              ✓  migration aplicada, 16·16·0
 E2   estados visuais de consulta   ✓  item 86 — 18 de 18
-E3   id próprio do pagamento previsto   <-  AQUI
-E4   duas formas de pagamento no cadastro
+E3   id próprio do pagamento previsto   ✓  item 87
+E4   duas formas de pagamento no cadastro  <-  AQUI
 E5   login por username
 E6   React Router + /notificacoes e /auditoria
 E7   divergência/regularização de valores
@@ -7261,13 +7547,32 @@ E8   portal da agência (RLS antes da tela)
 E9   endereço estruturado
 ```
 
-**O E3 MUDA A NATUREZA DA FRENTE, e vale saber antes de começar.** De E1
-a E2 o trabalho foi de UI e de estado, sem tocar em dado gravado. O E3
-volta a mexer em IDENTIDADE DE PAGAMENTO no banco — é migration de
-comportamento, não ajuste de tela. Daí o commit de checkpoint entre os
-dois: E1+E2 fecham um bloco que não encosta em `entregas` nem em
-`romaneios`, e o verificador de integridade volta a ser obrigatório a
-partir do E3.
+**A FRENTE MUDOU DE NATUREZA NO E3, e continua assim daqui pra frente.**
+De E1 a E2 o trabalho foi de UI e de estado, sem tocar em dado gravado;
+do E3 em diante mexe em banco. Daí o checkpoint na `main` entre os dois,
+e daí o E3 ter sido feito em **branch** (`feat/e3-pagamentos-previstos`)
+— com a ressalva que vale repetir: **branch do git NÃO isola o
+Supabase.** A migration é aplicada no mesmo banco de desenvolvimento,
+então a disciplina adotada foi a ADITIVA: nada destrutivo, nenhum
+backfill, e a `main` capaz de operar durante todo o desenvolvimento.
+
+**O E4 HERDA DUAS DÍVIDAS BLOQUEANTES do E3** — ver o fim do item 87:
+
+```
+E4 NÃO fecha enquanto:
+  src/data/entregas.ts:310
+  src/data/fechamento.ts:100
+ainda exibirem APENAS um previsto (`.find(...)?.forma`).
+```
+
+Elas ficaram de fora de propósito: só passam a mentir quando existirem
+dois previstos, e quem cria o segundo é o E4. Mexer antes seria alterar
+coluna de lista sem ter o caso que a justifica.
+
+**E o E3 deixou o modelo pronto:** `pagamentos` nunca teve unique em
+`(entrega_id, momento)` — o banco sempre aceitou N, e o 1:1 vivia só no
+id derivado do cliente, que saiu. O E4 não precisa de migration de
+schema pra criar o segundo previsto.
 
 **O que o E2 deixou pronto pro E5**, e que já está construído: o
 "verificando usuário…" do login novo é o `<Consulta>` com a variante
@@ -7299,10 +7604,13 @@ achados que mudaram o plano.
 
 #### Os cinco achados da auditoria que mudam o plano
 
-1. **E4 está bloqueado por colisão de chave primária.**
-   `criarPagamentoPrevisto` usa `id: entregaId` ("relação é 1:1"). Duas
-   formas previstas colidem na PK e a segunda não entra. É migration de
-   comportamento, não ajuste de UI — daí o E3 vir antes do E4.
+1. ~~**E4 está bloqueado por colisão de chave primária.**~~ —
+   **resolvido no item 87 (E3).** E o levantamento corrigiu o
+   diagnóstico: não era só a colisão. O `limit 1` no evento
+   `pagamento_alterado` era uma SEGUNDA suposição 1:1, escondida, que
+   teria gravado auditoria errada — e o banco nunca impôs 1:1 (não há
+   unique em `(entrega_id, momento)`), então nem havia constraint a
+   derrubar.
 2. **E9 toca o DCR1 e a trigger.** `cliente_endereco` está no canônico
    assinado (`canonico.ts:96`) e na lista congelada
    (`schema_inicial.sql:344`). Colunas novas precisam entrar na trigger,
@@ -7365,7 +7673,8 @@ lojas a R$ 9,00 e a agência Gabrielense —, esperando só **os convênios**
   `export PATH="/c/Program Files/nodejs:$PATH"`.
 - Os specs desta frente: `texto` e `fiacao-texto` (E1);
   `estado-de-consulta`, `fiacao-estado-de-consulta` e `consulta-render`
-  (E2). Os da cadeia de custódia continuam sendo o gate de regressão:
+  (E2); `pagamento-alterado` (E3). Os da cadeia de custódia continuam
+  sendo o gate de regressão:
   `canonico`, `canonico-retorno`, `dcrr1-vetores`, `congelar-retorno`,
   `custodia-do-retorno`, `envelope`, `offline-hash`,
   `despacho-sync-romaneio`, `dependencia-da-fila`,

@@ -23,6 +23,20 @@ const GERAM_DOCUMENTO_FISICO: FormaPagamento[] = ['convenio', 'crediario']
 
 export type NovaEntrega = {
   id: string
+  /**
+   * O id do pagamento PREVISTO — E3.C. Cunhado junto com o `id`, antes
+   * de enfileirar, e nunca dentro de `criarEntrega`.
+   *
+   * Tem que estar no payload porque o reenvio da fila precisa ser
+   * idempotente: `criarPagamentoPrevisto` insere e trata `23505` como
+   * sucesso, e isso só funciona se o id for O MESMO a cada tentativa.
+   * Cunhado dentro da função, cada reenvio criaria um previsto novo.
+   *
+   * Antes do E3 ele não existia porque era derivado (`= id`), e é
+   * justamente essa derivação que fazia duas formas previstas colidirem
+   * na PK.
+   */
+  pagamentoPrevistoId: string
   tenantId: string
   lojaId: string
   criadoPor: string
@@ -96,8 +110,22 @@ export async function criarEntrega(input: NovaEntrega): Promise<{ numeroVale: st
   if (error) throw error
   const row = data as unknown as { numero_vale: string }
 
+  // A JANELA DA FILA, e ela é só de desenvolvimento.
+  //
+  // Um item enfileirado ANTES do E3.C não tem `pagamentoPrevistoId` — o
+  // tipo governa o que se escreve de agora em diante, mas o IndexedDB de
+  // alguém pode ter o formato anterior. Sem o `??`, esse item gravaria
+  // `undefined` e o banco cunharia um id aleatório a cada reenvio,
+  // duplicando o previsto.
+  //
+  // A ausência significa "legado", exatamente como a do `tipo` no
+  // envelope (2C.5). Morre no corte pré-V1, que apaga a fila — não vira
+  // compatibilidade permanente.
+  const previstoId =
+    (input as { pagamentoPrevistoId?: string }).pagamentoPrevistoId ?? input.id
+
   await criarPagamentoPrevisto({
-    id: input.id,
+    id: previstoId,
     tenantId: input.tenantId,
     entregaId: input.id,
     forma: input.formaPagamento,

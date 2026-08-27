@@ -174,6 +174,10 @@ function DivergenciaPagamentoForm({
         valorCents: centsFromDigits(linha.valor),
       })),
       valorCentsPrevisto: valorCents,
+      // Sempre cunhado, mesmo quando `criarPrevisto` for falso: forma de
+      // payload não deve depender de booleano, e um reenvio que
+      // reavaliasse a condição cunharia outro id (E3.C).
+      pagamentoPrevistoId: uuidv7(),
       justificativa: normalizarParagrafo(justificativa),
       registradoPor: profile.id,
       autorNome: profile.nome,
