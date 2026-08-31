@@ -175,15 +175,54 @@ console.log('\n--- (3) segredo e identificador não são linguagem humana ---')
     'src/pages/NovaCorrida.tsx',
     'src/pages/RetornoCorrida.tsx',
   ]
+  // AS FUNÇÕES DE `texto.ts`, ENUMERADAS — e não `normalizar\w*`.
+  //
+  // O regex era `normalizar\w*\(`, e ele estava largo demais: a regra é
+  // *"isto nunca passa por `lib/texto.ts`"*, não *"isto nunca é
+  // normalizado por nada"*.
+  //
+  // O E5 provou a diferença. `normalizarUsername(username)` é o
+  // normalizador PRÓPRIO do username, em `lib/username.ts`, com regra
+  // oposta à de `normalizarNome` (aquele preserva acento, este tira). O
+  // spec o acusou como violação — verdadeiro pela letra, falso pela
+  // intenção.
+  //
+  // Deixar o regex largo cobraria um preço crescente: todo campo que
+  // ganhasse normalização própria — PIN formatado, token exibido — seria
+  // acusado, e a saída seria enfraquecer a regra ou encher de exceção.
+  const DE_TEXTO_TS = ['Linha', 'Paragrafo', 'Nome', 'Endereco', 'ParaBusca']
+
   let achados: string[] = []
   for (const arquivo of arquivos) {
     const fonte = ler(arquivo)
     for (const proibido of proibidoComoArgumento) {
-      const re = new RegExp(`normalizar\\w*\\(\\s*${proibido}\\b`, 'i')
+      const re = new RegExp(`normalizar(${DE_TEXTO_TS.join('|')})\\(\\s*${proibido}\\b`, 'i')
       if (re.test(fonte)) achados.push(`${arquivo}: ${proibido}`)
     }
   }
   checa('nenhum segredo/identificador normalizado', achados.length === 0, achados.join(' | '))
+
+  // CONTROLE NEGATIVO DO ESTREITAMENTO.
+  //
+  // Trocar `normalizar\w*` por uma lista fechada corre o risco de
+  // desligar a regra em vez de afiná-la — e o sintoma seria este bloco
+  // passando para sempre, sem nunca mais acusar nada. Então ele prova as
+  // duas metades sobre fonte sintético: o que TEM que pegar, e o que
+  // não pode mais pegar.
+  const pega = (fonte: string, alvo: string) =>
+    new RegExp(`normalizar(${DE_TEXTO_TS.join('|')})\\(\\s*${alvo}\\b`, 'i').test(fonte)
+
+  checa('ainda pega `normalizarNome(senha)`', pega('const x = normalizarNome(senha)', 'senha'))
+  checa('ainda pega `normalizarLinha(token)`', pega('normalizarLinha(token)', 'token'))
+  checa(
+    'ainda pega `normalizarParaBusca(email)`',
+    pega('normalizarParaBusca(email)', 'email')
+  )
+  checa(
+    'e NAO pega mais o normalizador proprio do username',
+    !pega('const u = normalizarUsername(username)', 'username'),
+    'ele mora em lib/username.ts e tem regra OPOSTA à de normalizarNome'
+  )
 
   // E o caso específico que mais preocupa: o painel de usuários mexe em
   // nome, e-mail e senha na MESMA tela.

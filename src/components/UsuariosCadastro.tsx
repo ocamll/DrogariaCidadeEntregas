@@ -14,6 +14,7 @@ import { useLojas } from '@/data/lojas'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
+import { validarUsername, normalizarUsername, usernameDoEmail } from '@/lib/username'
 import { Badge } from '@/components/ui/badge'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
@@ -75,7 +76,7 @@ export function UsuariosCadastro({ profile }: { profile: AuthProfile }) {
           <TableHeader>
             <TableRow>
               <TableHead>Nome</TableHead>
-              <TableHead>E-mail</TableHead>
+              <TableHead>Usuário</TableHead>
               <TableHead>Papel</TableHead>
               <TableHead>Filial</TableHead>
               <TableHead>Acesso</TableHead>
@@ -91,7 +92,7 @@ export function UsuariosCadastro({ profile }: { profile: AuthProfile }) {
                     {usuario.nome}
                     {euMesmo && <span className="ml-1 text-xs text-muted-foreground">(você)</span>}
                   </TableCell>
-                  <TableCell>{usuario.email ?? '—'}</TableCell>
+                  <TableCell>{usernameDoEmail(usuario.email)}</TableCell>
                   <TableCell>{PAPEL_USUARIO_LABEL[usuario.papel] ?? usuario.papel}</TableCell>
                   <TableCell>{usuario.lojaNome ?? '—'}</TableCell>
                   <TableCell>
@@ -157,7 +158,7 @@ function UsuarioFormDialog({
   const editando = usuario !== null
 
   const [nome, setNome] = useState(usuario?.nome ?? '')
-  const [email, setEmail] = useState(usuario?.email ?? '')
+  const [username, setUsername] = useState('')
   const [senha, setSenha] = useState('')
   const [papel, setPapel] = useState<PapelUsuario>(usuario?.papel ?? 'caixa')
   const [lojaId, setLojaId] = useState(usuario?.lojaId ?? '')
@@ -190,9 +191,12 @@ function UsuarioFormDialog({
       return
     }
 
-    const emailTrim = email.trim()
-    if (!emailTrim.includes('@')) {
-      setErro('E-mail inválido.')
+    // Valida com a MESMA regra que a Edge Function aplica — as duas
+    // são cópias uma da outra, conferidas por spec. Validar aqui é só
+    // pra o admin ver o problema antes do round-trip.
+    const erroUsername = validarUsername(username)
+    if (erroUsername) {
+      setErro(erroUsername)
       return
     }
     if (senha.length < 6) {
@@ -201,7 +205,7 @@ function UsuarioFormDialog({
     }
 
     criar.mutate(
-      { email: emailTrim, senha, nome: nomeTrim, papel, lojaId: lojaId || null },
+      { username, senha, nome: nomeTrim, papel, lojaId: lojaId || null },
       { onSuccess: () => onOpenChange(false), onError: (e) => setErro(e.message) }
     )
   }
@@ -232,15 +236,28 @@ function UsuarioFormDialog({
           {!editando && (
             <>
               <div className="flex flex-col gap-2">
-                <Label htmlFor="usuario-email">E-mail</Label>
+                <Label htmlFor="usuario-username">Usuário</Label>
                 <Input
-                  id="usuario-email"
-                  type="email"
+                  id="usuario-username"
+                  type="text"
                   autoComplete="off"
-                  placeholder="caixa2@drogariacidade.local"
-                  value={email}
-                  onChange={(e) => setEmail(e.target.value)}
+                  autoCapitalize="none"
+                  autoCorrect="off"
+                  spellCheck={false}
+                  placeholder="caixa2"
+                  value={username}
+                  onChange={(e) => setUsername(e.target.value)}
                 />
+                {/* O endereço técnico é DERIVADO, nunca digitado — a
+                    Edge Function o compõe, e recusa qualquer e-mail que
+                    venha no corpo do request. Mostrar aqui o que vai
+                    de fato ser gravado evita a surpresa de "José" virar
+                    "jose" sem ninguém avisar. */}
+                {username.trim() !== '' && (
+                  <p className="text-xs text-muted-foreground">
+                    Vai entrar como <strong>{normalizarUsername(username)}</strong>
+                  </p>
+                )}
               </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="usuario-senha">Senha inicial</Label>
@@ -257,8 +274,8 @@ function UsuarioFormDialog({
 
           {editando && (
             <div className="flex flex-col gap-2">
-              <Label>E-mail</Label>
-              <p className="text-sm text-muted-foreground">{usuario.email ?? '—'}</p>
+              <Label>Usuário</Label>
+              <p className="text-sm text-muted-foreground">{usernameDoEmail(usuario.email)}</p>
             </div>
           )}
 

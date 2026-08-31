@@ -18,6 +18,51 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 const PAPEIS_PERMITIDOS = ['caixa', 'gerente', 'admin'] as const
 const SENHA_MINIMA = 6
 
+// =====================================================================
+// GÊMEO DE `src/lib/username.ts` — E5
+//
+// Esta função roda em Deno, fora do bundle do app, então ela é uma
+// CÓPIA. Mesmo arranjo de `calcularOfflineEventHash`, que também tem
+// cópia na `sync-romaneio`.
+//
+// **AS DUAS TÊM QUE PRODUZIR OS MESMOS BYTES.** Divergindo, a conta
+// nasce com um endereço e o login tenta outro — e o sintoma é "senha
+// inválida", sem diagnóstico nenhum: não há verificador, não há canônico
+// impresso, só um usuário jurando que a senha está certa.
+//
+// `scripts/username.spec.mts` lê OS DOIS ARQUIVOS e compara o corpo
+// desta função e o valor do domínio. Não é confiança no copiar-colar: é
+// medido. Mexeu num lado, mexe no outro e roda o spec.
+// =====================================================================
+
+const DOMINIO_TECNICO = 'drogariacidade.invalid'
+const USERNAME_MIN = 3
+const USERNAME_MAX = 32
+
+function normalizarUsername(bruto: string): string {
+  return bruto
+    .trim()
+    .toLowerCase()
+    .normalize('NFD')
+    // As marcas combinantes, escritas com escape e NÃO com os caracteres
+    // literais: um range de combinantes no fonte é invisível, colide com
+    // a letra anterior no editor, e não sobrevive a um copiar-colar
+    // descuidado — num arquivo que tem gêmeo, isso é convite a divergir.
+    .replace(/[\u0300-\u036f]/g, '')
+}
+
+function validarUsername(bruto: string): string | null {
+  const u = normalizarUsername(bruto)
+  if (!u) return 'Informe o usuário.'
+  if (u.length < USERNAME_MIN) return `Usuário precisa de pelo menos ${USERNAME_MIN} caracteres.`
+  if (u.length > USERNAME_MAX) return `Usuário passa de ${USERNAME_MAX} caracteres.`
+  if (!/^[a-z]/.test(u)) return 'Usuário precisa começar com uma letra.'
+  if (!/^[a-z0-9._-]+$/.test(u)) {
+    return 'Usuário aceita só letras, números, ponto, hífen e sublinhado.'
+  }
+  return null
+}
+
 const cors = {
   'Access-Control-Allow-Origin': '*',
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -71,13 +116,26 @@ Deno.serve(async (req) => {
     return responder({ error: 'Corpo inválido.' }, 400)
   }
 
-  const email = String(corpo.email ?? '').trim().toLowerCase()
+  // O ENDEREÇO É COMPOSTO AQUI, NUNCA ACEITO DO CLIENTE — E5.
+  //
+  // Antes isto era `corpo.email`, validado só com `includes('@')`. Com o
+  // login por usuário o endereço deixou de ser um dado que alguém digita
+  // e virou uma DERIVAÇÃO do username, então aceitá-lo do corpo do
+  // request permitiria criar uma conta cujo endereço o login jamais
+  // comporia — uma conta que nasce inacessível.
+  //
+  // É a mesma regra que já vale para `tenant_id` e `papel` nesta função:
+  // nada que vem no corpo decide identidade.
+  const username = normalizarUsername(String(corpo.username ?? ''))
   const senha = String(corpo.senha ?? '')
   const nome = String(corpo.nome ?? '').trim()
   const papel = String(corpo.papel ?? '')
   const lojaId = corpo.lojaId ? String(corpo.lojaId) : null
 
-  if (!email || !email.includes('@')) return responder({ error: 'E-mail inválido.' }, 400)
+  const erroUsername = validarUsername(username)
+  if (erroUsername) return responder({ error: erroUsername }, 400)
+
+  const email = `${username}@${DOMINIO_TECNICO}`
   if (senha.length < SENHA_MINIMA) {
     return responder({ error: `Senha precisa de pelo menos ${SENHA_MINIMA} caracteres.` }, 400)
   }

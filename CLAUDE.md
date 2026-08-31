@@ -3528,13 +3528,43 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   dentro de `Painel.tsx`, com `onVoltar` como prop pra cada tela voltar pra lista. Isso
   aguenta bem o tanto de telas que o MVP tem hoje — se crescer muito mais, reconsiderar
   (mas aí é conversa pra ter, não decisão unilateral).
-- **Login é e-mail/senha (Supabase Auth nativo), não usuário.** Pra ficar rápido de
-  digitar sem construir um sistema de username de verdade, contas usam e-mail curto
-  e fake tipo `caixa1@drogariacidade.local` (não precisa ser e-mail real — não tem
-  fluxo de "esqueci minha senha" nem confirmação por e-mail). Decisão consciente,
-  não workaround temporário. Contas são criadas pelo painel de admin (o `email_confirm`
-  já vem marcado pela Edge Function justamente por isso); só a **troca de senha**
-  continua manual no Supabase.
+- **Login é USUÁRIO e senha desde o E5** (2026-08-27). O caixa digita
+  `camilo`, não um e-mail. Por baixo continua sendo o Supabase Auth
+  nativo: `src/lib/username.ts` compõe `camilo@drogariacidade.invalid` e
+  chama `signInWithPassword`.
+
+  **A arquitetura A é o que força esse desenho.** A decisão congelada
+  proíbe RPC pública que enumere usernames — e uma
+  `resolver_username(text) → email` É um oráculo de enumeração. Sem
+  lookup, sobra compor o endereço deterministicamente. De quebra a
+  unicidade global vem de graça (e-mail é único no Auth), e "global" é o
+  certo: antes de autenticar não existe tenant pra desempatar.
+
+  **`.invalid` é reservado pela RFC 2606** — nunca resolve, ninguém
+  registra, e se autodocumenta pra quem abre o painel do Supabase.
+  `DOMINIO_TECNICO` é uma constante só; **trocá-la exige atualizar o
+  e-mail de toda conta existente.**
+
+  **O e-mail é COMPOSTO no servidor, nunca aceito do cliente.** A Edge
+  Function deixou de ler `corpo.email` — aceitar o endereço permitiria
+  criar uma conta que o login jamais alcançaria. Mesma regra que já valia
+  pra `tenant_id` e `papel`.
+
+  **O GÊMEO é a parte frágil:** `normalizarUsername` existe no cliente e
+  numa cópia dentro da Edge Function (Deno, fora do bundle). Divergindo
+  em um byte, a conta nasce com um endereço e o login tenta outro — e o
+  sintoma é "senha inválida", sem verificador, sem canônico, sem pista.
+  `scripts/username.spec.mts` **lê os dois arquivos e compara o corpo das
+  duas funções**; mexeu num lado, mexe no outro.
+
+  Username **tira acento** (`josé` → `jose`), ao contrário de
+  `normalizarNome`, que preserva — o local part de um e-mail não os
+  aceita. É o par de contratos opostos do E1.1 outra vez, e por isso
+  username **nunca** passa por `lib/texto.ts`.
+
+  Não há fluxo de "esqueci minha senha" nem confirmação por e-mail
+  (`email_confirm` já vem marcado). Contas são criadas pelo painel de
+  admin; **trocar senha e trocar username continuam manuais no Supabase.**
 
 ---
 
