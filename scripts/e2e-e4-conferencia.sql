@@ -256,7 +256,20 @@ with alvo as (
 select a.numero_vale,
        ev.payload -> 'de'                       as de,
        jsonb_typeof(ev.payload -> 'de')         as tipo_do_de,    -- 'array'
-       jsonb_array_length(ev.payload -> 'de')   as formas_no_de,  -- 2
+       -- CASE OBRIGATÓRIO: `jsonb_array_length` LEVANTA EXCEÇÃO sobre um
+       -- escalar ("cannot get array length of a scalar"), e o `de` foi
+       -- string até o E3.B/E4.
+       --
+       -- `eventos` é append-only (regra 6): os antigos NUNCA vão ser
+       -- reescritos, então a forma escalar é permanente e toda consulta
+       -- sobre `de` tem que aguentar as duas. É a mesma razão pela qual
+       -- `formasDoEvento` existe no TypeScript — e sem este CASE a
+       -- consulta quebraria justamente nos vales de teste antigos.
+       case jsonb_typeof(ev.payload -> 'de')
+         when 'array'  then jsonb_array_length(ev.payload -> 'de')
+         when 'string' then 1     -- legado: uma forma, e SEM valor
+         else 0
+       end                                      as formas_no_de,  -- 2
        ev.payload -> 'para'                     as para,
        ev.payload ->> 'justificativa'           as justificativa,
        pr.nome                                  as autor,
@@ -331,7 +344,14 @@ select numero_vale,
        soma_prevista,
        soma_bate,
        tem_id_legado,
-       id = max(id) over ()   as alvo   -- o que os outros blocos usam
+       -- `row_number()`, e não `id = max(id) over ()`: **o Postgres não
+       -- tem agregado `max(uuid)`** (42883). E row_number é melhor por
+       -- outro motivo — ele repete LITERALMENTE o critério das outras
+       -- CTEs (`order by e.id desc limit 1`), então esta coluna não pode
+       -- discordar do alvo que os outros blocos vão usar. Um `max` sobre
+       -- `id::text` daria a resposta certa por um caminho diferente, e
+       -- caminho diferente é como dois lados divergem.
+       row_number() over (order by id desc) = 1   as alvo
   from candidatos
  order by id desc;
 
