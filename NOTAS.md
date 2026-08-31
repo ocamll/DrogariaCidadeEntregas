@@ -108,9 +108,19 @@ E1.1 busca sem acento                ✓  migration aplicada
 E2   estados visuais de consulta     ✓  item 86 — 18 de 18 migrados
 E3   id próprio do pagamento previsto  ✓  item 87 — aplicada e conferida
 E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
-E5   login por username                ←  próximo
+E5   login por username        IMPLEMENTADO · aceite pendente  item 89
 E6..E9  router, divergência, agência, endereço
 ```
+
+**O E5 NÃO ESTÁ FECHADO, e a distinção é o ponto do item 89.** O código
+está pronto e medido; o que falta é operacional e depende de acesso que
+eu não tenho — publicar a Edge Function e converter as contas. **Nenhum
+login por usuário aconteceu ainda.**
+
+E a ordem importa: **o E4 E2E vem ANTES**, enquanto o ambiente de
+autenticação continua conhecido. Mexer em conta antes de fechar o gate do
+E4 embaralharia um problema de login com o gate que decide o merge do
+PR #1.
 
 **O E3 achou uma SEGUNDA suposição 1:1**, escondida onde ninguém
 olharia: o evento `pagamento_alterado` escolhia UM previsto com
@@ -7565,12 +7575,310 @@ não aconteceu com dado real por nenhum dos dois escritores.
 
 **E4 FECHADO** — A, B, C e D.
 
+## 89. E5 — login por usuário: IMPLEMENTADO, aceite operacional PENDENTE
+
+**Este item não está fechado, e a separação é deliberada.** O código já
+rendeu decisões arquiteturais que são verdadeiras independentemente do
+teste ao vivo — elas valem porque decorrem da restrição congelada, não
+porque alguém logou. Registrá-las agora é o que as tira da branch.
+
+O que depende de acesso que eu não tenho fica na segunda lista, e ela é
+o que falta pra dizer "E5 fechado".
+
+```
+E5 — IMPLEMENTAÇÃO
+✓ username → <username>@drogariacidade.invalid
+✓ nenhuma RPC pública de resolução
+✓ nenhuma enumeração pré-auth
+✓ unicidade global via Supabase Auth
+✓ normalizarUsername cliente ↔ Edge byte a byte
+✓ login distingue recusado / indisponível / erro
+✓ E2 aplicado também à mutation de login
+✓ senha/PIN/token continuam fora de lib/texto
+✓ specs + tsc + build verdes
+
+E5 — ACEITE OPERACIONAL
+◷ Edge Function publicada
+◷ contas de teste convertidas
+◷ primeiro login real por username
+◷ senha errada comprovada como recusado
+◷ offline comprovado como indisponível, sem acusar senha
+◷ erro técnico comprovado separado de recusa
+```
+
+Branch: `feat/e5-login-username`, empilhada sobre o E4 (`adbe1f7`). Ela
+não entra no PR #1, que segue esperando o gate do E4.
+
+### A restrição congelada escreveu o desenho
+
+A decisão de 25/08 diz: *sem RPC pública que enumere usernames, sem
+autenticação caseira.* Isso não é preferência — é o que elimina as duas
+alternativas óbvias:
+
+| alternativa | por que cai |
+|---|---|
+| RPC `resolver_username(text) → email` | **é** um oráculo de enumeração: sonda quais usuários existem sem credencial nenhuma |
+| abrir `profiles` para o anônimo | idem, e ainda expõe nome, papel e filial |
+
+Sobra uma forma, e ela não tem consulta nenhuma antes de autenticar:
+
+```
+digita     camilo
+compõe     camilo@drogariacidade.invalid
+chama      signInWithPassword
+```
+
+Sem lookup, não há o que enumerar. E a unicidade global vem de graça —
+e-mail é único no Auth —, o que é o certo aqui: **antes de autenticar não
+existe tenant pra desempatar**, então username por tenant seria uma
+pergunta sem resposta.
+
+**Nenhuma migration, nenhuma tabela, nenhuma RPC.** É o segundo item
+seguido da frente que não toca no banco.
+
+### `.invalid`, e por que a escolha é permanente
+
+O usuário confirmou em 2026-08-30 que a farmácia não tem domínio próprio
+e deixou a escolha comigo. `.invalid` é reservado pela **RFC 2606**
+exatamente para isto: garantidamente não resolve, não pode ser
+registrado por ninguém, e nunca roteia correio de verdade. De quebra se
+autodocumenta — quem abre o painel do Supabase vê
+`camilo@drogariacidade.invalid` e entende na hora que não é endereço de
+e-mail de ninguém.
+
+`DOMINIO_TECNICO` é uma constante única. **Trocá-la significa atualizar o
+e-mail de toda conta existente**, porque o login passa a compor um
+endereço diferente do gravado — é uma linha aqui e uma migração de contas
+lá. Não é decisão de estilo.
+
+Havia uma incoerência que o levantamento achou e que vale ficar
+registrada: o CLAUDE.md documentava `drogariacidade.local`, mas as contas
+reais usam `drogcidade.sg`. `.local` é TLD reservado para mDNS e é
+recusado por parte dos validadores — a hipótese (não confirmada) é que
+alguém tenha tentado e o Supabase tenha recusado.
+
+### O gêmeo, que é a parte frágil
+
+```
+src/lib/username.ts                 monta o e-mail no LOGIN
+supabase/functions/criar-usuario    monta o e-mail na CRIAÇÃO
+```
+
+A Edge Function roda em Deno, fora do bundle, então carrega uma **cópia**
+de `normalizarUsername` — mesmo arranjo de `calcularOfflineEventHash`,
+que também tem cópia na `sync-romaneio`.
+
+**Divergindo em um byte, a conta nasce com um endereço e o login tenta
+outro.** O sintoma é *"senha inválida"*, e o diagnóstico é pior que o dos
+canônicos: não há verificador, não há canônico impresso, não há nada além
+de um usuário jurando que a senha está certa.
+
+Por isso `scripts/username.spec.mts` **lê os dois arquivos e compara o
+corpo das duas funções** (comentário e indentação removidos, o resto
+byte a byte) mais o valor do domínio. Não é confiança no copiar-colar: é
+medido.
+
+E a Edge Function **deixou de ler `corpo.email`**, com asserção que o
+cobra. O endereço virou DERIVAÇÃO do username, então aceitá-lo do corpo
+do request permitiria criar uma conta cujo endereço o login jamais
+comporia — **uma conta que nasce inacessível**. É a mesma regra que já
+valia ali para `tenant_id` e `papel`: nada que vem no corpo decide
+identidade.
+
+### O E2 ganhou a décima tela
+
+O E2 caçou, em nove telas, a cadeia que AFIRMA vazio sobre uma consulta
+que nunca respondeu. O login escapou **por ser escrita, não consulta** —
+e carregava a mesma família de defeito na forma mais crua possível:
+
+```tsx
+{mutation.isError && <p>E-mail ou senha inválidos.</p>}
+```
+
+Qualquer erro virava credencial inválida, inclusive não ter rede. Offline
+o app afirmava que a senha estava errada sem ter tido a quem perguntar —
+e mandava a pessoa **trocar uma senha que estava certa**.
+
+`classificarFalhaDeLogin` devolve `recusado | indisponivel | erro`, e a
+ordem das checagens é parte da regra: `online: false` vem **primeiro**,
+porque sem rede não existe resposta autoritativa e um status residual não
+pode virar veredito.
+
+Duas coisas que o spec cobra e que são o ponto todo:
+
+- **a mensagem de `indisponivel` não fala em senha** — nem a palavra, nem
+  "inválido". A tela não sabe se ela está certa e não deve chutar;
+- **o ramo do `TypeError`**, porque `navigator.onLine === true` com rede
+  morta é caso real (portal cativo, DNS caído, servidor fora), e esse
+  erro vem como exceção do `fetch`, não pelo `error` do supabase-js. Sem
+  ele, ficar offline com a tela aberta voltava a virar "senha inválida".
+
+`navigator.onLine` é lido **no instante da ação**, não no do último
+render — a regra que a Nova Corrida já seguia.
+
+### O identificador interno não aparece na UI — com UMA exceção, deliberada
+
+A lista de usuários e o dialog de edição mostram `camilo`, nunca
+`camilo@drogariacidade.invalid`: quem faz isso é `usernameDoEmail`. O
+formulário de criação mostra "Vai entrar como **camilo**", que é o
+username normalizado, não o endereço.
+
+**A exceção:** conta de OUTRO domínio sai crua. Durante a conversão
+existe um instante em que as duas formas convivem no banco, e mostrar
+`adminteste` para uma conta que ainda é `adminteste@drogcidade.sg`
+afirmaria uma conversão que não aconteceu. **O desalinho tem que ficar
+visível**, e tem caso no spec — alguém vai querer "consertar" isso e
+esconder o endereço; não conserte.
+
+### Os DOIS achados de ferramental
+
+O código final não explica nenhum dos dois sozinho.
+
+#### 1. O range Unicode sem escape comia dígitos
+
+`normalizarUsername` tira acento com NFD + corte das marcas
+combinantes. Ao trocar os caracteres literais pela forma escapada, um
+`sed` comeu as barras invertidas:
+
+```
+pretendido   .replace(/[̀-ͯ]/g, '')
+gravado      .replace(/[0300-036f]/g, '')
+```
+
+O segundo **não é um range de combinantes: é uma classe de dígitos**
+(`0`, `3`, `0`–`0`, `3`, `6`, `f`). `joao2` perdia o `2`, e
+`caixa1` viraria `caixa`.
+
+E o que torna isso perigoso é a superfície: um username silenciosamente
+encurtado gera um e-mail técnico diferente do que a Edge Function gravou
+— exatamente o modo de falha "senha inválida sem pista" que o gêmeo
+existe pra impedir, chegando pelo caminho de dentro.
+
+Pegou porque o spec tem caso de dígito. Ficaram três: `joao2`, `123` e
+`a0123456789`, com o comentário dizendo qual defeito eles guardam.
+
+**A lição de ferramental:** `sed` e heredoc do bash comem barra
+invertida e crase. Neste arquivo houve três acidentes do mesmo tipo —
+esse, um comentário JSX que perdeu as palavras entre crases porque o
+bash as tratou como substituição de comando, e uma chave órfã deixada
+por um `slice`. Para linha com escape, `awk` com o texto vindo de
+arquivo funcionou; para bloco com crase, o `Write`/`Edit` direto.
+
+#### 2. `fiacao-texto` acusou o normalizador legítimo
+
+O spec falhou em `normalizarUsername(username)`:
+
+```
+FALHA  nenhum segredo/identificador normalizado
+       — src/components/UsuariosCadastro.tsx: username
+```
+
+**Verdadeiro pela letra, falso pela intenção.** O regex era
+`normalizar\w*\(\s*${proibido}`, e a regra que ele deveria cobrar é
+*"isto nunca passa por `lib/texto.ts`"* — não *"isto nunca é normalizado
+por nada"*. `normalizarUsername` é o normalizador PRÓPRIO do username,
+com regra **oposta** à de `normalizarNome`:
+
+```
+normalizarNome      PRESERVA acento — mudar um nome corrompe documento
+normalizarUsername  TIRA acento — local part de e-mail não os aceita
+```
+
+É o par de contratos opostos do E1.1 outra vez.
+
+Deixar o regex largo cobraria um preço crescente: todo campo que
+ganhasse normalização própria — PIN formatado, token exibido — seria
+acusado, e a saída seria enfraquecer a regra ou enchê-la de exceção.
+Estreitado para a lista fechada das funções de `texto.ts`
+(`Linha|Paragrafo|Nome|Endereco|ParaBusca`).
+
+**Com controle negativo**, pela lição do E4: estreitar corre o risco de
+DESLIGAR a regra em vez de afiná-la, e o sintoma seria o bloco passando
+para sempre sem nunca mais acusar nada. Quatro asserções sobre fonte
+sintético provam as duas metades — ainda pega `normalizarNome(senha)`,
+`normalizarLinha(token)` e `normalizarParaBusca(email)`, e não pega mais
+o normalizador próprio.
+
+### A data, e o aviso deste arquivo funcionando
+
+Eu datei o E5 como 2026-08-27 em dois lugares, por me basear no contexto
+da conversa. **A sessão atravessou a pausa do limite de uso**, e o
+relógio diz outra coisa:
+
+```
+E4  1997041   2026-08-27
+E5  adbe1f7   2026-08-30
+```
+
+Corrigido conferindo `git log --date=iso`, que é o que a seção "Cuidado
+com datas ao escrever aqui" manda fazer. É a segunda vez que esse aviso
+paga o próprio custo.
+
+### O que foi medido
+
+```
+tsc -b     limpo
+oxlint     9 avisos — os pré-existentes
+build      ok
+
+username 46 · falha-de-login 24 · texto 62 · fiacao-texto 39
+estado-de-consulta 114 · fiacao-estado-de-consulta 90
+zero falhas
+```
+
+O oxlint chegou a **10** no meio do caminho, e o aviso novo apontou o
+conserto certo: `FalhaDeLoginError` estava em `data/auth.tsx`, que
+exporta componente React. Ela é pura, não precisa do cliente Supabase, e
+foi pra `lib/falhaDeLogin.ts` — onde também virou testável.
+
+### A ORDEM DO ACEITE, e por que uma conta por vez
+
+Combinada com o usuário em 2026-08-30. **O ambiente de autenticação
+continua conhecido até o passo 4**, e é isso que a ordem protege:
+
+```
+1. E4 E2E completo
+2. verifier admin
+3. decidir merge do PR #1
+   ────────────────────────────  só depois disto se mexe em conta
+4. publicar criar-usuario
+5. converter UMA conta:  adminteste → adminteste@drogariacidade.invalid
+6. testar login:
+     username adminteste + senha certa  → entra
+     senha errada                       → recusado
+     offline                            → indisponível, SEM falar em senha
+7. só então converter caixateste
+8. repetir o login como caixa
+```
+
+**Uma conta por vez, não as duas.** Se houver qualquer diferença entre a
+normalização publicada na Edge e a do cliente, ou alguma peculiaridade na
+alteração do usuário no Auth, a segunda conta continua sendo acesso
+conhecido enquanto se diagnostica. Converter as duas de uma vez é
+trancar-se do lado de fora — e o modo de falha deste desenho é
+silencioso.
+
+**E o gate que fecha o E5**, definido pelo usuário: depois de criar um
+usuário NOVO pelo fluxo administrativo, conferir no Supabase Auth que o
+identificador nasceu como
+
+```
+username_normalizado@drogariacidade.invalid
+```
+
+e então fazer logout/login usando **somente o username**, sem o
+identificador interno nunca ter aparecido na UI.
+
+Esse gate é o único que exercita os dois gêmeos contra o mesmo dado real:
+a Edge Function COMPÔS o endereço, e o cliente o RECOMPÔS para entrar. É
+a única prova de que as duas cópias concordam fora do spec.
+
 ## 90. E4 — aceite E2E e merge
 
-> **O item 89 não está faltando: ele é do E5** e vive em
-> `feat/e5-login-username`, que ainda não foi mergeada. A numeração é
-> cronológica, e o E5 foi implementado antes de o E4 ser aceito — as duas
-> frentes correm empilhadas. Quando o E5 entrar, a sequência fecha.
+> **A numeração é cronológica, e as duas frentes correm empilhadas:** o
+> item 89 (E5) foi escrito ANTES de o E4 ser aceito. Na `main`, entre o
+> merge do E4 e o do E5, a sequência pula de 88 direto para 90 — não é
+> item perdido, é o 89 esperando em `feat/e5-login-username`.
 
 O primeiro E2E do E4 rodou em 2026-08-31/09-01, com o `V-000053`:
 `R$ 123,90` divididos em `dinheiro 60,00 + pix 63,90`.
@@ -8073,10 +8381,46 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: o E5 da frente de produto
+### PRÓXIMA SESSÃO: fechar dois aceites, não começar frente nova
 
 > **Esta é a seção atual.** As de baixo são históricas: descrevem como
 > "próximo" coisas que já foram feitas.
+
+**O que está aberto não é código — é ACEITE.** Duas frentes estão
+implementadas e medidas, e nenhuma das duas está fechada:
+
+```
+E4  código na main? não — PR #1, esperando o E2E     item 88
+E5  código commitado, aceite operacional pendente     item 89
+```
+
+**A ordem é única e não deve ser invertida:**
+
+```
+1. E4 E2E completo          o cadastro dividido, o DCR1 com duas linhas `p`,
+                            o retorno FIEL que não pode virar divergência
+2. verifier admin           antes == depois, não "tem que dar 16"
+3. decidir merge do PR #1
+   ──────────────────────   só depois disto se mexe em conta
+4. publicar criar-usuario   dashboard; salvar no editor NÃO publica
+5. converter UMA conta      adminteste, e só ela
+6. testar os três desfechos senha certa · senha errada · offline
+7. converter caixateste
+8. repetir o login como caixa
+```
+
+**Os passos 1–3 acontecem com o ambiente de autenticação INTACTO**, e é
+isso que a ordem protege: um problema de login no meio do gate do E4
+embaralharia duas investigações. E uma conta por vez no 5–7 preserva a
+outra como acesso conhecido — converter as duas juntas é trancar-se do
+lado de fora, e o modo de falha deste desenho é silencioso.
+
+O gate que fecha o E5 está no fim do item 89: criar um usuário NOVO pelo
+fluxo administrativo, conferir no Auth que o identificador nasceu como
+`username_normalizado@drogariacidade.invalid`, e entrar usando só o
+username. É a única prova de que os dois gêmeos concordam fora do spec.
+
+**Só depois disso o E6 (React Router) começa.**
 
 **A cadeia de custódia (2A–2D) está FECHADA e não deve ser reaberta sem
 necessidade.** O que corre agora é uma frente de produto/UX de nove
@@ -8090,8 +8434,8 @@ E1.1 busca sem acento              ✓  migration aplicada, 16·16·0
 E2   estados visuais de consulta   ✓  item 86 — 18 de 18
 E3   id próprio do pagamento previsto   ✓  item 87
 E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
-E5   login por username                     <-  AQUI
-E6   React Router + /notificacoes e /auditoria
+E5   login por username    IMPLEMENTADO · aceite pendente   item 89
+E6   React Router + /notificacoes e /auditoria   <-  DEPOIS DOS ACEITES
 E7   divergência/regularização de valores
 E8   portal da agência (RLS antes da tela)
 E9   endereço estruturado
@@ -8244,7 +8588,8 @@ lojas a R$ 9,00 e a agência Gabrielense —, esperando só **os convênios**
   `export PATH="/c/Program Files/nodejs:$PATH"`.
 - Os specs desta frente: `texto` e `fiacao-texto` (E1);
   `estado-de-consulta`, `fiacao-estado-de-consulta` e `consulta-render`
-  (E2); `pagamento-alterado` (E3); `formas-previstas` (E4). Os da cadeia
+  (E2); `pagamento-alterado` (E3); `formas-previstas` (E4); `username` e
+  `falha-de-login` (E5). Os da cadeia
   de custódia continuam sendo o gate de regressão:
   `canonico`, `canonico-retorno`, `dcrr1-vetores`, `congelar-retorno`,
   `custodia-do-retorno`, `envelope`, `offline-hash`,

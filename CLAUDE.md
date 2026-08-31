@@ -3528,7 +3528,7 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   dentro de `Painel.tsx`, com `onVoltar` como prop pra cada tela voltar pra lista. Isso
   aguenta bem o tanto de telas que o MVP tem hoje — se crescer muito mais, reconsiderar
   (mas aí é conversa pra ter, não decisão unilateral).
-- **Login é USUÁRIO e senha desde o E5** (2026-08-27). O caixa digita
+- **Login é USUÁRIO e senha desde o E5** (2026-08-30). O caixa digita
   `camilo`, não um e-mail. Por baixo continua sendo o Supabase Auth
   nativo: `src/lib/username.ts` compõe `camilo@drogariacidade.invalid` e
   chama `signInWithPassword`.

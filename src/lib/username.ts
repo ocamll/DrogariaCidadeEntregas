@@ -79,7 +79,7 @@
  *
  * `.invalid` é RESERVADO pela RFC 2606 exatamente para este uso:
  * garantidamente não resolve, não pode ser registrado por ninguém, e
- * nunca vai rotear correio de verdade. Escolhido em 2026-08-27, quando o
+ * nunca vai rotear correio de verdade. Escolhido em 2026-08-30, quando o
  * usuário confirmou que a farmácia não tem domínio próprio.
  *
  * Ele também se autodocumenta: quem abrir o painel do Supabase vê
