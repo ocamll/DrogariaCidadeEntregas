@@ -13,11 +13,24 @@
 -- Cada bloco resolve o alvo sozinho, pela CTE `alvo`: **o vale mais
 -- recente que tem DOIS OU MAIS pagamentos previstos.**
 --
--- Isso é exato hoje por um motivo que vale registrar: até este PR, NADA
--- no sistema conseguia criar um segundo previsto — o id era derivado do
--- uuid da entrega, e a segunda forma colidia na PK. Então o primeiro (e
--- único) vale com dois previstos é justamente o que o E2E acabou de
--- criar. Não há como pegar o vale errado.
+-- ⚠️ A PREMISSA ORIGINAL DESTE ARQUIVO ESTAVA ERRADA, e o BLOCO 0 a
+-- derrubou na primeira execução (2026-08-30).
+--
+-- Eu escrevi que nenhum vale poderia ter dois previstos antes do E4,
+-- porque o id era derivado do uuid da entrega e a segunda forma colidia
+-- na PK. Isso vale para o CAMINHO DO APP — e eu esqueci do caminho de
+-- fora dele: o rodapé da migration do E3 tem cinco casos de teste que
+-- INSEREM previsto à mão, com `gen_random_uuid()`, dentro de um
+-- `begin; … rollback;`. O rollback não aconteceu, e o caso 3
+-- (`'previsto', 'pix', 5000`) ficou gravado em `V-000006`.
+--
+-- Resultado: existe UM vale pré-existente com dois previstos, e ele é
+-- dado de teste inconsistente (soma 10000 contra compra de 5000).
+--
+-- O script continua correto porque a ordenação é temporal: assim que o
+-- E2E criar o vale novo, ele passa a ser o mais recente e vira o alvo.
+-- Mas o BLOCO 0 agora LISTA em vez de contar, pra o alvo ficar visível
+-- em vez de suposto.
 --
 -- A ordenação é `order by e.id desc`, e ela é temporal de verdade: a
 -- regra 5 do projeto manda usar **uuid v7**, que carrega o timestamp nos
@@ -247,11 +260,11 @@ select a.numero_vale,
        ev.payload -> 'para'                     as para,
        ev.payload ->> 'justificativa'           as justificativa,
        pr.nome                                  as autor,
-       ev.registrado_em
+       ev.ocorrido_em
   from alvo a
   join public.eventos ev on ev.entrega_id = a.id and ev.tipo = 'pagamento_alterado'
   left join public.profiles pr on pr.id = ev.user_id
- order by ev.registrado_em desc;
+ order by ev.ocorrido_em desc;
 
 
 -- =====================================================================
@@ -284,21 +297,115 @@ select a.numero_vale,
 
 
 -- =====================================================================
--- BLOCO 0 · SANIDADE — rode ANTES de tudo, uma vez
+-- BLOCO 0 · SANIDADE — rode ANTES de tudo, e de novo depois do cadastro
 --
--- Quantos vales com dois previstos existem HOJE? A resposta esperada
--- ANTES do E2E é **zero**, e é isso que torna a CTE `alvo` inequívoca.
+-- LISTA, não conta. Contar respondia "a premissa vale?"; listar responde
+-- "QUAL vale o script vai olhar?", que é a pergunta útil — e foi contar
+-- em vez de listar que me fez precisar de uma segunda rodada.
 --
--- Se vier mais que zero antes de você cadastrar nada, pare: ou alguém
--- criou pelo app, ou a premissa acima não vale e os blocos podem estar
--- olhando o vale errado.
+-- ANTES do E2E, o esperado hoje é UMA linha: `V-000006`, o resíduo do
+-- rodapé da migration do E3 (ver o cabeçalho). `alvo = false` nele.
+--
+-- DEPOIS do cadastro, espere DUAS linhas, com o vale novo marcado
+-- `alvo = true` — é ele que todos os outros blocos vão usar.
 -- =====================================================================
 
-select count(*) as vales_com_dois_previstos
-  from (
-    select e.id
-      from public.entregas e
-      join public.pagamentos p on p.entrega_id = e.id and p.momento = 'previsto'
-     group by e.id
-    having count(*) >= 2
-  ) t;
+with candidatos as (
+  select e.id,
+         e.numero_vale,
+         e.valor_compra_cents,
+         count(*)                                       as previstos,
+         sum(p.valor_cents)                             as soma_prevista,
+         sum(p.valor_cents) = e.valor_compra_cents      as soma_bate,
+         array_agg(p.forma order by p.forma)            as formas,
+         bool_or(p.id = e.id)                           as tem_id_legado
+    from public.entregas e
+    join public.pagamentos p on p.entrega_id = e.id and p.momento = 'previsto'
+   group by e.id, e.numero_vale, e.valor_compra_cents
+  having count(*) >= 2
+)
+select numero_vale,
+       previstos,
+       formas,
+       valor_compra_cents,
+       soma_prevista,
+       soma_bate,
+       tem_id_legado,
+       id = max(id) over ()   as alvo   -- o que os outros blocos usam
+  from candidatos
+ order by id desc;
+
+
+-- =====================================================================
+-- BLOCO 0.1 · OS BURACOS DA SEQUÊNCIA — explicados, não ignorados
+--
+-- Em 30/08 o fechamento do §64 deixou de fechar:
+--
+--     selados 16 + conflitos 3 = 19,  mas o maior número é R-000026
+--
+-- Sete números sem documento. A hipótese é benigna — `nextval` NÃO faz
+-- rollback, então toda selagem que pegou número e foi desfeita (as
+-- recusas exercitadas na 2B, os erros de desenvolvimento) deixa buraco.
+-- Mas hipótese não é conferência: **liste os buracos e olhe.**
+--
+-- O que seria grave: um número ausente que corresponda a um documento
+-- que alguém lembra de ter selado. Buraco de rollback ninguém lembra,
+-- porque nunca virou documento.
+-- =====================================================================
+
+with emitidos as (
+  select generate_series(1, (select max(right(numero, 6)::int) from public.romaneios)) as n
+),
+existentes as (
+  select right(numero, 6)::int as n, numero, tipo, status from public.romaneios
+)
+select e.n                                        as numero_faltando,
+       'R-' || lpad(e.n::text, 6, '0')            as rotulo
+  from emitidos e
+  left join existentes x on x.n = e.n
+ where x.n is null
+ order by e.n;
+
+-- E o inverso, pra ler a sequência inteira de uma vez:
+select right(numero, 6)::int as n, numero, tipo, status
+  from public.romaneios
+ order by n;
+
+
+-- =====================================================================
+-- BLOCO 0.2 · O RESÍDUO DO E3 — confirmar a origem antes de decidir
+--
+-- Hipótese: o caso 3 do rodapé da migration do E3 foi rodado contra
+-- `V-000006` e o `rollback` não aconteceu. Ele insere exatamente
+-- `gen_random_uuid(), 'previsto', 'pix', 5000`.
+--
+-- A assinatura disso é UM previsto com id = uuid da entrega (o legado,
+-- criado pelo cadastro) e OUTRO com uuid aleatório e o mesmo valor.
+--
+-- Se for isso, é dado de teste — some no corte pré-V1, e não afeta
+-- documento assinado nenhum, porque este vale nunca entrou numa saída
+-- (o bloco 3 voltou vazio).
+-- =====================================================================
+
+select e.numero_vale,
+       e.status_entrega,
+       e.valor_compra_cents,
+       p.momento,
+       p.forma,
+       p.valor_cents,
+       p.id                       as pagamento_id,
+       p.id = e.id                as id_derivado_da_entrega,
+       p.registrado_em,
+       p.observacao
+  from public.entregas e
+  join public.pagamentos p on p.entrega_id = e.id
+ where e.numero_vale = 'V-000006'
+ order by p.momento, p.id::text collate "C";
+
+-- Este vale entrou em algum romaneio? Esperado: ZERO linhas.
+-- É isto que separa "dado de teste feio" de "documento assinado errado".
+select r.numero, r.tipo, r.status
+  from public.entregas e
+  join public.romaneio_entregas re on re.entrega_id = e.id
+  join public.romaneios r          on r.id = re.romaneio_id
+ where e.numero_vale = 'V-000006';
