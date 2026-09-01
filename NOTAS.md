@@ -109,7 +109,7 @@ E2   estados visuais de consulta     ✓  item 86 — 18 de 18 migrados
 E3   id próprio do pagamento previsto  ✓  item 87 — aplicada e conferida
 E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
 E5   login por username                 ✓  item 89 — aceite medido
-E10  admin operando por filial     ←  próximo
+E10  admin operando por filial   contrato fechado (91) ← construir
 E6..E9  router, divergência, agência, endereço
 ```
 
@@ -8112,6 +8112,247 @@ não está em romaneio nenhum.
 
 **E4 FECHADO** — implementação, correção e aceite operacional.
 
+## 91. E10 — admin operando por filial: CONTRATO FECHADO, código não começado
+
+Pedido em 2026-09-01, com os dois lados: o admin precisa **enxergar e
+filtrar** cada filial (suporte) e **operar** em nome de qualquer uma.
+
+Levantado contra o código antes de qualquer linha, e fechado com o
+usuário. Quem for construir: leia inteiro, porque metade das decisões
+existe pra evitar um problema de autorização, não de tela.
+
+### METADE JÁ EXISTE
+
+**Enxergar/filtrar está pronto em cinco telas:** Fechamento, Relatórios,
+Histórico, Registro de Auditoria e a Sangria já dão seletor de filial pro
+admin. Nada a construir nessa metade.
+
+**E a RLS já faz exatamente o que o E10 quer:**
+
+```sql
+entregas_insert  with check (
+  tenant_id = current_tenant_id()
+  and (is_admin() or loja_id = current_loja_id())
+  and criado_por = auth.uid())
+```
+
+Admin grava em qualquer filial do tenant; caixa e gerente só na própria.
+**Cadastro e transferência não precisam de migration nenhuma** — quem
+trava é o cliente, que fixa `profile.lojaId` e bloqueia a tela quando ele
+é nulo.
+
+### O ÚNICO PONTO DE SERVIDOR, E OS DOIS GATES QUE O CONFIRMARAM
+
+| ponto | como obtém a loja | competência? |
+|---|---|---|
+| RLS `entregas_*` | `is_admin() or loja_id = current_loja_id()` | **sim** |
+| `selar_romaneio` → `_interno` | `p_loja_id` do cliente | **NÃO** |
+| `selar_romaneio_sincronizado` | `p_loja_id` do corpo, via Edge | **NÃO** |
+| `selar_romaneio_retorno(_sincronizado)` | `v_saida.loja_id` | **imune** |
+| `registrar_conflito_romaneio` | recebe `p_loja_id` | herda |
+
+**O retorno nasceu imune, e foi acerto da 2B**: ele não tem `p_loja_id` —
+a loja sai do romaneio de saída selado, e payload nenhum opina.
+`RetornoCorrida` não menciona `lojaId` em lugar nenhum.
+
+**GATE 1 — `registrar_conflito_romaneio` é alcançável direto?** Não:
+`revoke all from public, anon, authenticated` e **nenhum `grant`**. É
+interna, só chamada de dentro do `_interno`. Herdar basta.
+
+De quebra, as duas portas sincronizadas são `to service_role` —
+alcançáveis só pela Edge Function. Então a guarda entra no **`_interno`**,
+que as quatro portas atravessam. Um lugar, não quatro.
+
+**GATE 2 — o tenant de `p_loja_id` é provado?** **Não**, só
+transitivamente: os vales precisam pertencer a ele *e* ao tenant, então
+uma loja de outro tenant não casa com vale nenhum e cai em conflito.
+
+Só que o caminho de conflito **grava**: `registrar_conflito_romaneio`
+insere em `romaneios` com `p_tenant` do ator e `p_loja_id` alheio — uma
+linha cujo tenant e loja discordam. Pequeno, mas é exatamente a classe de
+coisa que este projeto não deixa passar. **A prova de tenant vira
+explícita.**
+
+### A CORREÇÃO QUE O LEVANTAMENTO OBRIGOU, e ela é a mais importante
+
+A primeira versão da guarda usava `is_admin()` e `current_loja_id()`.
+**Ela quebraria toda a selagem offline.**
+
+`selar_romaneio_interno` deriva o tenant do **perfil de `p_caixa_id`**, e
+não de `auth.uid()`. O motivo estava escondido nos grants: a porta
+sincronizada é chamada pela Edge Function como `service_role`, onde
+**`auth.uid()` é NULL**. `is_admin()` e `current_loja_id()` leem
+`auth.uid()`, logo retornariam nulo, e toda saída offline passaria a ser
+recusada — meses depois, sem ninguém ligar a coisa à guarda.
+
+A guarda tem que ler do mesmo perfil que a função já lê:
+
+```sql
+select p.tenant_id, p.papel, p.loja_id
+  into v_tenant, v_papel, v_loja_do_ator
+  from public.profiles p where p.id = p_caixa_id and p.ativo;
+
+-- 1. a loja existe e é do tenant do ator?
+if not exists (select 1 from public.lojas l
+                where l.id = p_loja_id and l.tenant_id = v_tenant) then
+  raise exception 'Filial inválida para este tenant.'
+    using errcode = 'insufficient_privilege';
+end if;
+
+-- 2. o ator tem competência sobre ela?
+if v_papel <> 'admin' and p_loja_id is distinct from v_loja_do_ator then
+  raise exception 'Sem competência sobre esta filial.'
+    using errcode = 'insufficient_privilege';
+end if;
+```
+
+**`v_papel <> 'admin'`, nunca `is_admin()`.** Mesma razão, e vale como
+regra pra qualquer coisa nova dentro dessas funções: **o ator é o
+parâmetro, não a sessão.**
+
+E ela **não afrouxa nada hoje** — só torna explícito o que a RLS já
+garantia por acidente. É a diferença entre *"o caixa não consegue montar
+o payload"* e *"a função recusa"*.
+
+### O CONTRATO
+
+```
+E10 — ADMIN OPERANDO POR FILIAL
+
+VISIBILIDADE
+admin → todo o tenant
+demais → regras atuais
+
+CONTEXTO
+admin → escolhe loja operacional
+caixa/gerente → profile.loja_id
+
+SELEÇÃO ADMIN
+→ cabeçalho sempre visível
+→ sessionStorage por auth.uid
+→ limpa em logout/nova sessão
+→ sem seleção não é erro de perfil
+
+OPERAÇÃO
+→ captura lojaOperacionalId ao iniciar
+→ contexto fica congelado
+→ mudança posterior no header não altera operação existente
+
+FILA OFFLINE
+→ owner e loja operacional são campos distintos
+→ lojaOperacionalId congelada no enqueue
+→ sync nunca relê seleção atual do admin
+
+AUTORIZAÇÃO
+→ frontend escolhe contexto, nunca concede competência
+→ servidor valida loja/tenant/ator
+→ admin: qualquer loja do próprio tenant
+→ caixa/gerente: somente current_loja_id()
+
+SAÍDA
+→ selar_romaneio e sincronizado recebem loja da operação
+→ competência validada ANTES do canônico/digest
+→ quatro digest() permanecem byte a byte idênticos
+
+RETORNO
+→ permanece como está
+→ loja derivada da saída selada
+→ payload não escolhe filial
+
+AUDITORIA
+→ ator continua sendo ator
+→ romaneio/entrega continua carregando loja
+→ não criar evento artificial de "admin entrou na Filial 02"
+```
+
+### As três decisões, e o porquê de cada uma
+
+**1. `sessionStorage`, não `localStorage`.** Decisão do usuário, e a razão
+é o custo do erro: uma entrega lançada na filial errada é fato que não se
+reescreve (regra 4). Um admin que abre o sistema dois dias depois e herda
+silenciosamente *"Operando como: Filial 02"* da semana passada lança na
+filial errada sem nunca ter decidido isso. `sessionStorage` dá
+persistência suficiente pra não irritar em cada F5, e some no logout ou
+em aba nova.
+
+E o cabeçalho mostra algo **impossível de ignorar**, não um select
+discreto:
+
+```
+OPERANDO EM
+Filial 02 ▾
+```
+
+**2. "Por operação" significa SNAPSHOT, não leitura dinâmica.** O ponto
+mais importante do lado do cliente. Se o admin abre o Cadastro de Entrega
+na Filial 02 e troca o cabeçalho pra Filial 09 com o formulário aberto,
+**o vale não pode trocar de filial junto**.
+
+```
+contexto global      escolhe onde INICIAR novas operações
+operação iniciada    captura lojaOperacionalId
+depois disso         aquela operação segue vinculada à mesma loja
+```
+
+O formulário aberto continua sendo Filial 02, e mostra isso dentro dele.
+O que não pode acontecer nunca é o destino mudar em silêncio.
+
+É a mesma disciplina da **tarifa**, que é capturada no cadastro e vai no
+payload em vez de ser lida na hora do sync — e pelo mesmo motivo.
+
+**3. `donoDaFila` NÃO é sobrecarregado.** São eixos diferentes:
+
+```
+ownerUserId / tenantId    quem é dono daquele item local
+lojaOperacionalId         a filial CONGELADA da operação
+```
+
+Hoje `donoDaFila(profile)` grava `lojaId: profile.lojaId`, e o NOTAS já
+registrava que `tenantId`/`lojaId` da fila nunca são comparados. Com o
+E10 o segundo passa a ter significado próprio, e misturá-lo com o dono
+faria a sincronização relêr a seleção atual do admin — exatamente o que
+o snapshot existe pra impedir.
+
+**Caixa e gerente não mudam:** `lojaOperacional = profile.lojaId`, sem
+seletor, sem override, e o servidor recusa outra loja.
+
+### Admin sem contexto não é erro de perfil
+
+Hoje as três telas de escrita mostram *"Sua conta não tem uma loja
+associada — fale com o administrador"*. Pra um admin isso é falso: ele
+não tem problema de cadastro, ele tem estado operacional `sem_contexto`.
+
+```
+"Escolha a filial em que você está operando"   + o seletor ali mesmo
+```
+
+As ações que precisam de loja ficam indisponíveis até a escolha; telas
+globais e administrativas seguem acessíveis normalmente.
+
+**O `camiloadmin` fica com `loja_id` nulo de propósito**, como caso de
+prova: o E10 tem que funcionar sem enfiar uma filial artificial no
+perfil.
+
+### A ordem, e o método
+
+```
+1. migration da porta de saída   patch MÍNIMO no `_interno`
+   → prova de que os 4 digest() não mudaram um byte
+   → verificador admin antes/depois, com o gate `antes == depois`
+2. o snapshot no cliente e a fila
+3. o seletor no cabeçalho
+4. as três telas
+```
+
+**Servidor primeiro**, decidido com o usuário: é o único ponto onde errar
+vira problema de autorização e integridade, e a tela é a parte fácil.
+
+O patch usa o método do E3.B — script que extrai a função, aplica a
+mudança mínima, imprime o diff e **prova as invariantes antes de o
+arquivo da migration existir**. `selar_romaneio_interno` é a função mais
+crítica do projeto, e reescrevê-la à mão é a forma mais provável de mover
+sem querer uma linha de `digest(...)`.
+
 ## Commits desta sessão
 
 
@@ -8498,7 +8739,7 @@ E2   estados visuais de consulta   ✓  item 86 — 18 de 18
 E3   id próprio do pagamento previsto   ✓  item 87
 E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
 E5   login por username                    ✓  item 89 — aceite medido
-E10  admin operando/filtrando por filial       <-  PRÓXIMO (pedido em 01/09)
+E10  admin operando por filial   CONTRATO FECHADO — item 91  <- construir
 E6   React Router + /notificacoes e /auditoria
 E7   divergência/regularização de valores
 E8   portal da agência (RLS antes da tela)
