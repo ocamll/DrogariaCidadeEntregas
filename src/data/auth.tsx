@@ -2,6 +2,8 @@ import { createContext, useContext, useEffect, useState, type ReactNode } from '
 import { useQuery } from '@tanstack/react-query'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
+import { emailTecnico } from '@/lib/username'
+import { classificarFalhaDeLogin, FalhaDeLoginError } from '@/lib/falhaDeLogin'
 
 type Papel = 'caixa' | 'gerente' | 'admin' | 'agencia' | 'superadmin'
 
@@ -71,9 +73,42 @@ export async function marcarNotificacoesPagamentoLidas(userId: string) {
   if (error) throw error
 }
 
-export async function signInWithPassword(email: string, senha: string) {
-  const { error } = await supabase.auth.signInWithPassword({ email, password: senha })
-  if (error) throw error
+/**
+ * Entra com USUÁRIO e senha — E5.
+ *
+ * Quem compõe o endereço é `emailTecnico`, e é o mesmo endereço que a
+ * Edge Function compôs ao criar a conta. Não há consulta antes de
+ * autenticar, então não há o que enumerar: é o que a arquitetura A pede.
+ *
+ * A falha volta CLASSIFICADA, não crua. `navigator.onLine` é lido AQUI,
+ * no instante da ação, e não no do último render — entre um e outro a
+ * rede muda, e o que vale é o instante em que se tentou. É a mesma regra
+ * que a Nova Corrida já segue.
+ */
+export async function signInComUsuario(usuario: string, senha: string) {
+  const email = emailTecnico(usuario)
+  const online = navigator.onLine
+  try {
+    const { error } = await supabase.auth.signInWithPassword({ email, password: senha })
+    if (error) {
+      throw new FalhaDeLoginError(
+        classificarFalhaDeLogin({
+          online,
+          status: (error as { status?: number }).status ?? null,
+          nome: error.name,
+        })
+      )
+    }
+  } catch (e) {
+    if (e instanceof FalhaDeLoginError) throw e
+    // O `fetch` do navegador levanta `TypeError` quando não consegue
+    // sair da máquina, e isso NÃO passa pelo `error` do supabase-js —
+    // vem como exceção. Sem este ramo, ficar offline com a tela aberta
+    // caía no `catch` genérico da tela e virava "senha inválida".
+    throw new FalhaDeLoginError(
+      classificarFalhaDeLogin({ online, nome: e instanceof Error ? e.name : null })
+    )
+  }
 }
 
 export function signOut() {

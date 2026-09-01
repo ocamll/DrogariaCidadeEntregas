@@ -83,7 +83,7 @@ export function useUsuarios() {
 }
 
 export type NovoUsuario = {
-  email: string
+  username: string
   senha: string
   nome: string
   papel: PapelUsuario
@@ -107,7 +107,7 @@ async function criarUsuario(input: NovoUsuario): Promise<void> {
   const { data, error } = await supabase.functions.invoke('criar-usuario', {
     headers: { Authorization: `Bearer ${token}` },
     body: {
-      email: input.email,
+      username: input.username,
       senha: input.senha,
       nome: input.nome,
       papel: input.papel,
