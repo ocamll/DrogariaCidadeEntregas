@@ -324,15 +324,40 @@ function UsuarioFormDialog({
               ))}
             </select>
             <p className="text-xs text-muted-foreground">
-              {/* ERRADO DESDE 2026-08-12, corrigido em 2026-09-01.
-                  Dizia "Admin e gerente enxergam todas as filiais", que
-                  é o que valia ANTES de o item 27 prender o gerente à
-                  própria loja. O texto não acompanhou, e não era
-                  cosmético: ele induzia a deixar gerente "Sem filial", e
-                  aí a policy nunca casa `loja_id` e ele não vê NADA. */}
-              Só o admin enxerga todas as filiais. Gerente e caixa ficam presos à que
-              estiver aqui.
+              {/* DUAS CORREÇÕES, e a segunda veio de uma pergunta do
+                  usuário: "admin não devia nem ver esse campo?".
+
+                  1. Dizia "Admin e gerente enxergam todas as filiais",
+                     o que valia até o item 27 prender o gerente à
+                     própria loja (2026-08-12). Induzia a deixar gerente
+                     "Sem filial" — e aí a policy nunca casa `loja_id` e
+                     ele não vê NADA, sem erro nenhum.
+
+                  2. Falando só de quem ENXERGA, o texto sugeria que pro
+                     admin o campo não serve. Serve, e é outra coisa:
+
+                       loja_id   DE ONDE se opera
+                       is_admin  O QUE se enxerga
+
+                     `CadastroEntrega`, `CadastroTransferencia` e
+                     `NovaCorrida` exigem `profile.lojaId`. Admin sem
+                     filial enxerga tudo e não lança nada. */}
+              A filial é <strong>de onde a pessoa opera</strong>: lançar entrega,
+              transferência e corrida saem dela. Para gerente e caixa ela também
+              limita o que enxergam. O admin enxerga todas — mas sem filial não
+              consegue lançar nada.
             </p>
+            {/* AVISA, NÃO BLOQUEIA. Admin sem filial é configuração
+                legítima — alguém que só administra e nunca encosta no
+                balcão. O que não pode é a pessoa descobrir isso ao abrir
+                "Nova entrega" e levar um "sua conta não tem loja
+                associada" sem entender por quê. */}
+            {papel === 'admin' && !lojaId && (
+              <p className="text-xs text-muted-foreground">
+                Sem filial, este admin enxerga tudo mas <strong>não consegue lançar
+                entrega, transferência nem abrir corrida</strong>.
+              </p>
+            )}
           </div>
 
           {erro && <p className="text-sm text-destructive">{erro}</p>}
