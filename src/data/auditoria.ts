@@ -1,6 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { textoDoPagamentoAlterado, type LadoDoPagamentoAlterado } from '@/data/pagamentos'
+import {
+  textoDoPagamentoAlterado,
+  textoDaReferenciaInformada,
+  type LadoDoPagamentoAlterado,
+} from '@/data/pagamentos'
 import { formatBRL } from '@/lib/money'
 import type { FiltroPeriodo } from '@/data/relatorios'
 
@@ -139,7 +143,12 @@ function resumoEDetalhe(row: EventoAuditoriaRow): { resumo: string; detalhe: str
       // num lugar só, porque esta era a segunda cópia dela.
       const de = textoDoPagamentoAlterado(row.payload.de as LadoDoPagamentoAlterado)
       const para = textoDoPagamentoAlterado(row.payload.para as LadoDoPagamentoAlterado)
-      return { resumo: `Era ${de}, virou ${para}`, detalhe: row.payload.justificativa ?? null }
+      // E4.1 — ver a nota gêmea em `notificacoes.ts`. `de` é estado
+      // PERSISTIDO; a referência informada é declaração de uma pessoa, e
+      // as duas não podem se parecer no Registro de Auditoria.
+      const informado = textoDaReferenciaInformada(row.payload)
+      const ladoAnterior = informado ? `${de} (${informado})` : de
+      return { resumo: `Era ${ladoAnterior}, virou ${para}`, detalhe: row.payload.justificativa ?? null }
     }
     case 'falta_receita':
       return { resumo: 'Receita não retornou com o motoboy', detalhe: row.payload.justificativa ?? null }

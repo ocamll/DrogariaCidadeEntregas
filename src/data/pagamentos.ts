@@ -20,6 +20,9 @@ export {
   MAX_FORMAS_PREVISTAS,
   validarFormasPrevistas,
   divergiuDoPrevisto,
+  ORIGEM_INFORMADA,
+  referenciaInformadaDoEvento,
+  textoDaReferenciaInformada,
 } from '@/lib/formasDePagamento'
 export type {
   FormaPagamento,
@@ -28,6 +31,7 @@ export type {
 } from '@/lib/formasDePagamento'
 
 import type { FormaPagamento, FormaComValor } from '@/lib/formasDePagamento'
+import { ORIGEM_INFORMADA } from '@/lib/formasDePagamento'
 
 export async function criarPagamentoPrevisto(input: {
   tenantId: string
@@ -90,36 +94,30 @@ export type MarcarDivergenciaInput = {
    * mesmo campo do lado do servidor (`limit 1` → agrega todos); aqui
    * está o OUTRO escritor do mesmo tipo de evento, que ficou escalar.
    *
-   * Quando `criarPrevisto` (vale legado, sem previsto nenhum), a lista
-   * traz exatamente uma linha: a forma que o caixa informou e o valor da
-   * compra. É ela que vira o previsto retroativo.
+   * VAZIO quando o vale não tem previsto — e aí `de` vai `null`. O que o
+   * operador informou NÃO entra aqui: vai em `referenciaInformada`, que
+   * é fato de outra natureza (E4.1).
    */
   previstos: FormaComValor[]
   pagamentosRealizados: PagamentoRealizado[]
   justificativa: string
   registradoPor: string
   autorNome: string
-  // true quando a entrega nunca teve pagamento.previsto gravado (vale
-  // antigo, de antes dessa feature existir) — nesse caso cria o previsto
-  // retroativo com a forma "esperada" que o caixa informou, antes de
-  // gravar o(s) realizado(s).
-  criarPrevisto: boolean
   /**
-   * O id do previsto retroativo — E3.C. Só é usado quando
-   * `criarPrevisto`, mas vem SEMPRE no payload: cunhá-lo condicionalmente
-   * deixaria a forma do item da fila depender de um booleano, e um
-   * reenvio que reavaliasse a condição cunharia outro id.
+   * O que o operador INFORMOU como forma esperada, num vale que não tem
+   * previsto gravado. `null` quando o vale tem previsto — aí a verdade
+   * está em `previstos` e não há o que declarar.
    *
-   * Era `input.entregaId`, o mesmo default de `criarEntrega`.
+   * **Isto NÃO vira linha em `pagamentos`** — E4.1. Ver `marcarDivergencia`.
    */
-  pagamentoPrevistoId: string
+  referenciaInformada: FormaComValor[] | null
   // chave gerada uma única vez por quem monta o payload (antes de
   // enfileirar) — é isso que torna o insert do evento seguro pra reenviar
   // depois de uma falha parcial, sem duplicar log.
   eventoIdempotencyKey: string
   // relógio do dispositivo, capturado no dialog antes de enfileirar —
-  // usado nos pagamentos.realizado, no previsto retroativo (quando
-  // criarPrevisto) e no evento pagamento_alterado, todos a mesma ação.
+  // usado nos pagamentos.realizado e no evento pagamento_alterado, que
+  // são a mesma ação.
   registradoEmLocal: string
 }
 
@@ -150,31 +148,53 @@ export async function marcarDivergencia(input: MarcarDivergenciaInput) {
       ? [{ forma: legado.formaAnterior, valor_cents: legado.valorCentsPrevisto ?? 0 }]
       : [])
 
-  if (input.criarPrevisto) {
-    // Previsto RETROATIVO, pra vale antigo que nunca teve um gravado.
-    //
-    // Era `id: input.entregaId`, o mesmo default do `criarEntrega` — e o
-    // mesmo motivo de ele sair: a relação não é 1:1, e o id derivado
-    // fazia a segunda forma colidir na PK.
-    //
-    // Mesma janela do `criarEntrega`: item enfileirado antes do E3.C não
-    // traz o campo, e aí o comportamento antigo vale.
-    //
-    // UMA linha, sempre — e é o dialog que garante isso: o retroativo
-    // descreve um vale de antes de o modelo aceitar N, e o caixa informa
-    // uma forma esperada só. `previstos[0]` não é "a primeira de várias",
-    // é "a única".
-    await criarPagamentoPrevisto({
-      id:
-        (input as { pagamentoPrevistoId?: string }).pagamentoPrevistoId ?? input.entregaId,
-      tenantId: input.tenantId,
-      entregaId: input.entregaId,
-      forma: previstos[0].forma,
-      valorCents: previstos[0].valor_cents,
-      registradoPor: input.registradoPor,
-      registradoEmLocal: input.registradoEmLocal,
-    })
-  }
+  // ================================================================
+  // O PREVISTO RETROATIVO DEIXOU DE EXISTIR — E4.1 (2026-08-30)
+  // ================================================================
+  //
+  // Havia aqui um `criarPagamentoPrevisto` para vale antigo sem previsto.
+  // Ele saiu por dois motivos, e o segundo é o que decide.
+  //
+  // 1. A CORRIDA, aberta pelo E3.C. O `criarPrevisto` é decidido no
+  //    CLIENTE, a partir de uma query que pode estar velha. Antes do E3
+  //    isso não fazia estrago por acidente: o retroativo usava
+  //    `id: entregaId`, o mesmo id do `criarEntrega`, então um duplicado
+  //    batia em `23505` e era engolido. O E3.C tirou o id derivado —
+  //    corretamente — e levou junto uma guarda que ninguém sabia que
+  //    existia.
+  //
+  //    O caminho real não é exótico: `criarEntrega` faz duas escritas em
+  //    sequência, e se a rede cair entre elas o vale fica no banco SEM
+  //    previsto até a fila reenviar. Nessa janela o fallback dispara.
+  //
+  // 2. E COORDENAR OS DOIS ESCRITORES NÃO RESOLVE. Com o retroativo
+  //    entrando ANTES do replay, o replay é o escritor LEGÍTIMO e traz o
+  //    fato real — se ele inserir são duas linhas, se ele pular perde-se
+  //    a verdade. Não há terceira saída: `pagamentos` não tem policy de
+  //    DELETE nem de UPDATE (regra 4), então a linha retroativa é
+  //    IRREMOVÍVEL. Lock, RPC ou `select`-antes-de-inserir não fecham
+  //    esse caso — só escolhem qual dano.
+  //
+  // Daí a correção ser por ELIMINAÇÃO: sem segundo escritor, não há
+  // concorrência a serializar. `criarEntrega` (e o replay dela) passa a
+  // ser o ÚNICO escritor de pagamento previsto.
+  //
+  // ---------------------------------------------------------------
+  // E ISSO JÁ ERA SEMANTICAMENTE FRÁGIL, antes da corrida
+  // ---------------------------------------------------------------
+  //     previsto     fato conhecido NO CADASTRO, pelo sistema
+  //     referência   declarada DEPOIS, por uma pessoa
+  //
+  // O fallback transformava a segunda coisa na primeira. O `V-000006`
+  // ficou como prova: previsto gravado às 03:23, e às 03:26 uma
+  // ocorrência afirmando "vale antigo sem pagamento registrado".
+  //
+  // O que o operador informa continua sendo evidência — com autor,
+  // horário e justificativa — no evento append-only, em campo PRÓPRIO
+  // (`referencia_informada`). Nunca em `de`, que o servidor define como
+  // estado persistido e mais nada.
+  //
+  // **Ausência de histórico não se corrige inventando histórico.**
 
   for (const pagamento of input.pagamentosRealizados) {
     const { error } = await supabase.from('pagamentos').insert({
@@ -219,8 +239,16 @@ export async function marcarDivergencia(input: MarcarDivergenciaInput) {
       // (`formasDoEvento`), então nenhum evento antigo deixa de ser
       // legível — `eventos` é append-only, e os que já existem com `de`
       // escalar ficam assim para sempre.
-      de: previstos,
+      de: previstos.length > 0 ? previstos : null,
       para: input.pagamentosRealizados.map((p) => ({ forma: p.forma, valor_cents: p.valorCents })),
+      // E4.1 — campo PRÓPRIO, porque `de` significa estado persistido.
+      // Só aparece quando há o que declarar; ausente é o normal.
+      ...(input.referenciaInformada
+        ? {
+            referencia_informada: input.referenciaInformada,
+            origem_referencia: ORIGEM_INFORMADA,
+          }
+        : {}),
       justificativa: input.justificativa,
       autor_nome: input.autorNome,
     },

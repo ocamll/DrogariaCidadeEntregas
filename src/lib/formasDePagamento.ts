@@ -215,3 +215,70 @@ export function divergiuDoPrevisto(
   const b = chaves(realizados)
   return a.length !== b.length || a.some((chave, i) => chave !== b[i])
 }
+
+// =====================================================================
+// A REFERÊNCIA INFORMADA — E4.1
+//
+// `de` significa UMA coisa só, e é o servidor quem fixa esse significado:
+//
+//     'de', (select jsonb_agg(...) from public.pagamentos pg
+//             where pg.entrega_id = ... and pg.momento = 'previsto')
+//
+// **Estado persistido anterior.** Nada mais.
+//
+// Até o E4.1, quando o caixa marcava ocorrência num vale sem previsto, o
+// cliente CRIAVA um previsto retroativo e mandava aquela forma como
+// `de` — o que fechava o círculo por construção, mas ao custo de
+// fabricar história: uma suposição feita 28 minutos depois virava um
+// pagamento previsto histórico.
+//
+// O fallback parou de escrever em `pagamentos` (ver `marcarDivergencia`).
+// Com isso, a forma que o operador informa deixa de ter onde caber em
+// `de` — e NÃO PODE caber, porque ali ela se passaria por estado
+// persistido. Ela ganhou campo próprio:
+//
+//     de                     [] / null   — não havia previsto, e é isso
+//     referencia_informada   [{...}]     — o que o operador DECLAROU
+//     origem_referencia      'informada_pelo_operador'
+//
+// São fatos de naturezas diferentes, e a distinção sobrevive no dado:
+//
+//     previsto      conhecido no cadastro do vale, pelo sistema
+//     referência    declarada depois, por uma pessoa, com autor e hora
+//
+// **Ausência de histórico não se corrige inventando histórico.**
+// =====================================================================
+
+/** O carimbo de origem, escrito por extenso no payload append-only. */
+export const ORIGEM_INFORMADA = 'informada_pelo_operador'
+
+/**
+ * A referência que o operador informou, ou `null`.
+ *
+ * Tolera o payload legado — eventos anteriores ao E4.1 não têm o campo, e
+ * `eventos` é append-only (regra 6), então essa ausência é permanente.
+ * Nesses, o palpite do operador está em `de` mesmo, indistinguível do
+ * estado persistido: é uma ambiguidade histórica que não dá pra desfazer
+ * e que este campo existe pra não criar de novo.
+ */
+export function referenciaInformadaDoEvento(
+  payload: Record<string, unknown> | null | undefined
+): FormaComValor[] | null {
+  const bruto = payload?.['referencia_informada']
+  if (!Array.isArray(bruto) || bruto.length === 0) return null
+  return bruto as FormaComValor[]
+}
+
+/**
+ * O texto da referência informada, já rotulado — ou `null`.
+ *
+ * O rótulo é parte do valor: sem ele a tela mostraria "Pix" do lado de
+ * "Era", e o leitor concluiria que o sistema sabia. Ele não sabia.
+ */
+export function textoDaReferenciaInformada(
+  payload: Record<string, unknown> | null | undefined
+): string | null {
+  const formas = referenciaInformadaDoEvento(payload)
+  if (!formas) return null
+  return `informado pelo operador: ${textoDoPagamentoAlterado(formas)}`
+}

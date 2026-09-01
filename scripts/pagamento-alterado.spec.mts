@@ -198,8 +198,20 @@ console.log('\n--- (7) E3.C — o id do previsto vem do PAYLOAD, nunca de dentro
   // ausência significa "legado" — igual à do `tipo` no envelope (2C.5).
   checa('e `criarEntrega` tolera a ausência (fila antiga)',
     /pagamentoPrevistoId \?\? input\.id/.test(entregas))
-  checa('idem no previsto retroativo da divergência',
-    /pagamentoPrevistoId \?\? input\.entregaId/.test(pagamentos))
+  // SUPERADA PELO E4.1, e trocada em vez de apagada.
+  //
+  // Aqui se cobrava a janela de fila do previsto RETROATIVO
+  // (`pagamentoPrevistoId ?? input.entregaId`). Esse escritor deixou de
+  // existir: o primeiro E2E do E4 mostrou que ele abria uma corrida com
+  // o replay do cadastro, e que a linha criada por ele é irremovível
+  // (regra 4). Ver `previsto-escritor-unico.spec.mts`.
+  //
+  // A invariante que sobrou é MAIS forte que a antiga — em vez de "o id
+  // do retroativo é idempotente", agora é "não há retroativo".
+  checa('o previsto retroativo da divergência DEIXOU DE EXISTIR (E4.1)',
+    !/criarPagamentoPrevisto\s*\(/.test(
+      pagamentos.slice(pagamentos.indexOf('export async function marcarDivergencia'))
+    ))
 
   // ATUALIZADO NO E4, e a invariante é a MESMA — o que mudou foi a
   // forma. O id do previsto deixou de ser um `useState` solto e passou a

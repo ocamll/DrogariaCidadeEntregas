@@ -1,6 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { textoDoPagamentoAlterado, type LadoDoPagamentoAlterado } from '@/data/pagamentos'
+import {
+  textoDoPagamentoAlterado,
+  textoDaReferenciaInformada,
+  type LadoDoPagamentoAlterado,
+} from '@/data/pagamentos'
 
 // Leitura agregada dos eventos que viram "notificação" pra gestão — 4
 // tipos hoje (pagamento_alterado, falta_receita, falta_documento_convenio,
@@ -71,8 +75,14 @@ function resumoEJustificativa(row: EventoNotificacaoRow): { resumo: string; just
       // (regra 6) —, então isto não é janela: é o histórico.
       const de = textoDoPagamentoAlterado(payload.de)
       const paraTexto = textoDoPagamentoAlterado(payload.para)
+      // E4.1 — vale sem previsto NÃO ganha mais um previsto retroativo, e
+      // a forma que o operador informou vive em campo próprio. Ela é
+      // exibida ROTULADA: sem o rótulo, "Pix" apareceria do lado de "era"
+      // e o leitor concluiria que o sistema sabia. Ele não sabia.
+      const informado = textoDaReferenciaInformada(payload as unknown as Record<string, unknown>)
+      const ladoAnterior = informado ? `${de} (${informado})` : de
       return {
-        resumo: `Divergência de pagamento — era ${de}, virou ${paraTexto}.`,
+        resumo: `Divergência de pagamento — era ${ladoAnterior}, virou ${paraTexto}.`,
         justificativa: payload.justificativa,
         autorNome: payload.autor_nome,
       }

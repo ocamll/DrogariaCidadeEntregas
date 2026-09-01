@@ -220,20 +220,24 @@ function DivergenciaPagamentoForm({
       // escalar. Com dois previstos ele afirmaria que a divergência foi
       // de UMA das formas e descartaria a outra em silêncio, num evento
       // que é append-only e nunca vai ser reescrito.
-      previstos: previstosParaComparar,
+      // O QUE O BANCO SABE, e só isso. Vale sem previsto manda lista
+      // vazia, e o evento grava `de: null` — que é a verdade.
+      previstos,
+      // O QUE A PESSOA DECLAROU, em campo próprio. Só existe quando não
+      // havia previsto; é a mesma lista usada pra decidir se houve
+      // divergência, mas ela NÃO se passa por estado persistido.
+      referenciaInformada: semPrevisto ? previstosParaComparar : null,
       pagamentosRealizados: realizados.map((r) => ({
         id: uuidv7(),
         forma: r.forma,
         valorCents: r.valor_cents,
       })),
-      // Sempre cunhado, mesmo quando `criarPrevisto` for falso: forma de
-      // payload não deve depender de booleano, e um reenvio que
-      // reavaliasse a condição cunharia outro id (E3.C).
-      pagamentoPrevistoId: uuidv7(),
+      // `criarPrevisto` e `pagamentoPrevistoId` SAÍRAM no E4.1. Esta tela
+      // não escreve mais pagamento previsto — o único escritor é o
+      // cadastro (e o replay dele pela fila). Ver `marcarDivergencia`.
       justificativa: normalizarParagrafo(justificativa),
       registradoPor: profile.id,
       autorNome: profile.nome,
-      criarPrevisto: semPrevisto,
       eventoIdempotencyKey: uuidv7(),
       registradoEmLocal: new Date().toISOString(),
     }
