@@ -108,7 +108,8 @@ E1.1 busca sem acento                ✓  migration aplicada
 E2   estados visuais de consulta     ✓  item 86 — 18 de 18 migrados
 E3   id próprio do pagamento previsto  ✓  item 87 — aplicada e conferida
 E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
-E5   login por username        IMPLEMENTADO · aceite pendente  item 89
+E5   login por username                 ✓  item 89 — aceite medido
+E10  admin operando por filial     ←  próximo
 E6..E9  router, divergência, agência, endereço
 ```
 
@@ -7575,9 +7576,13 @@ não aconteceu com dado real por nenhum dos dois escritores.
 
 **E4 FECHADO** — A, B, C e D.
 
-## 89. E5 — login por usuário: IMPLEMENTADO, aceite operacional PENDENTE
+## 89. E5 — login por usuário: FECHADO
 
-**Este item não está fechado, e a separação é deliberada.** O código já
+**FECHADO em 2026-09-01.** A separação abaixo é deliberada, e vale ler
+mesmo com tudo verde: o código já era verdadeiro antes do teste ao vivo,
+porque decorre da restrição congelada — não porque alguém logou.
+
+_(texto original de quando o item foi aberto:)_ **Este item não está fechado, e a separação é deliberada.** O código já
 rendeu decisões arquiteturais que são verdadeiras independentemente do
 teste ao vivo — elas valem porque decorrem da restrição congelada, não
 porque alguém logou. Registrá-las agora é o que as tira da branch.
@@ -7603,7 +7608,7 @@ E5 — ACEITE OPERACIONAL           (2026-09-01)
 ✓ primeiro login real usando SOMENTE o username
 ✓ senha errada comprovada como recusado
 ✓ offline comprovado como indisponível, sem acusar senha
-◷ `profiles.email` consistente com o Auth
+✓ `profiles.email` consistente com o Auth — os dois lados idênticos
 ~ contas antigas NÃO convertidas — por decisão, ver abaixo
 ~ erro técnico (5xx) separado de recusa — só no spec, não em produção
 ```
@@ -8492,8 +8497,9 @@ E1.1 busca sem acento              ✓  migration aplicada, 16·16·0
 E2   estados visuais de consulta   ✓  item 86 — 18 de 18
 E3   id próprio do pagamento previsto   ✓  item 87
 E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
-E5   login por username    IMPLEMENTADO · aceite pendente   item 89
-E6   React Router + /notificacoes e /auditoria   <-  DEPOIS DOS ACEITES
+E5   login por username                    ✓  item 89 — aceite medido
+E10  admin operando/filtrando por filial       <-  PRÓXIMO (pedido em 01/09)
+E6   React Router + /notificacoes e /auditoria
 E7   divergência/regularização de valores
 E8   portal da agência (RLS antes da tela)
 E9   endereço estruturado
