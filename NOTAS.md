@@ -107,7 +107,7 @@ E1   normalização de texto livre     ✓  itens 84 e 85
 E1.1 busca sem acento                ✓  migration aplicada
 E2   estados visuais de consulta     ✓  item 86 — 18 de 18 migrados
 E3   id próprio do pagamento previsto  ✓  item 87 — aplicada e conferida
-E4   duas formas de pagamento no cadastro  ✓  item 88 — sem migration
+E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
 E5   login por username                ←  próximo
 E6..E9  router, divergência, agência, endereço
 ```
@@ -7565,6 +7565,182 @@ não aconteceu com dado real por nenhum dos dois escritores.
 
 **E4 FECHADO** — A, B, C e D.
 
+## 90. E4 — aceite E2E e merge
+
+> **O item 89 não está faltando: ele é do E5** e vive em
+> `feat/e5-login-username`, que ainda não foi mergeada. A numeração é
+> cronológica, e o E5 foi implementado antes de o E4 ser aceito — as duas
+> frentes correm empilhadas. Quando o E5 entrar, a sequência fecha.
+
+O primeiro E2E do E4 rodou em 2026-08-31/09-01, com o `V-000053`:
+`R$ 123,90` divididos em `dinheiro 60,00 + pix 63,90`.
+
+```
+✓ primeiro vale dividido gravado no banco
+✓ 2 previstos com IDs independentes
+✓ soma dos previstos = valor da compra
+✓ DCR1 com 2 linhas p
+✓ retorno fiel com 2 formas
+✓ cliente e servidor concordaram: sem divergência
+✓ pagamento_alterado manual preservou as 2 formas em de[]
+✓ referencia_informada permaneceu null quando havia previsto real
+✓ correção ce84756 eliminou o segundo escritor retroativo
+✓ V-000006 e dados sujos de desenvolvimento permanecem intocados
+  até o corte pré-V1
+✓ verifier sem novas divergências de integridade
+```
+
+### O placar
+
+```
+antes do E2E     16 · 16 · 0
+pós-saída        19 · 19 · 0
+pós-retorno      20 · 20 · 0
+```
+
+O critério nunca foi "continuar em 16": é *documentos antigos válidos
+continuam válidos, cada romaneio novo aumenta o universo esperado, e
+nenhuma divergência de integridade nova.* Quatro documentos entraram —
+dois de uma rodada anterior, dois desta — e os vinte verificam.
+
+### O que ficou provado, e como
+
+**Os dois previstos, com identidade própria.**
+
+```
+dinheiro  6000  01a05aa0-9ea3-71ba-…
+pix       6390  01a05aa1-867b-71b8-…
+                soma 12390 = valor_compra_cents
+```
+
+`id_derivado_da_entrega = false` nos dois. Era essa derivação que o E3
+removeu, e que fazia a segunda forma bater no `23505`, ser tratada como
+sucesso, e sumir em silêncio.
+
+**O DCR1 com duas linhas `p`**, em `R-000029` (`selado`, `online`):
+
+```
+p  01a05aa0-…-7fb4-…  01a05aa0-…-71ba-…  dinheiro  6000  0
+p  01a05aa0-…-7fb4-…  01a05aa1-…-71b8-…  pix       6390  0
+```
+
+Lido do canônico ASSINADO, não de `pagamentos` — é a diferença entre "o
+banco tem duas formas" e "as duas formas entraram no documento que as
+duas partes assinaram".
+
+**O retorno FIEL não virou divergência** — e a prova é POR AUSÊNCIA, o
+que merece ser explicado porque é o tipo de prova que se lê errado:
+
+Se o servidor tivesse julgado divergente, `selar_romaneio_retorno_interno`
+teria gravado o SEU PRÓPRIO `pagamento_alterado`. A consulta do CHECK 5
+busca todos os eventos daquele tipo para aquela entrega, **sem filtro de
+data e sem limite**, ordenados por `ocorrido_em desc`. Ela trouxe UM: o
+manual, com a justificativa do teste. Logo o automático não existe, logo
+o servidor considerou fiel.
+
+Era exatamente isto que o PR existia pra provar. Antes do E4 a tela teria
+dito "divergiu" (ela contava linhas) e o servidor não (ele compara
+conjuntos de `forma|valor`) — os dois escritores do mesmo fato afirmando
+coisas diferentes.
+
+**E o `de` do escritor manual saiu como lista:**
+
+```json
+"de": [{"forma":"dinheiro","valor_cents":6000},
+       {"forma":"pix","valor_cents":6390}],
+"tipo_do_de": "array",
+"referencia_informada": null
+```
+
+`pagamento_alterado` tem DOIS escritores, e o E3.B corrigiu só o do
+servidor. Antes do E4 este teria gravado a string `"dinheiro"`, e o
+`pix 6390` sumiria da auditoria — num evento append-only, que ninguém
+reescreve depois.
+
+E `referencia_informada: null` é o E4.1 se comportando: o vale TEM
+previsto, então não há nada a declarar. O campo só se preenche em vale
+antigo sem previsto.
+
+### O pré-preenchimento, com a precisão que ele merece
+
+O retorno persistiu exatamente as duas formas e valores previstos, e foi
+considerado fiel pelo servidor. **O pré-preenchimento VISUAL das duas
+linhas não é medição deste registro** — os realizados saindo idênticos
+aos previstos é consequência dele, não prova dele.
+
+*(Marcar aqui `observado` se o operador confirmar que viu as duas linhas
+já preenchidas na tela; até lá, fica INFERIDO pelo resultado
+persistido.)*
+
+Não se transforma inferência em medição. É a mesma disciplina do §49 e do
+placar: o que foi medido tem um nome, o que foi deduzido tem outro.
+
+### O que o E2E achou que os gates estáticos não achavam
+
+E é a razão de a fronteira dos commits ficar como ficou:
+
+```
+1997041   implementação E3/E4, com todos os gates estáticos verdes
+ce84756   correção que só o primeiro E2E revelou
+item 90   prova operacional
+merge
+```
+
+O `V-000006` no banco — dois previstos `pix 5000` num vale de R$ 50,00,
+com uma ocorrência de 03:26 afirmando "vale antigo sem pagamento
+registrado" sobre um vale que tinha previsto desde 03:23 — expôs uma
+corrida que **nenhum spec conseguia demonstrar**, porque ela depende de
+interleaving entre a ocorrência e o replay da fila.
+
+E ela tinha sido ABERTA pelo E3.C: antes dele o retroativo usava
+`id: entregaId`, então um duplicado batia no `23505` e era engolido. O
+E3.C tirou o id derivado — corretamente — e levou junto uma guarda que
+ninguém sabia que existia.
+
+A correção foi por ELIMINAÇÃO, não por coordenação, e o motivo está no
+item que o usuário isolou: com a ocorrência entrando ANTES do replay, o
+replay é o escritor legítimo — se insere são duas linhas, se pula
+perde-se a verdade, e `pagamentos` não tem DELETE nem UPDATE (regra 4).
+Lock, RPC ou `select`-antes-de-inserir só escolheriam qual dano.
+
+### Duas armadilhas do MEU ferramental, e a segunda é a que ensina
+
+**1. O roteiro tinha três erros de SQL**, todos da mesma causa: escrevi de
+memória o que não podia executar. `eventos.registrado_em` (é
+`ocorrido_em`), `max(uuid)` (não existe), e `jsonb_array_length` sobre o
+`de` escalar legado (estoura). O terceiro teria quebrado na execução
+seguinte. Passei a conferir cada coluna contra o schema antes de mandar.
+
+**2. O SELETOR NÃO SABIA DIZER "NÃO ACHEI NADA NOVO".**
+
+A CTE `alvo` era *"o vale mais recente com dois ou mais previstos"*. Sem
+o vale novo, ela caía silenciosamente no `V-000006` e respondia sobre ele
+**com a mesma cara de resposta legítima**. Uma rodada inteira foi
+interpretada como falha do E4 quando media dado de 08/08.
+
+É o defeito do E2 — a ferramenta afirmando sem distinguir "não há
+resposta" de "esta é a resposta" — construído por mim, no instrumento
+que existia pra conferir o conserto dele. Resolvido excluindo o resíduo
+por id, para que "sem vale novo" devolva ZERO LINHAS, que é honesto.
+
+### Os dados sujos, por decisão explícita
+
+```
+V-000006  (e qualquer irmão fora de documento selado)
+→ dado de desenvolvimento inconsistente
+→ NÃO corrigir
+→ NÃO apagar individualmente
+→ NÃO tentar regularizar
+→ nunca entrou em romaneio
+→ eliminado no corte limpo pré-V1
+```
+
+Mexer nele só pra deixar o banco bonito violaria justamente a disciplina
+de não reescrever fato histórico. E ele é inerte: o CHECK 3 confirmou que
+não está em romaneio nenhum.
+
+**E4 FECHADO** — implementação, correção e aceite operacional.
+
 ## Commits desta sessão
 
 
@@ -7913,7 +8089,7 @@ E1   normalização central          ✓  itens 84 e 85
 E1.1 busca sem acento              ✓  migration aplicada, 16·16·0
 E2   estados visuais de consulta   ✓  item 86 — 18 de 18
 E3   id próprio do pagamento previsto   ✓  item 87
-E4   duas formas de pagamento no cadastro  ✓  item 88 — sem migration
+E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
 E5   login por username                     <-  AQUI
 E6   React Router + /notificacoes e /auditoria
 E7   divergência/regularização de valores
