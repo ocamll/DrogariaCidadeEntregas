@@ -29,6 +29,31 @@ function checa(nome: string, condicao: boolean, extra = '') {
 const CAMINHO = 'supabase/functions/sync-romaneio/index.ts'
 const fonte = readFileSync(CAMINHO, 'utf8')
 
+/**
+ * O FONTE SEM PROSA, pras asserções que leem TEXTO — E4 (2026-08-27).
+ *
+ * `fonte` continua cru de propósito: ele alimenta a EXTRAÇÃO das funções
+ * que este spec depois executa de verdade, e ali comentário é inofensivo.
+ * O que não é inofensivo é asserção de texto lendo comentário, e este
+ * arquivo tem a variedade mais exposta delas — o bloco da ordem afirma
+ * POSIÇÃO:
+ *
+ *     const primeiraRpc = pos('.rpc(')
+ *     checa(..., p > 0 && p < primeiraRpc)
+ *
+ * Um `.rpc(` citado num comentário antes da chamada real puxaria a
+ * fronteira pra trás e faria checagens corretas falharem; e
+ * `handler.split('.rpc(')` contaria três portas onde há duas.
+ *
+ * Medido em 2026-08-27: hoje nenhuma das asserções deste arquivo depende
+ * de comentário — a saída é idêntica com e sem a limpeza. A mudança é
+ * profilática, e existe porque a Edge Function é dos arquivos mais
+ * comentados do projeto: a próxima linha de explicação é que morde.
+ */
+const codigo = (f: string) =>
+  f.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^\s*\/\/.*$/gm, '')
+const fonteCodigo = codigo(fonte)
+
 // ---- extrai as três funções de resolução ----
 const inicio = fonte.indexOf('function resolverTipoDoRomaneio')
 const fim = fonte.indexOf('async function abrirEnvelope')
@@ -139,7 +164,7 @@ console.log('\n--- o que a matriz garante, dito de outro jeito ---')
 
 console.log('\n--- a ordem: primeiro prova o envelope, depois escolhe a porta ---')
 {
-  const handler = fonte.slice(fonte.indexOf('Deno.serve('))
+  const handler = fonteCodigo.slice(fonteCodigo.indexOf('Deno.serve('))
   const pos = (agulha: string) => handler.indexOf(agulha)
 
   const primeiraRpc = pos('.rpc(')
@@ -175,7 +200,7 @@ console.log('\n--- a ordem: primeiro prova o envelope, depois escolhe a porta --
 
 console.log('\n--- o vocabulário dos traços é rígido por tipo ---')
 {
-  const handler = fonte.slice(fonte.indexOf('Deno.serve('))
+  const handler = fonteCodigo.slice(fonteCodigo.indexOf('Deno.serve('))
   checa(
     'retorno lê responsavelStrokes',
     handler.includes("tipo === 'retorno' ? corpo.responsavelStrokes : corpo.caixaStrokes")

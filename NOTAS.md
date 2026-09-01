@@ -105,9 +105,54 @@ invariantes já construídas.
 ```
 E1   normalização de texto livre     ✓  itens 84 e 85
 E1.1 busca sem acento                ✓  migration aplicada
-E2   estados visuais de consulta     ←  próximo
-E3..E9  pagamento, login, router, divergência, agência, endereço
+E2   estados visuais de consulta     ✓  item 86 — 18 de 18 migrados
+E3   id próprio do pagamento previsto  ✓  item 87 — aplicada e conferida
+E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
+E5   login por username                ←  próximo
+E6..E9  router, divergência, agência, endereço
 ```
+
+**O E3 achou uma SEGUNDA suposição 1:1**, escondida onde ninguém
+olharia: o evento `pagamento_alterado` escolhia UM previsto com
+`limit 1`, e com dois teria gravado auditoria errada. Corrigido antes de
+existir qualquer caminho capaz de criar o segundo — que é a diferença
+entre consertar um defeito e descobri-lo depois de selar um documento.
+
+**E o E4 achou mais DUAS, e uma delas escrevia auditoria.**
+`pagamento_alterado` tem **dois escritores** — o E3.B corrigiu o do
+servidor e ninguém perguntou quem mais gravava aquele evento;
+`marcarDivergencia` ficou escalar. A outra: o cliente decidia divergência
+por **contagem de linhas**, enquanto o servidor compara conjuntos de
+`forma|valor` — com um previsto só os dois concordavam por acidente.
+
+**O E4 não precisou de migration nenhuma**, e isso diz algo do trabalho
+de 16 a 25/08: a cadeia de custódia foi construída sobre a cardinalidade
+REAL da tabela, não sobre a que a UI usava. O canônico do DCR1 e o gêmeo
+TypeScript já varriam N previstos. Uma feature de produto inteira caiu
+dentro dela sem tocar no banco.
+
+**⚠️ O E3 ESTÁ NUMA BRANCH, não na `main`:**
+
+```
+main                            f2fe300  E1
+                                9b5afcc  E2      ← último estado na main
+feat/e3-pagamentos-previstos    220e6c9  E3
+                                ???????  E3: conferência pós-migration
+```
+
+**Mas a MIGRATION já está aplicada no banco de desenvolvimento** — git
+não isola Supabase. Então a `main` sozinha já não corresponde ao banco:
+ela não tem os leitores bicompatíveis do E3.A, e o evento novo escreve
+`de` como lista. Na prática, **trabalhe a partir da branch**, e faça o
+merge quando quiser — ele não tem conflito com nada.
+
+**O E2 não foi padronização de markup.** Ele achou um defeito de
+comportamento em nove telas: com a query PAUSADA (offline sem cache) o
+`isLoading` do TanStack vem `false`, e a cadeia
+`if (isLoading) … if (!data) → "nenhum registro"` cai no último ramo e
+AFIRMA vazio sem ter havido resposta. O pior deles negava um documento
+de custódia selado; o segundo era a tela pós-login do caixa. Ver o item
+86 — inclusive as três vezes em que o gate reprovou o próprio autor.
 
 **O que ainda NÃO existe, e é fácil supor errado:** não há deploy — nem
 conta na Cloudflare, nem projeto do Pages, nem site no ar. Isso não é
@@ -115,10 +160,21 @@ configuração pendente, é infra inteira, e os passos 5 e 6 do roteiro do
 corte dependem dela.
 
 **Se você está retomando, comece por "PRÓXIMA SESSÃO", perto do fim deste
-arquivo.** É lá que está o trabalho combinado — hoje o **E2**, com as
+arquivo.** É lá que está o trabalho combinado — hoje o **E5**, com as
 decisões já fechadas (React Router entra na stack; username usa
-identificador técnico interno) e os cinco achados da auditoria que
-mudaram a ordem das etapas. **O trabalho vive na `main`.**
+identificador técnico interno) e os achados da auditoria que mudaram a
+ordem das etapas.
+
+**ONDE O TRABALHO VIVE MUDOU NO E3.** Até o E2 era tudo na `main`; o E3
+foi para uma branch porque passou a mexer em banco:
+
+```
+git checkout feat/e3-pagamentos-previstos
+```
+
+A `main` está no E2 (`9b5afcc`) e **já não corresponde ao banco** — a
+migration do E3 foi aplicada no mesmo Supabase de desenvolvimento, e
+branch do git não isola banco. Merge quando quiser: não há conflito.
 
 ## 1. Fila offline nas outras 4 escritas
 
@@ -6512,6 +6568,1179 @@ mostraria "joao da silva" no lugar do nome da pessoa.
 
 **E1.1 FECHADO.** 62 asserções na biblioteca, 30 na fiação.
 
+## 86. E2 — estados visuais de consulta, e o `isLoading` que mente
+
+O pedido era "estados visuais de consulta", e parecia padronização de
+markup. O levantamento achou um defeito de comportamento com nove telas
+mentindo, e a migração achou outros quatro — três deles meus.
+
+### O DEFEITO, medido no fonte antes de qualquer código
+
+```js
+// @tanstack/query-core, queryObserver.js:307-310
+const isFetching = newState.fetchStatus === "fetching"
+const isPending  = status === "pending"
+const isLoading  = isPending && isFetching
+
+// retryer.js:11 — networkMode default
+return (networkMode ?? "online") === "online" ? onlineManager.isOnline() : true
+```
+
+Offline e sem cache, a query **pausa**: `fetchStatus: 'paused'`, logo
+`isFetching: false`, logo **`isLoading: false`**. `isError` também é
+`false`, e `data` é `undefined`. Então toda cadeia escrita como
+
+```
+if (isLoading) …; if (isError) …; if (!data) → "nenhum registro"
+```
+
+cai no último ramo e AFIRMA vazio sobre uma consulta que nunca
+respondeu. O app tinha 55 usos de `isLoading` em 18 arquivos e **zero**
+de `isPending`/`fetchStatus`.
+
+### O inventário, arquivo por arquivo
+
+Não foi glob: cada um foi lido e classificado pela frase que ele põe no
+ar com a query pausada.
+
+| categoria | quantos | o que faziam |
+|---|---|---|
+| `defeituoso` | 9 | afirmavam vazio sem saber |
+| `mudo` | 5 | não mentiam, e também não explicavam — tela em branco |
+| `acidental` | 2 | corretos só porque `data?.length === 0` dá `undefined === 0` → `false` |
+| `deliberado` | 2 | já tratavam à mão, com comentário (§50.2) |
+
+**Meu primeiro número estava errado**, e vale registrar: reportei "6
+defeituosos" tendo inspecionado 9 dos 18 arquivos. Os três que faltavam
+eram os piores:
+
+```
+Romaneio.tsx          "Romaneio não encontrado."   sobre um documento SELADO
+ListaEntregas.tsx     "Nenhum vale encontrado."    tela pós-login do caixa
+HistoricoEntregas.tsx "Nenhum vale encontrado."    reabrindo o defeito do E1.1
+```
+
+O terceiro é o mais irônico: o E1.1 existe porque "resultado vazio é
+indistinguível de *não existe cadastro*, a pior forma de errar numa
+busca" — e offline a mesma tela voltava a dizer isso, agora por falta de
+resposta em vez de por acento.
+
+E os `acidental` mostram por que "está funcionando" não basta: eles
+escapavam por um acidente de sintaxe que ninguém decidiu, e bastaria
+alguém trocar por `(data ?? []).length === 0`, achando que é a mesma
+coisa, pra a tela passar a mentir.
+
+### AS DUAS PERGUNTAS, que estavam misturadas
+
+```
+1. TRANSPORTE   a consulta conseguiu responder?
+                inactive · loading · ready · unavailable · error
+
+2. DOMÍNIO      se respondeu, qual foi o veredito?
+                aceito · recusado(motivo)
+```
+
+`nao_encontrado` **não é falha de consulta**. É uma consulta
+bem-sucedida cujo resultado de domínio foi negativo — e por isso ele só
+existe DENTRO de `ready`, nunca ao lado dele:
+
+```ts
+EstadoDeConsulta<Veredito<Credencial, MotivoDoCartao>>
+```
+
+Assim "cartão não existe" fica inalcançável sem ter havido resposta
+confiável. É o §59 de novo: tornar o erro impossível de representar vale
+mais que rejeitá-lo.
+
+**A mistura de idiomas é deliberada**, e diz de que camada cada palavra
+fala: `loading`/`ready`/`unavailable` são o estado técnico da OBTENÇÃO
+do dado; `aceito`/`recusado` são o significado da resposta PARA A
+FARMÁCIA.
+
+**E chama-se `inactive`, não `idle`**, porque o TanStack já usa
+`fetchStatus: 'idle'` no mesmo ecossistema com outro sentido — lá quer
+dizer "não está buscando agora", o que inclui uma consulta que já
+terminou e tem dado. Dois `'idle'` a duas linhas um do outro produziriam
+leitura errada num arquivo que ninguém abre há meses. A tradução
+`TanStack: idle → nosso: inactive` é visível justamente porque as
+palavras diferem.
+
+### O CONTRATO DE APRESENTAÇÃO, congelado com o usuário
+
+```
+inactive                sem mensagem, sem CTA
+loading                 indicador; CTA que depende da resposta travado
+ready                   renderiza o dado — e SÓ aqui pode afirmar vazio
+ready · cache_sem_rede   dado VISÍVEL + "podem estar desatualizados", sem retry
+ready · cache_apos_falha dado VISÍVEL + "não foi possível atualizar" + [Atualizar]
+unavailable             informa, tom de AVISO, SEM botão
+error                   acusa a falha, tom de FALHA, + [Tentar novamente]
+```
+
+**A ausência de botão no `unavailable` é a decisão central.** Não há a
+quem perguntar, então um botão só produziria o mesmo resultado — e
+ensinaria o operador a martelar uma consulta que o próprio sistema sabe
+que não pode executar, que é o comportamento que o E2 veio matar. A
+recuperação é automática, e isso foi MEDIDO: religando a rede, as telas
+voltaram sozinhas sem nenhum clique.
+
+E `ready` com cache é o que impede trocar um defeito por outro: com dado
+utilizável a tela CONTINUA mostrando, e o aviso vai ao lado. Sem essa
+regra, "offline parece vazio" viraria "offline esconde o que já temos".
+
+### A polaridade, que é o defeito numa frase
+
+```
+desconhecido  ≠  vazio
+```
+
+E ela é estrutural, não disciplina: o `children` do `<Consulta>` é
+função e só roda com dado; o `vazio` só é consultado dentro do ramo
+`ready`. Não há como uma tela afirmar vazio sem ter havido resposta —
+não porque alguém lembrou de checar, mas porque o galho onde a frase
+mora fica pendurado no `ready`.
+
+### Três specs, e cada um fecha um buraco que os outros deixam
+
+```
+estado-de-consulta         a decisão está certa          (apresentar puro)
+fiacao-estado-de-consulta  o componente é CASCA          (lê o fonte)
+consulta-render            a casca RENDERIZA o que a decisão diz
+```
+
+O terceiro não é redundante: os dois primeiros juntos ainda deixariam
+passar uma casca que chama `apresentar()` e ignora o resultado. Ele roda
+o componente de verdade por `react-dom/server`, sem navegador — e
+**precisa de `--tsconfig tsconfig.app.json`**, senão o esbuild do `tsx`
+compila JSX no runtime clássico e quebra com `React is not defined`.
+
+A asserção que mais importa passa `aoRecarregar` de propósito:
+
+```
+ok   NÃO tem botão, mesmo com aoRecarregar passado
+```
+
+Uma casca descuidada desenharia o botão só por ter callback em mãos.
+
+### O gate é lista EXPLÍCITA e FECHADA
+
+A lista nomeia os 18 alvos; a varredura exige que TODO arquivo que use
+`isLoading` esteja nela. Glob aceitaria tela nova em silêncio; lista
+sozinha não a veria. Com as duas, tela nova quebra o gate e alguém tem
+que decidir o que ela afirma quando não sabe.
+
+### AS TRÊS VEZES EM QUE O GATE PEGOU O PRÓPRIO AUTOR
+
+Isso é mais importante do que parece: prova que eles não são decorativos.
+
+1. **A biblioteca caiu na própria regra.** `estadoDeConsulta.ts` cita
+   `isLoading` no cabeçalho pra explicar por que não o usa, e a checagem
+   lia o fonte cru. A regra passou a ignorar comentários — contar prosa
+   acusa justamente quem documentou o conserto. O mesmo falso positivo
+   voltou em `ListaEntregas` uma etapa depois, porque um dos checks
+   ainda lia o cru; uniformizei.
+
+2. **O `CampoDependente` violou a regra da casca.** Ele montava o título
+   "Filiais indisponíveis" dentro do componente, e o gate reprovou:
+   escolher texto é decidir. O rótulo virou variante (`{ campo: string }`)
+   e `apresentar()` voltou a ser o único que escreve frase.
+
+3. **Marquei dois arquivos como migrados sem migrar.** `NovaCorrida` e
+   `RetornoCorrida` ainda tinham a consulta de LISTA à mão, e o gate
+   acusou "não lê mais `isLoading`" nos dois.
+
+### Consultas independentes, verdades independentes
+
+`MototaxistasCadastro` era o único defeito que falhava **até online**:
+
+```js
+{!isLoading && !isError && (!agencias || agencias.length === 0) && (
+  <p>Cadastra uma agência primeiro…</p>
+)}
+```
+
+As flags são da query de MOTOBOYS; o `data` é da de AGÊNCIAS. Bastava a
+de motoboys responder primeiro — requisições independentes, isso
+acontece sempre — pra a tela mandar o admin cadastrar uma agência que já
+existe. Offline era permanente.
+
+Medido no app, com as duas pausadas:
+
+```
+["agencias-cadastro"]      pending · paused · sem dado
+["mototaxistas-cadastro"]  pending · paused · sem dado
+→ "Dados indisponíveis no momento."   botão Novo motoboy travado COM explicação
+→ nenhum "Cadastra uma agência primeiro"
+```
+
+E o mesmo defeito apareceu numa CÉLULA, três vezes: `nomeAgencia` e
+`rotuloCidade` devolviam `'—'` tanto para "não tem" quanto para "não
+sei" — a ignorância de uma consulta virando afirmação de ausência sobre
+o dado de outra. Hoje `'—'` só sai quando o id é nulo; sem a lista sai
+`'…'`.
+
+### Campo dependente: o formulário fica, só a dependência trava
+
+Sete sítios têm select alimentado por consulta. Numa lista o
+`<Consulta>` domina a área de conteúdo; num formulário ele NÃO pode,
+porque o operador está no meio de um lançamento.
+
+Duas regras, congeladas com o usuário:
+
+1. **não limpar o resto do formulário** — o que ficou indisponível foi a
+   filial, não o que o caixa já digitou;
+2. **não apagar uma seleção que já existia** — transformar
+   indisponibilidade em perda de trabalho é pior que o problema. Quem
+   revalida é o submit.
+
+Medido nos dois cenários:
+
+```
+formulário aberto do ZERO, offline, sem cache
+  "Filiais indisponíveis no momento."   select DESABILITADO, form montado
+
+a rede CAINDO com o formulário aberto   ← o caso que acontece no balcão
+  query: success · paused · temDado=true
+  select HABILITADO, 8 opções, seleção PRESERVADA ("Filial 02")
+  "Exibindo dados disponíveis offline; podem estar desatualizados."
+```
+
+O segundo é `ready + cache_sem_rede`, não `unavailable` — as filiais
+ainda são conhecidas, então o campo continua utilizável. É a distinção
+funcionando onde ela importa.
+
+E o submit passou a separar duas frases que pediam coisas opostas: "não
+sei quais são as filiais" e "você não escolheu uma" davam a mesma.
+
+### NovaCorrida: as duas CONSULTAS, e só elas
+
+O alvo não era "sumir com `ocupado`". `bipar cartão` e `conferir PIN`
+perguntam e recebem resposta; `criar PIN` e `confirmar saída` ESCREVEM,
+e ficaram com a mecânica delas — esticar `EstadoDeConsulta` para
+qualquer async só pra zerar ocorrências apagaria a distinção que ele
+existe pra marcar. **O gate afirma as duas metades**, porque sem a
+segunda alguém "terminaria o trabalho" removendo o que foi mantido de
+propósito.
+
+O conserto de comportamento estava no PIN: `r.ok === false` e o `catch`
+terminavam os dois em `setPinConferido(null)` + string vermelha. A tela
+voltava ao início e reoferecia "Confirmar identidade" nos dois casos, e
+o caixa relia o PIN no papel do motoboy procurando um erro que podia não
+existir.
+
+Medido no app:
+
+```
+formato inválido      "Isso não parece um cartão do sistema."     recusa
+não reconhecida       "Credencial não reconhecida."               recusa
+erro de rede          "Não foi possível carregar os dados."       falha + retry
+offline sem cache     "Não foi possível verificar agora."         AVISO, sem botão
+                      + "isso não quer dizer que o cartão seja inválido"
+offline com cache     badge "Credencial informada"
+PIN offline           "PIN guardado, mas não conferido"           custódia liberada
+PIN recusado          motivo do servidor                          custódia NÃO liberada
+erro de rede no PIN   "Não foi possível concluir a verificação."  custódia NÃO liberada
+                      + "O PIN não foi recusado — não deu pra conferir.
+                         Tentar de novo não conta como erro pro motoboy."
+```
+
+**O ramo offline do PIN ficou FORA do vocabulário de consulta.** Sem
+rede ninguém RESPONDE nada sobre aquele PIN: ele é capturado e validado
+na sincronização. Chamar isso de `ready` seria inventar uma resposta; de
+`unavailable`, seria dizer que o fluxo não pode seguir — e ele pode, é o
+caminho que o projeto passou dias provando. Virou
+`pinCapturadoOffline`, e a custódia libera por dois caminhos que a tela
+nomeia separadamente.
+
+E `credencial` deixou de ser estado próprio: é o que a consulta devolveu
+quando ACEITOU. Não há mais como existir credencial sem ter havido
+resposta — antes isso dependia de dois `setState` andarem sempre juntos.
+
+### RetornoCorrida: a máquina dizia uma coisa, a string dizia outra
+
+Aqui `custodiaDoRetorno.ts` já separava `cartao_recusado`,
+`pin_recusado`, `erro_rede` e `conflito` corretamente. O que faltava era
+o MOTIVO viajar com ela: ele vivia num `erro: string | null` paralelo, e
+**o `catch` dos handlers escrevia a string SEM despachar nada** — a
+máquina ficava em `aguardando_cartao`, como se nada tivesse sido
+tentado, com um texto de erro no ar. Duas fontes descrevendo momentos
+diferentes, e nenhuma delas a autoridade.
+
+Hoje a mensagem é campo do estado, e carrega texto E natureza juntos:
+
+```ts
+mensagem: { texto: string; tipo: 'recusa' | 'falha' } | null
+```
+
+O `erro` paralelo sobreviveu servindo só **validação local** — formato
+do PIN, assinatura faltando, chave de ambiente ausente. Nada disso é
+resposta de ninguém: são conferências anteriores a qualquer transição, e
+a máquina nem chega a ser tocada.
+
+#### O BECO SEM SAÍDA que eu criei, e que só a medição achou
+
+Rotear o `catch` do cartão para `ERRO_REDE` parecia óbvio. Mas:
+
+```
+CARTAO_LIDO é aceito de:  aguardando_cartao · cartao_recusado · falha_selo_online
+erro_rede                 NÃO está na lista
+```
+
+Depois de uma falha de rede ao bipar, **o caixa não conseguia bipar de
+novo**. Antes o `catch` não despachava nada, então a máquina ficava em
+`aguardando_cartao` e rebipar funcionava — troquei "canal errado" por
+"travou", que é pior.
+
+A raiz: `ERRO_REDE` foi desenhado pro passo de CONCLUIR. **Uma consulta
+que falha não descobriu nada e não move custódia.** Daí
+`FALHA_NA_CONSULTA`, que muda só a mensagem e deixa o `nome` intacto — o
+próximo passo continua sendo o mesmo de antes.
+
+Isso só apareceu porque o roteiro de verificação tinha DUAS perguntas
+por cenário: *o texto/cor/CTA estão certos?* e *a máquina permite
+exatamente os próximos passos esperados?*. A primeira sozinha teria
+passado — o texto e a cor estavam corretos.
+
+Consequência de desenho: **a cor sai do TIPO DA MENSAGEM, não do nome do
+estado**. Pelo nome, uma consulta falha (que não move a máquina) seria
+pintada como se nada tivesse acontecido.
+
+#### `useContextoRetorno` já era o vocabulário, com outros nomes
+
+```
+carregando            →  loading
+pronto + servidor     →  ready + procedencia 'servidor'
+pronto + cache        →  ready + cache_sem_rede / cache_apos_falha
+nao_encontrado        →  ready + recusado('nao_encontrado')
+indisponivel_offline  →  unavailable
+erro                  →  error
+```
+
+Inventado independentemente, incluindo um `origem: 'servidor' | 'cache'`
+que é o `Procedencia`. Migrar **ganhou precisão** em dois pontos:
+`nao_encontrado` era irmão de `erro` quando na verdade é o oposto deles
+— uma RESPOSTA, e das boas —, e o `origem: 'cache'` colapsava dois casos
+que a própria função já distinguia (offline × depois de falhar). Hoje a
+tela diz qual foi.
+
+### Dois defeitos de UX que só a medição no app achou
+
+**`[object Object]`** — o §80 de novo, reintroduzido por mim. O erro do
+PostgREST não é um `Error`, então `String(e)` o apagava. Trocado por
+`mensagemDeErro` em seis pontos, `NovaCorrida` inclusa.
+
+**Stack trace no balcão** — e este é o par do anterior:
+`mensagemDeErro` junta `message` + `details`, e num erro de rede do
+supabase o `details` É A STACK. O caixa via isso na tela. Agora o
+técnico vai pro `console.error` e o balcão recebe uma frase; perder o
+detalhe seria o §80 outra vez, então ele continua existindo — só que
+onde se depura.
+
+**E a mensagem da falha ficava no ar** depois de o cartão ser lido com
+sucesso. Um passo bem-sucedido agora apaga o que o anterior disse.
+
+### Uma asserção minha que era teatro
+
+Escrevi um bloco varrendo os quatro estados de motoboys pra provar que a
+afirmação sobre agências não depende deles. Passava verde e não provava
+nada: o predicado NÃO RECEBE o estado de motoboys, então varrê-los não
+podia falhar nem se ele estivesse errado por outro motivo. Trocado pela
+afirmação honesta — a independência é estrutural, e o que se prova é a
+assinatura.
+
+### O placar
+
+```
+família B — consultas          18 arquivos
+  defeituoso   0     (eram 9)
+  mudo         0     (eram 5)
+  acidental    0     (eram 2)
+  deliberado   0     (eram 2)
+  migrado     18
+
+família A — ações               4 operações
+  migradas     2     as duas CONSULTAS; as duas escritas ficam com `ocupado`
+
+regressão   cadeia de custódia 11 · E1 2 · E2 3   todos verdes
+            tsc -b ok · oxlint 9 avisos, os pré-existentes
+```
+
+**E2 FECHADO.** O que ele mudou não foi a aparência: foi o app parar de
+afirmar sobre o mundo o que só sabe sobre a própria consulta.
+
+## 87. E3 — identidade do pagamento previsto, e a segunda suposição 1:1
+
+O achado nº 1 da auditoria das nove frentes dizia que o E4 estava
+bloqueado: `criarPagamentoPrevisto` usa `id: entregaId` ("relação é
+1:1"), então duas formas previstas colidiriam na PK e a segunda não
+entraria. Parecia um ajuste de uma linha.
+
+O levantamento — feito ANTES da migration, a pedido do usuário — achou
+que o perigo era outro.
+
+### O levantamento, e a notícia boa que ele deu primeiro
+
+`romaneio_canonico` **lê ao vivo** de `public.pagamentos` e põe `pg.id`
+na linha `p` do DCR1:
+
+```sql
+'p' || e'\t' || v_registro.entrega_id::text
+    || e'\t' || v_registro.id::text        -- ← o id do previsto
+```
+
+Ou seja: **todo romaneio de saída selado tem o id do previsto dentro do
+`document_hash`**. Se o verificador recomputasse o canônico, trocar essa
+identidade acusaria divergência em documentos que ninguém tocou.
+
+Não recompõe:
+
+```sql
+-- verificador_de_hash.sql:135
+-- Note que NÃO se recalcula o canônico a partir de `entregas`.
+v_recalc := encode(digest(r.canonico, 'sha256'), 'hex')
+```
+
+Ele prova que **os bytes assinados produzem o hash assinado**, usando
+`romaneios.canonico` gravado. Isso já estava certo por outro motivo (a
+regra 7 — o vale pode ter sido corrigido depois), e nos salvou aqui de
+graça. O `romaneios.payload` também congela o `pagamento_id`.
+
+### A SEGUNDA SUPOSIÇÃO 1:1, escondida, e que grava auditoria
+
+Em `selar_romaneio_retorno_interno`, o evento `pagamento_alterado`:
+
+```sql
+'de', (select pg.forma from public.pagamentos pg
+        where pg.entrega_id = v_entrega_id and pg.momento = 'previsto'
+        order by pg.id::text collate "C" limit 1),
+```
+
+**`limit 1`.** Com dois previstos — que é exatamente o que o E4 vai criar
+— o evento afirma que a divergência foi de UMA das formas e descarta a
+outra em silêncio. Não é registro incompleto: é registro **errado**, num
+evento de auditoria.
+
+E o que torna isso traiçoeiro é o contraste: a checagem da invariante do
+§78, **vinte linhas acima**, já é multi-consciente (`array_agg` de
+`forma|valor`). Quem lesse aquele bloco concluiria que a função inteira
+lida com N.
+
+O usuário tinha previsto exatamente esta classe: *"o perigo do E3 não é
+só duas formas colidirem. É existir uma segunda suposição 1:1 escondida
+em outro ponto e descobrir só depois de selar um documento."*
+
+### O inventário completo, e o que ele desarmou
+
+| ponto | assumia | desfecho |
+|---|---|---|
+| `criarPagamentoPrevisto` | `id?` default = `entregaId` | a premissa, removida no E3.C |
+| `entregas.ts` · `pagamentos.ts` | passam `id: entregaId` | os dois chamadores |
+| `selar_romaneio_retorno_interno` | `limit 1` no evento | **corrigido no E3.B** |
+| `entregas.ts:310` · `fechamento.ts:100` | `.find(previsto)?.forma` | **dívida BLOQUEANTE do E4** |
+| guard do §78 · `congelarRetorno` | "realizado ≠ id do previsto" | ficam integralmente |
+| `romaneio_canonico` · `payload` | leem `pg.id` ao vivo | seguros |
+| `documentos_esperados_do_retorno` | faz parse da linha `p` | seguro: lê texto gravado |
+| tabela `pagamentos` | — | **nunca impôs 1:1** |
+
+O último achado é o que encolheu a frente: **não existe unique em
+`(entrega_id, momento)`**. O banco sempre aceitou N; o 1:1 vivia só no
+default do cliente. Não houve constraint a derrubar, nem backfill.
+
+### A ordem READER-FIRST, e por que ela não é burocracia
+
+O usuário corrigiu o contrato aqui, e a correção é conceitual: o banco
+aceitar as duas formas (o `payload` é `jsonb`, sem constraint) torna a
+migration **estruturalmente** compatível, não **comportamentalmente**.
+Um leitor que só saiba interpretar `"pix"` quebra ao receber
+`[{forma,valor_cents}]`.
+
+```
+E3.A  os leitores aceitam string E lista
+E3.B  o SQL passa a ESCREVER lista
+E3.C  o cliente cunha id próprio
+```
+
+É protocolo distribuído: todo mundo aprende a LER o formato novo antes
+de alguém começar a escrevê-lo. Inverter faria o sintoma aparecer no
+Registro de Auditoria, que é onde menos se pode errar.
+
+### E3.A — e o helper que estava no lugar errado
+
+O `para` do evento JÁ era bicompatível nos dois leitores, com comentário
+explicando ("eventos antigos gravaram `para` como string única"). Fazer o
+`de` do mesmo jeito daria QUATRO cópias da mesma normalização.
+
+Extraído para um lugar só — e a primeira tentativa **falhou na primeira
+execução do spec**:
+
+```
+TypeError: Cannot read properties of undefined (reading 'VITE_SUPABASE_URL')
+```
+
+Eu tinha posto o helper em `data/pagamentos.ts`, que importa o cliente
+Supabase, que lê `import.meta.env` — inexistente sob `tsx`. É a
+disciplina que o projeto já tem e eu furei: **regra que decide o que a
+tela AFIRMA mora em `lib/` e não importa nada.** Movido para
+`src/lib/formasDePagamento.ts`, com `data/pagamentos.ts` reexportando —
+nenhum importador mudou, e agora existe teste onde antes só havia a
+esperança de que as duas cópias concordassem.
+
+**A decisão de leitura que vale guardar:** a string legada NÃO carrega
+valor, e o helper marca isso em vez de inventar.
+
+```
+'pix'                             →  "Pix"
+[{forma:'pix',valor_cents:1000}]  →  "Pix (R$ 10,00)"
+```
+
+Fabricar um `valor_cents` faria o Registro de Auditoria afirmar um
+número que ninguém gravou. E forma fora do enum (`'vale'`, que saiu do
+banco no §64) sai **crua** em vez de sumir.
+
+**O NBSP de novo.** Quatro casos falharam mostrando strings visualmente
+idênticas. `formatBRL` usa `toLocaleString('pt-BR')`, que põe U+00A0
+depois do `R$` — medido: `82,36,160,49,48,44,48,48`. As expectativas
+passaram a ser construídas com o próprio `formatBRL`, porque digitar o
+espaço à mão é o erro que qualquer um repete. É o §84 outra vez, noutro
+arquivo.
+
+### E3.B — a quinta definição, por patch da quarta
+
+Mesmo método da quarta (§78), e ele existe porque reescrever à mão a
+função mais crítica do projeto é a forma mais provável de mover sem
+querer uma linha de `digest(...)` — e fórmula de hash alterada por
+acidente não dá erro, dá romaneio que deixa de verificar meses depois.
+
+`scripts/patch-selar-retorno-e3b.mts`: extrai a 4ª, aplica um patch
+mínimo, imprime o diff, e **prova as invariantes antes de o arquivo da
+migration existir**.
+
+```
+2 linhas removidas, 23 acrescentadas (19 delas comentário)
+
+ok  há 4 expressões digest()
+ok  e elas continuam byte a byte idênticas
+ok  nenhum insert em assinaturas alterado
+ok  nenhum trecho do DCRR1 alterado
+ok  o guard do §78 intacto
+ok  nenhum ON CONFLICT alterado
+ok  o número de queries de pagamentos não mudou   2 → 2
+ok  e EXATAMENTE UMA delas mudou
+ok  e a que mudou é a do evento `pagamento_alterado`
+```
+
+**A ordem é TOTAL, e isso é do usuário:**
+
+```sql
+order by pg.forma, pg.id::text collate "C"
+```
+
+`order by pg.forma` sozinho deixa empate entre dois previstos da MESMA
+forma, e o Postgres não promete ordem útil aí. Mesmo não entrando em
+hash nenhum, é evento de auditoria: mesmos fatos têm que produzir a
+mesma representação.
+
+**E NULL, não `[]`:** sem previsto o `jsonb_agg` devolve NULL, e o
+escalar de antes também acabava em NULL. Um `coalesce(..., '[]')` diria
+"havia previsto, e ele estava vazio", que é outro fato.
+
+#### Um check meu que estava errado
+
+A primeira versão de "nenhuma OUTRA query de pagamentos alterada" falhou
+por defeito meu: a janela de 160 caracteres começa DEPOIS do `from`,
+então o `valor_cents` da query nova cai fora dela e meu filtro por
+conteúdo não a excluía — o script acusava a própria query patcheada.
+
+Trocado por uma afirmação mais simples e que prova mais: **"exatamente
+uma mudou, e é a do evento"**, comparando posicionalmente.
+
+### E3.C — e o `?` que não enumerou nada
+
+`criarPagamentoPrevisto` passou a EXIGIR o `id`. A intenção era o método
+da 2D.6 — deixar o compilador enumerar quem dependia do default. **Não
+enumerou nada**: os dois chamadores já passavam `id` explicitamente, só
+que com o valor errado. Quem os achou foi o levantamento.
+
+Fica registrado porque a lição não é "funcionou": o que a
+obrigatoriedade compra aqui é o FUTURO — um chamador novo não consegue
+mais omitir o id e herdar a premissa 1:1 sem perceber.
+
+**A janela da fila**, igual à do `tipo` no envelope (2C.5):
+
+```
+NovaEntrega ganha  pagamentoPrevistoId: string      ← o que nasce agora
+handler aceita     pagamentoPrevistoId ?? id        ← o que já está guardado
+```
+
+O tipo governa o que se escreve; o `??` tolera o item que já está no
+IndexedDB de alguém. Sem ele, esse item gravaria `undefined`, o banco
+cunharia um id aleatório A CADA REENVIO, e o previsto duplicaria — a
+fila reenvia sempre que a rede oscila. Morre no corte pré-V1.
+
+**O id é cunhado antes de enfileirar, nunca dentro da função.**
+`criarPagamentoPrevisto` insere e trata `23505` como sucesso, e isso só
+é idempotente se o id for O MESMO a cada tentativa.
+
+E na divergência ele é cunhado **sempre**, mesmo quando `criarPrevisto`
+é falso: forma de payload não deve depender de booleano, e um reenvio
+que reavaliasse a condição cunharia outro id.
+
+### A dívida BLOQUEANTE do E4, registrada aqui de propósito
+
+```
+E4 NÃO fecha enquanto:
+  src/data/entregas.ts:310    .find(p => p.momento === 'previsto')?.forma
+  src/data/fechamento.ts:100  idem
+ainda exibirem APENAS um previsto.
+```
+
+Elas ficaram fora do E3 por decisão conjunta: só passam a mentir quando
+existirem dois previstos, e **quem cria o segundo é o E4**. Mexer agora
+seria alterar coluna de lista sem ter o caso que a justifica — e no E4
+dá pra testar a UI contra um caso real.
+
+A condição que torna isso seguro: **o E3 não habilita nenhum caminho
+operacional capaz de criar dois previstos.** Ele torna o modelo capaz de
+1:N; o E4 passa a usar.
+
+### O que foi medido
+
+```
+baseline ANTES da migration, como admin     16 · 16 · 0   (13 saídas + 3 retornos)
+migration aplicada pelo usuário em 2026-08-26
+verificador DEPOIS                          16 · 16 · 0   ← IDÊNTICO
+
+specs   custódia 11 · E1 2 · E2 3 · E3 1 (30 asserções) · patch 11
+        tsc -b ok · oxlint 9 avisos, os pré-existentes
+```
+
+**O GATE ERA `antes == depois`, e não "tem que dar 16".** A distinção
+importa porque o baseline SOBE a cada saída nova (§64: era 9, virou 10,
+virou 11) — um número maior não seria regressão. O que se prova aqui é
+que as mesmas 16 que verificavam continuam verificando, e que nenhuma
+sumiu.
+
+E era o esperado por construção: a migration troca um `select` dentro de
+um `jsonb_build_object` de evento, e não encosta em nenhuma das quatro
+expressões `digest(...)` — isso foi provado por diff antes de o arquivo
+existir. A medição não é redundante com a prova: ela é o mesmo método do
+§22 e do §49, onde medir o "antes" e o "depois" no MESMO instrumento foi
+o que impediu concluir certo por sorte.
+
+Os cinco casos da escrita nova (0 previstos → NULL; 1 legado; 2; ordem
+de inserção invertida → JSON idêntico; mesma forma duas vezes →
+desempate por uuid) estão como SQL rodável no rodapé da migration,
+dentro de `begin; … rollback;` — o rollback é obrigatório, porque
+`pagamentos` não tem policy de DELETE e a regra 4 proíbe apagar.
+
+**E3 FECHADO** — A, B e C, com a conferência pós-migration medida.
+
+O que continua sem exercício, e é honesto dizer: **nenhum retorno foi
+selado depois da migration**, então a escrita nova do evento
+(`de` como lista) ainda não aconteceu com dado real. Os cinco casos do
+rodapé cobrem a QUERY isolada; o evento inteiro só sai quando houver um
+retorno novo pra fechar. O primeiro que acontecer serve de conferência —
+a consulta está no item (4) do rodapé da migration.
+
+## 88. E4 — duas formas de pagamento no cadastro, e as duas que faltavam
+
+O E3 tirou a premissa 1:1 do modelo. O E4 é quem passa a usar: o cadastro
+de entrega aceita até três formas previstas.
+
+O levantamento foi feito antes da primeira linha, como nos itens 58, 67,
+76 e 87 — e deu duas notícias, uma boa e uma que não estava no plano.
+
+### A notícia boa: o servidor inteiro já era N-consciente
+
+Eu esperava migration. Não houve nenhuma.
+
+| ponto | estado medido |
+|---|---|
+| `pagamentos` — unique em `(entrega_id, momento)` | não existe (o E3 já tinha provado) |
+| `romaneio_canonico` — linha `p` do DCR1 | `for … loop`, uma por previsto, ordem `(entrega_id, pagamento_id)` |
+| **`canonico.ts` — o gêmeo TypeScript** | mesmo loop sobre lista plana |
+| `romaneio_payload` | `jsonb_agg` dos previstos |
+| `romaneio_documentos_esperados` | `select distinct (entrega_id, tipo_documento)` |
+| `obter_contexto_retorno` → `pagamentosPrevistos` | lista |
+| `RetornoCorrida` — pré-preenchimento | `vale.pagamentosPrevistos.map(...)` |
+| guard do §78 · derivação da divergência | `array_agg` de `forma\|valor`, comparação de conjunto |
+| `pagamento_alterado` no retorno | corrigido no E3.B |
+
+**O gêmeo é o que mais importa.** Os dois lados do canônico já emitiam N
+linhas `p` com a mesma ordenação, então o E4 não encostou no risco nº 1
+do projeto — o par `montarCanonico`/`romaneio_canonico` divergindo em um
+byte, cujo sintoma é "a saída offline nunca sincroniza", meses depois e
+sem pista.
+
+E o `distinct` resolveu de graça o caso que eu esperava ser problema:
+dois previstos com um convênio → **uma** linha `d` esperada; dois
+convênios → ainda uma.
+
+Vale registrar o que isso diz do trabalho de 16 a 25/08: a cadeia de
+custódia foi construída sobre a cardinalidade REAL da tabela, não sobre a
+que a UI usava. Uma feature de produto inteira caiu dentro dela sem
+migration.
+
+### A notícia que não estava no plano: eram QUATRO dívidas, não duas
+
+O E3 registrou duas, e as duas eram exibição:
+
+```
+src/data/entregas.ts     .find(p => p.momento === 'previsto')?.forma
+src/data/fechamento.ts   idem
+```
+
+O levantamento achou mais duas, **no mesmo arquivo** — e a primeira delas
+não é exibição, é **escrita de auditoria**:
+
+**3. `marcarDivergencia` gravava `de` como escalar.**
+`pagamento_alterado` tem DOIS escritores. O E3.B corrigiu o do servidor
+(`limit 1` → agrega todos) e eu não perguntei quem mais escrevia aquele
+tipo de evento. Com dois previstos, este afirmaria que a divergência foi
+de UMA das formas e descartaria a outra em silêncio, numa tabela
+append-only que nunca vai ser reescrita.
+
+**4. `ehDivergente` decidia por CONTAGEM.**
+
+```
+servidor   array_agg(forma || '|' || valor_cents)     conjunto
+cliente    linhas.length > 1 || linhas[0].forma !== esperada
+```
+
+Enquanto existia um previsto só, os dois concordavam **por acidente**.
+Com dois, um vale previsto `pix + dinheiro` e pago exatamente
+`pix + dinheiro` é fiel para o servidor e divergente para a tela: dois
+escritores do mesmo fato afirmando coisas diferentes.
+
+O usuário decidiu que as duas entram no E4, pelo mesmo argumento que
+manteve as outras fora do E3: **só passam a mentir quando existe um
+segundo previsto, e quem o cria é o E4.**
+
+### As três decisões do usuário, tomadas antes do código
+
+**1. O gatilho da segunda forma fica FORA da cadeia de Enter.** Um botão
+"+ outra forma" ao lado do rótulo. As alternativas recusadas dizem mais
+que a escolhida: opção no próprio select cobraria uma linha a mais do
+dropdown em TODA entrega (e misturaria "como pagou" com "em quantas
+formas"); atalho de teclado seria invisível, e a farmácia tem
+rotatividade de caixa.
+
+**2. Convênio DIVIDE, e o integral vale mesmo parcial.** Metade convênio,
+metade dinheiro: se o convênio tem `farmacia_paga_entrega_integral`, a
+farmácia banca a entrega inteira. Quem banca a entrega é o convênio, e
+isso não depende de quanto da COMPRA ele cobriu.
+
+**3. Os achados 3 e 4 entram no E4.**
+
+### O desenho, e o que ele protege
+
+**O caminho de UMA forma não mudou um passo.** Com uma linha, o valor
+previsto **é** o da compra e o campo de valor nem existe. Foi medido no
+navegador, e é a asserção que mais vale desta etapa:
+
+```
+antes do clique    1 campo de dinheiro (a compra)  ·  2 selects
+                   rótulo "Forma de pagamento"
+```
+
+Mesmo número de teclas, mesma cadeia de Enter, mesmo orçamento de 25s.
+O teste da regra, que fica: **"o que muda pra quem NÃO usa a feature?"**
+Se a resposta não for "nada", o desenho ainda não está pronto.
+
+**O cronômetro não foi rodado de novo, e não precisou** — não há passo
+novo no caminho que foi medido em 10/08. Se algum dia entrar, aí sim.
+
+Duas regras puras foram pra `src/lib/formasDePagamento.ts`, que não
+importa nada além de `money.ts`:
+
+- `validarFormasPrevistas` — soma bate, forma não repete, teto de 3;
+- `divergiuDoPrevisto` — o gêmeo do SQL.
+
+**Forma repetida é recusada, e o caso real é banal:** o caixa clica
+"+ outra forma", não troca o select, e "Dinheiro" fica valendo duas
+vezes. Sem a regra, o DCR1 sairia com duas linhas `p` dizendo a mesma
+coisa com ids diferentes, dentro de um documento assinado. E convênio
+duas vezes seriam dois acordos disputando `entregas.convenio_id`, que é
+uma coluna só.
+
+**O teto do cadastro é 3, o do dialog é 4, e a diferença é deliberada.**
+Aqui se PREVÊ, lá se REGISTRA. Ser mais permissivo no registro é o lado
+seguro de errar: recusar um fato consumado empurra a correção pra fora do
+sistema, que é o que a regra 7 existe pra impedir. Recusar uma previsão
+custa um clique.
+
+**A ordenação dos gêmeos não precisa casar, e isso parece que precisa.**
+Cada lado ordena os DOIS conjuntos dele com o MESMO comparador e compara
+um com o outro — nunca o array ordenado de um lado com o do outro.
+Igualdade de multiconjunto independe da ordem total escolhida, então
+collation nenhuma muda o resultado. O que precisa casar é a CHAVE
+(`forma|valor_cents`) e o fato de **duplicata contar** — implementar o
+lado TS com `Set` daria a resposta errada, e só num vale onde a mesma
+forma aparece duas vezes, que o cadastro recusa mas o realizado não.
+
+**`status_documental` passou a olhar TODAS as formas** (`.some()`): basta
+uma prever convênio ou crediário. É a mesma regra que
+`romaneio_documentos_esperados` aplica varrendo todas as linhas `p` —
+divergirem faria o retorno recusar `documentos_nao_conferem` **depois**
+de colhidas as duas assinaturas.
+
+**A validação acontece na TELA, antes de enfileirar.** Nunca em
+`criarEntrega`: revalidar na sincronização recusaria uma operação já
+aceita no balcão, e o item iria pra `erro` e pro backoff pra sempre
+(§50.4). Coberto por asserção de fiação nos dois sentidos — a tela valida,
+`criarEntrega` não.
+
+E os inserts do previsto são **sequenciais**, não `Promise.all`. Não é
+medo de concorrência: é que falha no meio de um lote paralelo deixa um
+subconjunto arbitrário gravado, e em série o estado parcial é sempre um
+PREFIXO — reenviar completa de onde parou. São 1 a 3 linhas.
+
+### A ordem: leitores antes do escritor, de novo
+
+```
+E4.A  as duas regras puras em lib/, com spec
+E4.C  os leitores (as quatro dívidas)
+E4.B  o escritor (NovaEntrega, criarEntrega)
+E4.D  a tela
+```
+
+Diferente do E3, aqui não havia split real — é tudo um bundle só. Mas
+ordenar assim custou nada e evitou o instante em que dois previstos
+existem e os leitores mostram um.
+
+### As DUAS armadilhas de spec que esta etapa achou, e a segunda é pior
+
+**A primeira:** a asserção "o dialog não decide mais por contagem"
+falhou — casando com o **comentário** que eu tinha acabado de escrever
+explicando a regra removida.
+
+**A segunda, e essa é a que assusta:** a asserção do E3.C
+```
+checa('`NovaEntrega` carrega `pagamentoPrevistoId`',
+  /pagamentoPrevistoId: string/.test(entregas))
+```
+**PASSOU depois de o campo ter sido removido** — casando com o comentário
+do E4 que cita o nome antigo pra explicar a troca.
+
+Falso negativo faz barulho. **Falso positivo é um teste afirmando que uma
+proteção existe depois de ela ter saído.** Não houve dano porque o
+compilador cobriu o caso, mas nem toda asserção de fiação tem compilador
+atrás.
+
+A regra, e ela vale pra toda a família de spec de fiação deste projeto:
+**asserção de fiação lê o CÓDIGO, nunca a prosa.**
+
+```ts
+const semComentarios = (fonte: string) =>
+  fonte.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+```
+
+E o incentivo estava do lado errado: **quanto melhor documentada a
+remoção, mais provável o falso positivo.** Um projeto que comenta tanto
+quanto este não podia ficar com isso armado.
+
+O helper entrou nos dois specs (`formas-previstas` e `pagamento-alterado`).
+
+#### A varredura, feita em seguida — e ela achou um TERCEIRO
+
+Sete specs leem fonte. Três só extraem funções pra EXECUTAR de verdade
+(`envelope`, `offline-hash` e metade do `despacho`), e ali comentário é
+inofensivo. Os outros afirmam sobre texto, e foram os varridos:
+
+| spec | o que era | o que virou |
+|---|---|---|
+| `fiacao-texto` | `ler` cru | `ler` = `semComentarios(lerBruto)` |
+| `fiacao-estado-de-consulta` | tinha `codigo()`, aplicado **no call site** | `ler` já devolve código |
+| `despacho-sync-romaneio` | `fonte` cru nas duas derivações do handler | `fonteCodigo` |
+
+**A `fiacao-estado-de-consulta` já tinha o stripper** — o E2 aprendeu
+essa lição na primeira rodada dele, e escreveu isso no comentário. O que
+faltava era o PADRÃO: com `codigo()` no call site, o seguro exige
+lembrar; um call site esquecido não dá erro, dá asserção lendo prosa sem
+ninguém notar. Era o caso do bloco (1), que lia cru e afirmava
+`/export type LeituraDeConsulta/`.
+
+**O `despacho` é o mais exposto dos três**, e não era óbvio: ele afirma
+ORDEM por posição —
+
+```ts
+const primeiraRpc = pos('.rpc(')
+checa(..., p > 0 && p < primeiraRpc)
+```
+
+— então um `.rpc(` citado num comentário puxaria a fronteira pra trás e
+faria checagens corretas falharem, e `split('.rpc(')` contaria três
+portas onde há duas. Numa Edge Function que é dos arquivos mais
+comentados do projeto.
+
+**As TRÊS saídas ficaram byte a byte idênticas** — medidas com `diff`
+contra o baseline de antes. Ou seja: nenhuma asserção existente dependia
+de comentário hoje. A mudança é profilática, e o valor dela está no
+incentivo, não no bug de hoje.
+
+**E saída idêntica não prova que a proteção morde** — é o §22 de novo. Por
+isso a `fiacao-texto` ganhou um bloco (0) que é **controle negativo do
+próprio instrumento**: prova que o fonte cru acusaria uma chamada citada
+em comentário de linha e em bloco JSX, que o limpo não acusa, que o
+código em volta sobrevive, e que a chamada de VERDADE continua sendo
+vista. Sem ele, um `semComentarios` que devolvesse o fonte intacto
+passaria despercebido pra sempre — com um comentário tranquilizador por
+cima.
+
+### O `?` que não enumerou nada, e o que enumerou
+
+No E3.C, tornar `id` obrigatório em `criarPagamentoPrevisto` não enumerou
+chamador nenhum: os dois já passavam o id, com o valor errado.
+
+Aqui foi diferente. Remover `formaPagamento` de `NovaEntrega` **enumerou
+exatamente um** — `CadastroEntrega.tsx:137` —, que era o que faltava. É o
+método da 2D.6 funcionando como anunciado: o compilador achando o
+trabalho em vez da memória.
+
+### O que foi medido
+
+```
+tsc -b            limpo
+oxlint            9 avisos, os pré-existentes
+build             ok, 22,5s
+
+specs   formas-previstas  40 asserções (E4)
+        pagamento-alterado  atualizado, TUDO OK
+        custódia 11 · E1 2 · E2 3 · Drive/geo/token/code128 4
+        TODOS VERDES
+```
+
+**A tela foi exercitada no navegador**, montada isolada com a técnica do
+§86 (o app cai no Login e eu não digito senha). Quatro casos:
+
+```
+(a) 123,90 + 50,00      total vermelho "R$ 173,90 de R$ 123,90"
+(b) soma bate, 2x Dinheiro   "Dinheiro aparece duas vezes"
+(c) Dinheiro + Pix, soma ok  passa a validação do E4 e chega
+                             no guard da tarifa (sem sessão)
+(d) remove a 2a linha        campo de valor some, rótulo volta
+                             ao singular, total some
+```
+
+O (c) é o que prova mais: a mensagem que aparece é a da **tarifa**, um
+guard pré-existente — ou seja, a validação nova passou e o fluxo seguiu.
+
+E o (d) prova a reversibilidade: voltar pra uma forma restaura o caminho
+rápido inteiro, não deixa resíduo.
+
+**A captura de tela falhou** ("Browser pane is not displayed"), como o
+próprio NOTAS já registrava. Leitura de DOM é o instrumento aqui.
+
+**Duas coisas do ferramental que voltam a morder quem repetir:** o estado
+do componente **não sobrevive entre chamadas** do `javascript_tool` (o HMR
+espúrio do OneDrive remonta a árvore no meio) — faça tudo num script só;
+e os deps que o Vite serve exportam via `default` (interop CJS), então é
+`Rm.default ?? Rm`, não `import * as React`.
+
+### O que o E4 NÃO fez, e é honesto dizer
+
+**Nenhum vale com duas formas previstas foi gravado no banco.** A
+verificação foi de componente isolado, sem sessão — o insert, o DCR1 com
+duas linhas `p`, e o Romaneio de Retorno pré-preenchendo duas linhas
+nunca aconteceram com dado real.
+
+O primeiro cadastro dividido que o usuário fizer é a conferência, e ela
+tem uma consulta natural:
+
+```sql
+select e.numero_vale, p.forma, p.valor_cents, p.id
+  from public.entregas e
+  join public.pagamentos p on p.entrega_id = e.id and p.momento = 'previsto'
+ where e.id = '<o vale>'
+ order by p.id::text collate "C";
+```
+
+Duas linhas, ids distintos, soma igual a `valor_compra_cents`. E se esse
+vale sair numa corrida, o `document_hash` do romaneio passa a carregar as
+duas linhas `p` — o verificador continua sendo o gate.
+
+**E o E3 continua com a mesma pendência**: nenhum retorno foi selado
+depois da migration de 26/08, então a escrita nova do `de` (lista) ainda
+não aconteceu com dado real por nenhum dos dois escritores.
+
+**E4 FECHADO** — A, B, C e D.
+
+## 90. E4 — aceite E2E e merge
+
+> **O item 89 não está faltando: ele é do E5** e vive em
+> `feat/e5-login-username`, que ainda não foi mergeada. A numeração é
+> cronológica, e o E5 foi implementado antes de o E4 ser aceito — as duas
+> frentes correm empilhadas. Quando o E5 entrar, a sequência fecha.
+
+O primeiro E2E do E4 rodou em 2026-08-31/09-01, com o `V-000053`:
+`R$ 123,90` divididos em `dinheiro 60,00 + pix 63,90`.
+
+```
+✓ primeiro vale dividido gravado no banco
+✓ 2 previstos com IDs independentes
+✓ soma dos previstos = valor da compra
+✓ DCR1 com 2 linhas p
+✓ retorno fiel com 2 formas
+✓ cliente e servidor concordaram: sem divergência
+✓ pagamento_alterado manual preservou as 2 formas em de[]
+✓ referencia_informada permaneceu null quando havia previsto real
+✓ correção ce84756 eliminou o segundo escritor retroativo
+✓ V-000006 e dados sujos de desenvolvimento permanecem intocados
+  até o corte pré-V1
+✓ verifier sem novas divergências de integridade
+```
+
+### O placar
+
+```
+antes do E2E     16 · 16 · 0
+pós-saída        19 · 19 · 0
+pós-retorno      20 · 20 · 0
+```
+
+O critério nunca foi "continuar em 16": é *documentos antigos válidos
+continuam válidos, cada romaneio novo aumenta o universo esperado, e
+nenhuma divergência de integridade nova.* Quatro documentos entraram —
+dois de uma rodada anterior, dois desta — e os vinte verificam.
+
+### O que ficou provado, e como
+
+**Os dois previstos, com identidade própria.**
+
+```
+dinheiro  6000  01a05aa0-9ea3-71ba-…
+pix       6390  01a05aa1-867b-71b8-…
+                soma 12390 = valor_compra_cents
+```
+
+`id_derivado_da_entrega = false` nos dois. Era essa derivação que o E3
+removeu, e que fazia a segunda forma bater no `23505`, ser tratada como
+sucesso, e sumir em silêncio.
+
+**O DCR1 com duas linhas `p`**, em `R-000029` (`selado`, `online`):
+
+```
+p  01a05aa0-…-7fb4-…  01a05aa0-…-71ba-…  dinheiro  6000  0
+p  01a05aa0-…-7fb4-…  01a05aa1-…-71b8-…  pix       6390  0
+```
+
+Lido do canônico ASSINADO, não de `pagamentos` — é a diferença entre "o
+banco tem duas formas" e "as duas formas entraram no documento que as
+duas partes assinaram".
+
+**O retorno FIEL não virou divergência** — e a prova é POR AUSÊNCIA, o
+que merece ser explicado porque é o tipo de prova que se lê errado:
+
+Se o servidor tivesse julgado divergente, `selar_romaneio_retorno_interno`
+teria gravado o SEU PRÓPRIO `pagamento_alterado`. A consulta do CHECK 5
+busca todos os eventos daquele tipo para aquela entrega, **sem filtro de
+data e sem limite**, ordenados por `ocorrido_em desc`. Ela trouxe UM: o
+manual, com a justificativa do teste. Logo o automático não existe, logo
+o servidor considerou fiel.
+
+Era exatamente isto que o PR existia pra provar. Antes do E4 a tela teria
+dito "divergiu" (ela contava linhas) e o servidor não (ele compara
+conjuntos de `forma|valor`) — os dois escritores do mesmo fato afirmando
+coisas diferentes.
+
+**E o `de` do escritor manual saiu como lista:**
+
+```json
+"de": [{"forma":"dinheiro","valor_cents":6000},
+       {"forma":"pix","valor_cents":6390}],
+"tipo_do_de": "array",
+"referencia_informada": null
+```
+
+`pagamento_alterado` tem DOIS escritores, e o E3.B corrigiu só o do
+servidor. Antes do E4 este teria gravado a string `"dinheiro"`, e o
+`pix 6390` sumiria da auditoria — num evento append-only, que ninguém
+reescreve depois.
+
+E `referencia_informada: null` é o E4.1 se comportando: o vale TEM
+previsto, então não há nada a declarar. O campo só se preenche em vale
+antigo sem previsto.
+
+### O pré-preenchimento, com a precisão que ele merece
+
+O retorno persistiu exatamente as duas formas e valores previstos, e foi
+considerado fiel pelo servidor. **O pré-preenchimento VISUAL das duas
+linhas não é medição deste registro** — os realizados saindo idênticos
+aos previstos é consequência dele, não prova dele.
+
+*(Marcar aqui `observado` se o operador confirmar que viu as duas linhas
+já preenchidas na tela; até lá, fica INFERIDO pelo resultado
+persistido.)*
+
+Não se transforma inferência em medição. É a mesma disciplina do §49 e do
+placar: o que foi medido tem um nome, o que foi deduzido tem outro.
+
+### O que o E2E achou que os gates estáticos não achavam
+
+E é a razão de a fronteira dos commits ficar como ficou:
+
+```
+1997041   implementação E3/E4, com todos os gates estáticos verdes
+ce84756   correção que só o primeiro E2E revelou
+item 90   prova operacional
+merge
+```
+
+O `V-000006` no banco — dois previstos `pix 5000` num vale de R$ 50,00,
+com uma ocorrência de 03:26 afirmando "vale antigo sem pagamento
+registrado" sobre um vale que tinha previsto desde 03:23 — expôs uma
+corrida que **nenhum spec conseguia demonstrar**, porque ela depende de
+interleaving entre a ocorrência e o replay da fila.
+
+E ela tinha sido ABERTA pelo E3.C: antes dele o retroativo usava
+`id: entregaId`, então um duplicado batia no `23505` e era engolido. O
+E3.C tirou o id derivado — corretamente — e levou junto uma guarda que
+ninguém sabia que existia.
+
+A correção foi por ELIMINAÇÃO, não por coordenação, e o motivo está no
+item que o usuário isolou: com a ocorrência entrando ANTES do replay, o
+replay é o escritor legítimo — se insere são duas linhas, se pula
+perde-se a verdade, e `pagamentos` não tem DELETE nem UPDATE (regra 4).
+Lock, RPC ou `select`-antes-de-inserir só escolheriam qual dano.
+
+### Duas armadilhas do MEU ferramental, e a segunda é a que ensina
+
+**1. O roteiro tinha três erros de SQL**, todos da mesma causa: escrevi de
+memória o que não podia executar. `eventos.registrado_em` (é
+`ocorrido_em`), `max(uuid)` (não existe), e `jsonb_array_length` sobre o
+`de` escalar legado (estoura). O terceiro teria quebrado na execução
+seguinte. Passei a conferir cada coluna contra o schema antes de mandar.
+
+**2. O SELETOR NÃO SABIA DIZER "NÃO ACHEI NADA NOVO".**
+
+A CTE `alvo` era *"o vale mais recente com dois ou mais previstos"*. Sem
+o vale novo, ela caía silenciosamente no `V-000006` e respondia sobre ele
+**com a mesma cara de resposta legítima**. Uma rodada inteira foi
+interpretada como falha do E4 quando media dado de 08/08.
+
+É o defeito do E2 — a ferramenta afirmando sem distinguir "não há
+resposta" de "esta é a resposta" — construído por mim, no instrumento
+que existia pra conferir o conserto dele. Resolvido excluindo o resíduo
+por id, para que "sem vale novo" devolva ZERO LINHAS, que é honesto.
+
+### Os dados sujos, por decisão explícita
+
+```
+V-000006  (e qualquer irmão fora de documento selado)
+→ dado de desenvolvimento inconsistente
+→ NÃO corrigir
+→ NÃO apagar individualmente
+→ NÃO tentar regularizar
+→ nunca entrou em romaneio
+→ eliminado no corte limpo pré-V1
+```
+
+Mexer nele só pra deixar o banco bonito violaria justamente a disciplina
+de não reescrever fato histórico. E ele é inerte: o CHECK 3 confirmou que
+não está em romaneio nenhum.
+
+**E4 FECHADO** — implementação, correção e aceite operacional.
+
 ## Commits desta sessão
 
 
@@ -6626,6 +7855,15 @@ Cada um apareceu porque o usuário mandou o resultado COMPLETO em vez de
 "passou" — e três deles eram cobertura que eu tinha declarado sem ter.
 
 ## Migrations aplicadas nesta sessão
+
+**Última aplicada: `20260826120000_pagamento_alterado_todos_previstos.sql`**
+(E3.B, 2026-08-26). Quinta definição de
+`selar_romaneio_retorno_interno`, obtida por patch da quarta — o evento
+`pagamento_alterado` deixou de escolher UM previsto com `limit 1` e
+passou a agregar todos, com ordem total.
+
+**Verificador: `16 · 16 · 0` antes e `16 · 16 · 0` depois.** O gate era
+`antes == depois`, e ele fechou.
 
 7. `20260809190000_eventos_idempotency_key.sql`
 8. `20260809210000_receita_custodia.sql` (`tem_receita`,
@@ -6801,9 +8039,16 @@ conferidas no banco** pelo usuário, na ordem:
     zero linhas, porque nenhum vale de crediário foi lançado ainda.
 
 **Atenção pra quem for reescrever `selar_romaneio_retorno_interno`:** ela
-já tem DUAS definições no repositório (`20260820130000` e
-`20260820160000`). Parta da mais recente, mesma regra da
-`selar_romaneio_interno`.
+já tem **CINCO** definições no repositório — `20260820130000`,
+`20260820160000`, `20260820200000` e `20260826120000`. Parta da mais
+recente, mesma regra da `selar_romaneio_interno`.
+
+E não reescreva à mão: as duas últimas foram feitas por PATCH via script
+(`scripts/patch-selar-retorno-e3b.mts` é o do E3), com o diff conferido
+e as invariantes provadas antes de a migration existir. O risco que esse
+método evita é específico — mover sem querer uma das quatro expressões
+`digest(...)`, que não dá erro nenhum e só aparece meses depois como
+romaneio que deixou de verificar.
 
 **Atenção pra quem for reescrever `selar_romaneio_interno` de novo:** há
 TRÊS definições dela no repositório agora — a original de
@@ -6828,7 +8073,7 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: o E2 da frente de produto
+### PRÓXIMA SESSÃO: o E5 da frente de produto
 
 > **Esta é a seção atual.** As de baixo são históricas: descrevem como
 > "próximo" coisas que já foram feitas.
@@ -6842,15 +8087,64 @@ itens, decidida em 2026-08-25, que roda ANTES do corte pré-V1.
 ```
 E1   normalização central          ✓  itens 84 e 85
 E1.1 busca sem acento              ✓  migration aplicada, 16·16·0
-E2   estados visuais de consulta   <-  AQUI
-E3   id próprio do pagamento previsto
-E4   duas formas de pagamento no cadastro
-E5   login por username
+E2   estados visuais de consulta   ✓  item 86 — 18 de 18
+E3   id próprio do pagamento previsto   ✓  item 87
+E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
+E5   login por username                     <-  AQUI
 E6   React Router + /notificacoes e /auditoria
 E7   divergência/regularização de valores
 E8   portal da agência (RLS antes da tela)
 E9   endereço estruturado
 ```
+
+**A FRENTE MUDOU DE NATUREZA NO E3, e continua assim daqui pra frente.**
+De E1 a E2 o trabalho foi de UI e de estado, sem tocar em dado gravado;
+do E3 em diante mexe em banco. Daí o checkpoint na `main` entre os dois,
+e daí o E3 ter sido feito em **branch** (`feat/e3-pagamentos-previstos`)
+— com a ressalva que vale repetir: **branch do git NÃO isola o
+Supabase.** A migration é aplicada no mesmo banco de desenvolvimento,
+então a disciplina adotada foi a ADITIVA: nada destrutivo, nenhum
+backfill, e a `main` capaz de operar durante todo o desenvolvimento.
+
+~~**O E4 HERDA DUAS DÍVIDAS BLOQUEANTES do E3**~~ — **pagas no item 88**,
+e eram **quatro**, não duas. Além das de exibição (`entregas.ts`,
+`fechamento.ts`), o levantamento achou o `de` escalar de
+`marcarDivergencia` — que ESCREVE auditoria — e o `ehDivergente` por
+contagem de linhas, que discordava do servidor. Ver o item 88.
+
+**O E5 não herda dívida de ninguém.** O que ele herda é o oposto: o E2
+já construiu o `<Consulta>` com a variante `verificacao`, e a distinção
+`recusado` × `unavailable` × `error` está congelada e testada. O
+"verificando usuário…" do login novo já existe.
+
+**E o E4 deixou uma regra que vale pra qualquer etapa daqui pra frente:**
+asserção de fiação lê o CÓDIGO, nunca a prosa. Uma asserção do E3.C
+**passou falsamente** depois de o campo que ela protegia ter sido
+removido, casando com o comentário que explicava a remoção.
+
+**Varrido — os CINCO specs que afirmam sobre texto estão limpos:**
+`formas-previstas`, `pagamento-alterado`, `fiacao-texto`,
+`fiacao-estado-de-consulta` e `despacho-sync-romaneio`. Os outros dois
+que leem fonte (`envelope`, `offline-hash`) extraem função pra EXECUTAR,
+e ali comentário é inofensivo. As três saídas mexidas ficaram idênticas
+ao baseline, e a `fiacao-texto` ganhou um controle negativo do próprio
+instrumento. Detalhe no item 88.
+
+**O padrão que fica: `ler` devolve código.** Não `codigo(ler(...))` no
+call site — um call site esquecido não dá erro, dá asserção lendo prosa
+sem ninguém notar. Quem precisar da prosa usa `lerBruto` e diz por quê.
+
+**E o E3 deixou o modelo pronto:** `pagamentos` nunca teve unique em
+`(entrega_id, momento)` — o banco sempre aceitou N, e o 1:1 vivia só no
+id derivado do cliente, que saiu. **Confirmado no E4: nenhuma migration**
+— e nem só pela tabela. O canônico do DCR1, o gêmeo TypeScript, o
+payload, `romaneio_documentos_esperados`, o contexto do retorno e o
+pré-preenchimento da tela de retorno já varriam N previstos.
+
+**O que o E2 deixou pronto pro E5**, e que já está construído: o
+"verificando usuário…" do login novo é o `<Consulta>` com a variante
+`verificacao`, e a distinção `recusado` × `unavailable` × `error` já
+está congelada e testada. O E5 não precisa inventar nada disso.
 
 **A auditoria das nove frentes está na conversa, não num arquivo** — o
 que sobreviveu dela em forma durável são as decisões abaixo e os cinco
@@ -6877,10 +8171,13 @@ achados que mudaram o plano.
 
 #### Os cinco achados da auditoria que mudam o plano
 
-1. **E4 está bloqueado por colisão de chave primária.**
-   `criarPagamentoPrevisto` usa `id: entregaId` ("relação é 1:1"). Duas
-   formas previstas colidem na PK e a segunda não entra. É migration de
-   comportamento, não ajuste de UI — daí o E3 vir antes do E4.
+1. ~~**E4 está bloqueado por colisão de chave primária.**~~ —
+   **resolvido no item 87 (E3).** E o levantamento corrigiu o
+   diagnóstico: não era só a colisão. O `limit 1` no evento
+   `pagamento_alterado` era uma SEGUNDA suposição 1:1, escondida, que
+   teria gravado auditoria errada — e o banco nunca impôs 1:1 (não há
+   unique em `(entrega_id, momento)`), então nem havia constraint a
+   derrubar.
 2. **E9 toca o DCR1 e a trigger.** `cliente_endereco` está no canônico
    assinado (`canonico.ts:96`) e na lista congelada
    (`schema_inicial.sql:344`). Colunas novas precisam entrar na trigger,
@@ -6888,25 +8185,45 @@ achados que mudaram o plano.
 3. **E8 é a frente maior.** `profiles.papel` aceita `'agencia'` desde o
    schema inicial e existem ZERO policies pra ele. É RLS nova em ~8
    tabelas, e RLS vem antes da tela.
-4. **E2 não tem padrão central hoje** — a Nova Corrida tem 13 usos de
-   `ocupado`/`pinConferido` construídos à mão. É de lá que sai o
-   vocabulário.
+4. ~~**E2 não tem padrão central hoje**~~ — **resolvido no item 86.** E
+   o levantamento corrigiu o número: são **12** leituras, não 13, e elas
+   se resolvem em 4 operações — duas consultas (que migraram) e duas
+   escritas (que ficaram com `ocupado`, de propósito).
 5. **E7 precisa de tabela nova** (regularizações append-only), e o
    projeto exige SQL aprovado antes.
 
-#### O contrato do E2, que é o próximo a escrever
+#### (feito) O contrato do E2
 
-```
-idle -> loading -> success | not_found/invalid | error
-```
+Foi escrito como `idle → loading → success | not_found/invalid | error`
+e o levantamento **mudou duas coisas**, as duas registradas no item 86:
 
-A regra do usuário: **não mostrar "não encontrado" enquanto a query
-ainda está carregando**, e o operador nunca deve clicar de novo por não
-saber se o sistema consultou ou travou. Sem migration, e sem tocar o
-caminho rápido do caixa.
+- `not_found` e `invalid` COLAPSARAM em `recusado(motivo)` — os dois
+  produzem a mesma consequência de UI, e o código já votava assim em
+  `custodiaDoRetorno.ts`, que separa por QUAL credencial falhou e não
+  por razão da recusa;
+- entrou `unavailable`, que não estava no desenho: "não há resposta
+  autoritativa e não há dado local" é diferente de "a tentativa falhou",
+  e era a metade que faltava pro defeito das nove telas.
 
-Ele é pré-requisito do E5: o "verificando usuário…" do login novo é
-exatamente esse componente.
+Contrato final: `inactive · loading · ready · unavailable · error`, com
+`aceito`/`recusado` só DENTRO de `ready`.
+
+#### (feito) O contrato do E3 e do E4
+
+Os dois fecharam — itens 87 e 88. O que sobrevive deles como aviso, e
+que quem mexer em pagamento tem que ler antes:
+
+- **a armadilha do §78** continua valendo integralmente: o
+  `pagamento_id` do PREVISTO nasce do cliente e **nunca** pode ser
+  copiado pro realizado, senão o romaneio de retorno SELA afirmando um
+  pagamento que não existe — o `on conflict (id) do nothing` engole o
+  insert em silêncio;
+- **`pagamento_alterado` tem DOIS escritores** (`marcarDivergencia` e
+  `selar_romaneio_retorno_interno`). Consertar um e esquecer o outro foi
+  exatamente o que aconteceu entre o E3.B e o E4;
+- **o cliente e o servidor decidem divergência pela MESMA regra** desde
+  o E4 (`divergiuDoPrevisto` × `array_agg` de `forma|valor`). Voltar a
+  decidir por contagem de linhas de um dos lados recria a discordância.
 
 #### O que fica DEPOIS de toda a frente
 
@@ -6925,12 +8242,23 @@ lojas a R$ 9,00 e a agência Gabrielense —, esperando só **os convênios**
 
 - Node em `C:\Program Files\nodejs`, **fora do PATH**. Prefixe
   `export PATH="/c/Program Files/nodejs:$PATH"`.
-- Os specs desta frente: `texto`, `fiacao-texto`. Os da cadeia de
-  custódia continuam sendo o gate de regressão: `canonico`,
-  `canonico-retorno`, `dcrr1-vetores`, `congelar-retorno`,
+- Os specs desta frente: `texto` e `fiacao-texto` (E1);
+  `estado-de-consulta`, `fiacao-estado-de-consulta` e `consulta-render`
+  (E2); `pagamento-alterado` (E3); `formas-previstas` (E4). Os da cadeia
+  de custódia continuam sendo o gate de regressão:
+  `canonico`, `canonico-retorno`, `dcrr1-vetores`, `congelar-retorno`,
   `custodia-do-retorno`, `envelope`, `offline-hash`,
   `despacho-sync-romaneio`, `dependencia-da-fila`,
   `corridas-bloqueadas`, `romaneio-pdf`.
+- **`consulta-render` é o único spec que precisa de `--tsconfig`**, e
+  sem ele o erro não é óbvio (`React is not defined`): o esbuild do
+  `tsx` compila JSX no runtime clássico, e quem tem `"jsx": "react-jsx"`
+  é o tsconfig do app.
+
+```bash
+npx tsx --tsconfig tsconfig.app.json scripts/consulta-render.spec.mts
+```
+
 - **O verificador é o gate de tudo que toca `entregas` ou `romaneios`:**
 
 ```
@@ -6945,6 +8273,23 @@ select count(*) as verificados,
 - **O que eu NÃO consigo fazer daqui:** entrar no app (não digito
   senha) e rodar SQL. Conferência no banco e cronômetro no balcão são
   clique do usuário.
+
+  **Mas em 26/08 o usuário logou**, e isso mudou o que dá pra provar: a
+  verificação do E2 passou a ser medida no app rodando, com controle
+  negativo no mesmo instante (telas migradas dizendo `unavailable`
+  enquanto as ainda-antigas mentiam "nenhum…"). O roteiro que funcionou
+  está no item 86; o resumo é `javascript_tool` disparando a sequência
+  completa de eventos de ponteiro, e leitura do DOM em vez de
+  screenshot — o pane do navegador segue não compondo frames de forma
+  confiável.
+
+  Duas armadilhas medidas no caminho, e as duas voltam se alguém
+  repetir: `queryClient.clear()` esvazia o cache mas **não
+  re-renderiza**, então o DOM antigo fica no ar e parece que a migração
+  falhou (navegue pra uma tela ainda não buscada em vez disso); e montar
+  componente por fora da árvore exige importar os deps com o `?v=<hash>`
+  que o Vite serve, senão o `QueryClientProvider` é de outra instância e
+  os hooks não o enxergam.
 
 ### (histórico) A retomada de antes da 2C
 

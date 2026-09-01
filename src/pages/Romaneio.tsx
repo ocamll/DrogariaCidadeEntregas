@@ -11,7 +11,9 @@ import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
-import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { EmAndamento } from '@/components/EmAndamento'
+import { Consulta } from '@/components/Consulta'
+import { derivarEstado } from '@/lib/estadoDeConsulta'
 
 // O documento em si. Ele é a fonte da verdade da saída — o PDF, quando
 // existir, sai daqui e não o contrário.
@@ -33,6 +35,26 @@ type ValeDoPayload = {
   pagamentos_previstos?: Array<{ forma: string; valor_cents: number }>
 }
 
+/**
+ * A casca da consulta. Ela não desenha documento nenhum: decide se há
+ * documento a desenhar.
+ *
+ * ANTES DAQUI ISTO ERA UM `if (!data)` SÓ, e ele fundia duas coisas que
+ * a página não pode confundir:
+ *
+ *     data === undefined   o servidor NÃO RESPONDEU
+ *     data === null        o servidor respondeu: não existe
+ *
+ * `buscarRomaneio` devolve `RomaneioCompleto | null`, então o `null` é
+ * uma resposta de domínio legítima — e `!undefined` e `!null` são os
+ * dois `true`. Offline, a página dizia **"Romaneio não encontrado"**
+ * sobre um documento de custódia SELADO, que é a pior afirmação falsa
+ * do app inteiro: ela nega uma prova assinada.
+ *
+ * Agora o `null` chega como `ready` (houve resposta) e vira a frase de
+ * ausência pelo `estaVazio`; a falta de resposta chega como
+ * `unavailable` e diz outra coisa.
+ */
 export function Romaneio({
   romaneioId,
   onVoltar,
@@ -40,7 +62,39 @@ export function Romaneio({
   romaneioId: string
   onVoltar: () => void
 }) {
-  const { data, isLoading, isError, error } = useRomaneio(romaneioId)
+  const consulta = useRomaneio(romaneioId)
+  const estado = derivarEstado(consulta)
+
+  return (
+    <div className="mx-auto max-w-3xl">
+      <Consulta
+        estado={estado}
+        estaVazio={(r) => r === null}
+        vazio={
+          <div>
+            <Button variant="ghost" className="mb-3" onClick={onVoltar}>
+              ← Voltar
+            </Button>
+            <p className="text-sm text-muted-foreground">Romaneio não encontrado.</p>
+          </div>
+        }
+        aoRecarregar={() => void consulta.refetch()}
+      >
+        {(romaneio) =>
+          romaneio ? <RomaneioCarregado romaneio={romaneio} onVoltar={onVoltar} /> : null
+        }
+      </Consulta>
+    </div>
+  )
+}
+
+function RomaneioCarregado({
+  romaneio,
+  onVoltar,
+}: {
+  romaneio: RomaneioCompleto
+  onVoltar: () => void
+}) {
   const [ocupado, setOcupado] = useState<ViaDoRomaneio | 'drive' | null>(null)
   const [erroPdf, setErroPdf] = useState<string | null>(null)
   const [enviadoAoDrive, setEnviadoAoDrive] = useState<string | null>(null)
@@ -52,11 +106,15 @@ export function Romaneio({
     prepararDrive()
   }, [])
 
-  // O `data` só existe depois dos early returns, então as funções são
-  // declaradas aqui e RECEBEM o romaneio de quem já o estreitou. Nada de
-  // ler `data?.numero` aqui dentro: este nome é a chave de dedupe no
-  // Drive, e um "romaneio-undefined-farmacia.pdf" pousando numa pasta é
-  // pior que um erro — ele parece um arquivo.
+  // O romaneio chega por PROP, já estreitado — e isso deixou de ser
+  // disciplina pra ser tipo. Antes as funções carregavam um
+  // `if (!data) return` cada, porque o `data` da query é
+  // `RomaneioCompleto | undefined`; o risco que aqueles guards seguravam
+  // era o nome do arquivo, que é a chave de dedupe no Drive: um
+  // "romaneio-undefined-farmacia.pdf" pousando numa pasta é pior que um
+  // erro, porque parece um arquivo.
+  //
+  // Agora não há como escrever isso — a página só monta com romaneio.
   //
   // TODO: quando a correção cadastral por evento existir (categoria 1 da
   // regra 7), as correções entram aqui — a seção do PDF já está pronta pra
@@ -73,12 +131,11 @@ export function Romaneio({
   }
 
   async function baixar(via: ViaDoRomaneio) {
-    if (!data) return
     setErroPdf(null)
     setEnviadoAoDrive(null)
     setOcupado(via)
     try {
-      baixarArquivo(await gerarPdf(data, via), nomeDoArquivo(data, via), 'application/pdf')
+      baixarArquivo(await gerarPdf(romaneio, via), nomeDoArquivo(romaneio, via), 'application/pdf')
     } catch (e) {
       setErroPdf(e instanceof Error ? e.message : String(e))
     } finally {
@@ -87,7 +144,6 @@ export function Romaneio({
   }
 
   async function enviarParaDrive() {
-    if (!data) return
     setErroPdf(null)
     setEnviadoAoDrive(null)
     setOcupado('drive')
@@ -108,14 +164,14 @@ export function Romaneio({
       // que se compartilha — e as duas saem do mesmo snapshot selado.
       // Cada uma vai pra sua subpasta, então são dois envios; o cache
       // compartilhado evita repetir a busca de filial/mês/dia.
-      const aconteceu = quandoAconteceu(data)
+      const aconteceu = quandoAconteceu(romaneio)
       const cache = novoCachePastas()
       const enviados = []
       for (const via of ['farmacia', 'agencia'] as const) {
         enviados.push(
           ...(await enviarAoDrive(
-            [{ nome: nomeDoArquivo(data, via), blob: await gerarPdf(data, via) }],
-            caminhoDoRomaneio(data.lojaNome, aconteceu, via),
+            [{ nome: nomeDoArquivo(romaneio, via), blob: await gerarPdf(romaneio, via) }],
+            caminhoDoRomaneio(romaneio.lojaNome, aconteceu, via),
             cache
           ))
         )
@@ -123,7 +179,7 @@ export function Romaneio({
 
       const atualizados = enviados.filter((e) => e.atualizado).length
       const observacao = atualizados > 0 ? ` (${atualizados} já existiam e foram substituídos)` : ''
-      const ateODia = caminhoDoRomaneio(data.lojaNome, aconteceu, 'farmacia').slice(1, -1)
+      const ateODia = caminhoDoRomaneio(romaneio.lojaNome, aconteceu, 'farmacia').slice(1, -1)
       setEnviadoAoDrive(
         `${enviados.length} arquivos em ${NOME_DA_PASTA_ROMANEIOS} › ` +
           `${ateODia.join(' › ')}, um em cada via${observacao}.`
@@ -133,14 +189,6 @@ export function Romaneio({
     } finally {
       setOcupado(null)
     }
-  }
-
-  if (isLoading) return <Carregando className="p-4" />
-  if (isError) {
-    return <p className="p-4 text-sm text-destructive">Não consegui carregar: {error.message}</p>
-  }
-  if (!data) {
-    return <p className="p-4 text-sm text-muted-foreground">Romaneio não encontrado.</p>
   }
 
   // ESTA PÁGINA SÓ SABE DESENHAR A SAÍDA, e desde 2026-08-25 existem
@@ -156,14 +204,14 @@ export function Romaneio({
   // sangria filtram `tipo = 'saida'`), então isto é a segunda barreira —
   // a página recebe um id, e id vem de qualquer lugar. Recusar é a única
   // resposta honesta enquanto o retorno não tiver tela própria (etapa 9).
-  if (data.tipo === 'retorno') {
+  if (romaneio.tipo === 'retorno') {
     return (
       <div className="mx-auto max-w-2xl p-4">
         <Button variant="ghost" className="mb-3" onClick={onVoltar}>
           ← Voltar
         </Button>
         <p className="text-sm text-muted-foreground">
-          <strong>{data.numero}</strong> é um Romaneio de <strong>Retorno</strong>, e a tela dele
+          <strong>{romaneio.numero}</strong> é um Romaneio de <strong>Retorno</strong>, e a tela dele
           ainda não existe — esta aqui desenha o documento da saída, que tem outros campos. O
           retorno está selado e íntegro no servidor; o que falta é a página.
         </p>
@@ -171,7 +219,7 @@ export function Romaneio({
     )
   }
 
-  const payload = data.payload as { vales?: ValeDoPayload[] } | null
+  const payload = romaneio.payload as { vales?: ValeDoPayload[] } | null
   const vales = payload?.vales ?? []
   const totalEntrega = vales.reduce((s, v) => s + v.valor_entrega_cents, 0)
   const totalCompra = vales.reduce((s, v) => s + v.valor_compra_cents, 0)
@@ -180,8 +228,8 @@ export function Romaneio({
   // `'caixa'` é o nome do SLOT — o lado da farmácia —, e está dentro do
   // hash da assinatura, então nunca muda. O que a TELA diz é outra coisa:
   // ver os rótulos abaixo.
-  const caixa = data.assinaturas.find((a) => a.tipoSignatario === 'caixa')
-  const motoboy = data.assinaturas.find((a) => a.tipoSignatario === 'motoboy')
+  const caixa = romaneio.assinaturas.find((a) => a.tipoSignatario === 'caixa')
+  const motoboy = romaneio.assinaturas.find((a) => a.tipoSignatario === 'motoboy')
 
   // Os relógios do retorno têm TRÊS estados que não podem se parecer, e
   // um campo vazio diria a mesma coisa nos três:
@@ -191,7 +239,7 @@ export function Romaneio({
   //     nunca teve o do dispositivo, porque a coluna não existia.
   // Antes daqui a tela dizia "corrida ainda aberta" também no primeiro
   // caso, que é a tela afirmando o que não sabe.
-  const corrida = data.corrida
+  const corrida = romaneio.corrida
   const retornoServidor = !corrida
     ? 'sem corrida vinculada'
     : corrida.retornoEm
@@ -206,7 +254,10 @@ export function Romaneio({
         : 'não registrado'
 
   return (
-    <div className="mx-auto max-w-3xl">
+    // Sem `mx-auto max-w-3xl` aqui: quem dá o container é a casca da
+    // consulta, pra a mensagem de indisponível cair na mesma coluna que
+    // o documento cairia.
+    <div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
         <Button variant="ghost" onClick={onVoltar}>
           ← Voltar
@@ -237,13 +288,13 @@ export function Romaneio({
       <Card>
         <CardHeader>
           <div className="flex flex-wrap items-center gap-2">
-            <CardTitle>Romaneio {data.numero}</CardTitle>
-            {data.status === 'conflito' ? (
+            <CardTitle>Romaneio {romaneio.numero}</CardTitle>
+            {romaneio.status === 'conflito' ? (
               <Badge variant="destructive">Conflito — não selado</Badge>
             ) : (
               <Badge variant="secondary">Selado</Badge>
             )}
-            {data.modo === 'offline_sincronizada' && (
+            {romaneio.modo === 'offline_sincronizada' && (
               <Badge variant="outline">Registrada offline</Badge>
             )}
           </div>
@@ -251,15 +302,15 @@ export function Romaneio({
 
         <CardContent className="flex flex-col gap-6">
           <section className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
-            <Campo rotulo="Filial" valor={data.lojaNome} />
+            <Campo rotulo="Filial" valor={romaneio.lojaNome} />
             <Campo rotulo="Agência" valor={motoboy?.agenciaNome ?? null} />
             <Campo rotulo="Motoboy" valor={motoboy?.nome ?? null} />
             {/* "Pela farmácia", não "Caixa": quem sela pode ser caixa,
                 gerente ou admin, e o sistema não impõe papel na saída. O
                 cargo real de quem assinou aparece na Custódia, vindo de
                 `papel_no_momento`. */}
-            <Campo rotulo="Pela farmácia" valor={data.criadoPorNome} />
-            <Campo rotulo="IP" valor={data.ip} />
+            <Campo rotulo="Pela farmácia" valor={romaneio.criadoPorNome} />
+            <Campo rotulo="IP" valor={romaneio.ip} />
           </section>
 
           {/* OS RELÓGIOS, em duas colunas FIXAS: balcão à esquerda,
@@ -276,8 +327,8 @@ export function Romaneio({
               <Campo
                 rotulo="Saída (balcão)"
                 valor={
-                  data.ocorridoEmLocal
-                    ? new Date(data.ocorridoEmLocal).toLocaleString('pt-BR')
+                  romaneio.ocorridoEmLocal
+                    ? new Date(romaneio.ocorridoEmLocal).toLocaleString('pt-BR')
                     : null
                 }
               />
@@ -290,14 +341,14 @@ export function Romaneio({
             <div className="flex flex-col gap-1">
               <Campo
                 rotulo="Selado (servidor)"
-                valor={data.seladoEm ? new Date(data.seladoEm).toLocaleString('pt-BR') : null}
+                valor={romaneio.seladoEm ? new Date(romaneio.seladoEm).toLocaleString('pt-BR') : null}
               />
               {/* Só faz diferença quando os dois horários divergem, que é
                   exatamente o caso da saída offline. */}
-              {data.modo === 'offline_sincronizada' && (
+              {romaneio.modo === 'offline_sincronizada' && (
                 <Campo
                   rotulo="Recebido (servidor)"
-                  valor={new Date(data.recebidoEmServidor).toLocaleString('pt-BR')}
+                  valor={new Date(romaneio.recebidoEmServidor).toLocaleString('pt-BR')}
                 />
               )}
               <Campo rotulo="Retorno (servidor)" valor={retornoServidor} />
@@ -360,7 +411,7 @@ export function Romaneio({
             </p>
           </section>
 
-          {data.status === 'conflito' ? (
+          {romaneio.status === 'conflito' ? (
             <section className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
               <p className="mb-2 font-medium text-destructive">
                 Esta saída não pôde ser selada.
@@ -372,7 +423,7 @@ export function Romaneio({
               </p>
               <pre className="mt-2 overflow-x-auto rounded bg-background/60 p-2 text-xs">
                 {JSON.stringify(
-                  (data.conflito as { motivos?: unknown })?.motivos ?? data.conflito,
+                  (romaneio.conflito as { motivos?: unknown })?.motivos ?? romaneio.conflito,
                   null,
                   2
                 )}
@@ -400,7 +451,7 @@ export function Romaneio({
             <div className="flex flex-col gap-1 font-mono text-[11px] break-all">
               <p>
                 <span className="text-foreground/60">documento </span>
-                {data.documentHash}
+                {romaneio.documentHash}
               </p>
               {caixa?.signatureHash && (
                 <p>
@@ -414,10 +465,10 @@ export function Romaneio({
                   {motoboy.signatureHash}
                 </p>
               )}
-              {data.finalHash && (
+              {romaneio.finalHash && (
                 <p className="font-semibold">
                   <span className="font-normal text-foreground/60">envelope </span>
-                  {data.finalHash}
+                  {romaneio.finalHash}
                 </p>
               )}
             </div>

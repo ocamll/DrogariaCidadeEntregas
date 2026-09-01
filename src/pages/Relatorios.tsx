@@ -27,7 +27,9 @@ import {
   TableHeader,
   TableRow,
 } from '@/components/ui/table'
-import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { EmAndamento } from '@/components/EmAndamento'
+import { Consulta } from '@/components/Consulta'
+import { derivarEstado } from '@/lib/estadoDeConsulta'
 
 // mesmo estilo dos outros selects nativos do app (Fechamento, Histórico)
 const SELECT_CLASSNAME =
@@ -80,7 +82,14 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
   const [erroExport, setErroExport] = useState<string | null>(null)
   const [enviadoAoDrive, setEnviadoAoDrive] = useState<string | null>(null)
 
-  const { data, isLoading, isError, error } = useRelatorio(filtro)
+  // Estava no grupo "mudo". O `data` continua sendo lido AQUI FORA pelos
+  // exportadores, e isso é regra do projeto: os três arquivos saem do que
+  // ESTÁ NA TELA, nunca de uma segunda consulta — duas consultas podem
+  // divergir e aí existem duas versões do acerto sem ninguém pra
+  // desempatar. O que muda é só quem pode AFIRMAR ausência.
+  const consulta = useRelatorio(filtro)
+  const estado = derivarEstado(consulta)
+  const data = estado.estado === 'ready' ? estado.dados : undefined
 
   // deixa o script do Google baixado de antemão, pra o clique não gastar
   // o gesto do usuário esperando rede (ver prepararDrive)
@@ -291,10 +300,8 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
       {erroExport && <p className="text-sm text-destructive">{erroExport}</p>}
       {enviadoAoDrive && <p className="text-sm text-foreground/70">{enviadoAoDrive}</p>}
 
-      {isLoading && <Carregando />}
-      {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
-
-      {data && (
+      <Consulta estado={estado} aoRecarregar={() => void consulta.refetch()}>
+        {(data) => (
         <>
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
             <StatTile label="Vales no período" valor={String(data.totalVales)} />
@@ -338,7 +345,8 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
             </CardContent>
           </Card>
         </>
-      )}
+        )}
+      </Consulta>
     </div>
   )
 }

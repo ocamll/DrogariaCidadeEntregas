@@ -2,9 +2,11 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import type { AuthProfile } from '@/data/auth'
 import {
-  FORMA_PAGAMENTO_LABEL,
   FORMA_PAGAMENTO_OPTIONS,
+  textoDoPagamentoAlterado,
+  divergiuDoPrevisto,
   type FormaPagamento,
+  type FormaComValor,
   type MarcarDivergenciaInput,
 } from '@/data/pagamentos'
 import type { NotificarFaltaReceitaInput } from '@/data/documentos'
@@ -42,7 +44,7 @@ function linhaInicial(valorCents: number): Linha {
 export function NotificarOcorrenciaDialog({
   entregaId,
   tipo,
-  formaEsperadaAtual,
+  previstos,
   valorCents,
   temReceita,
   profile,
@@ -51,7 +53,7 @@ export function NotificarOcorrenciaDialog({
 }: {
   entregaId: string
   tipo: 'cliente' | 'transferencia'
-  formaEsperadaAtual: FormaPagamento | null
+  previstos: FormaComValor[]
   valorCents: number
   temReceita: boolean
   profile: AuthProfile
@@ -96,7 +98,7 @@ export function NotificarOcorrenciaDialog({
         {opcao === 'pagamento' && mostrarPagamento && (
           <DivergenciaPagamentoForm
             entregaId={entregaId}
-            formaEsperadaAtual={formaEsperadaAtual}
+            previstos={previstos}
             valorCents={valorCents}
             profile={profile}
             onConcluido={() => onOpenChange(false)}
@@ -112,18 +114,28 @@ export function NotificarOcorrenciaDialog({
 
 function DivergenciaPagamentoForm({
   entregaId,
-  formaEsperadaAtual,
+  previstos,
   valorCents,
   profile,
   onConcluido,
 }: {
   entregaId: string
-  formaEsperadaAtual: FormaPagamento | null
+  previstos: FormaComValor[]
   valorCents: number
   profile: AuthProfile
   onConcluido: () => void
 }) {
-  const [formaEsperada, setFormaEsperada] = useState<FormaPagamento>(formaEsperadaAtual ?? FORMA_PADRAO)
+  // Só serve pro vale LEGADO, que nunca teve previsto gravado — aí o
+  // caixa informa qual era a forma esperada. Um vale nascido depois do
+  // E4 tem os previstos dele, e este select nem aparece.
+  //
+  // Continua sendo UM select, e não uma lista: o retroativo descreve um
+  // vale de antes de o modelo aceitar N. Oferecer N aqui seria pedir ao
+  // caixa que reconstruísse, de memória, uma divisão que aquele vale
+  // nunca teve como registrar.
+  const [formaEsperada, setFormaEsperada] = useState<FormaPagamento>(
+    previstos[0]?.forma ?? FORMA_PADRAO
+  )
   const [linhas, setLinhas] = useState<Linha[]>([linhaInicial(valorCents)])
   const [justificativa, setJustificativa] = useState('')
   const [erro, setErro] = useState<string | null>(null)
@@ -143,6 +155,26 @@ function DivergenciaPagamentoForm({
   const totalRealizadoCents = linhas.reduce((soma, linha) => soma + centsFromDigits(linha.valor), 0)
   const totalBate = totalRealizadoCents === valorCents
 
+  const semPrevisto = previstos.length === 0
+
+  /**
+   * O previsto CONTRA O QUAL se compara — e é o MESMO valor que vai ser
+   * gravado como `de` do evento.
+   *
+   * Um só, de propósito. Se a comparação usasse uma coisa e o registro
+   * outra, a tela poderia recusar "não é divergência" e ainda assim
+   * gravar um evento dizendo que divergiu de outra coisa. O jeito de
+   * isso não acontecer é não haver duas expressões.
+   *
+   * No vale legado (sem previsto nenhum) a base é a forma que o caixa
+   * acabou de informar. Sem isso a comparação seria contra lista vazia,
+   * que diverge de qualquer realizado — e a guarda "isso bate com o que
+   * já era esperado" nunca dispararia justamente onde ela é útil.
+   */
+  const previstosParaComparar: FormaComValor[] = semPrevisto
+    ? [{ forma: formaEsperada, valor_cents: valorCents }]
+    : previstos
+
   function handleConfirmar() {
     if (linhas.some((linha) => centsFromDigits(linha.valor) <= 0)) {
       setErro('Toda linha precisa de um valor maior que zero.')
@@ -154,8 +186,21 @@ function DivergenciaPagamentoForm({
       )
       return
     }
-    const ehDivergente = linhas.length > 1 || linhas[0].forma !== formaEsperada
-    if (!ehDivergente) {
+    // E4 — ERA DECIDIDO POR CONTAGEM, e isso discordava do servidor:
+    //
+    //     linhas.length > 1 || linhas[0].forma !== formaEsperada
+    //
+    // Enquanto existia um previsto só, a contagem acertava por acidente.
+    // Com dois, um vale previsto `pix + dinheiro` e pago exatamente
+    // `pix + dinheiro` seria divergência aqui e fidelidade em
+    // `selar_romaneio_retorno_interno`, que compara conjuntos de
+    // `forma|valor`. Os dois escritores do mesmo fato afirmando coisas
+    // diferentes.
+    const realizados: FormaComValor[] = linhas.map((linha) => ({
+      forma: linha.forma,
+      valor_cents: centsFromDigits(linha.valor),
+    }))
+    if (!divergiuDoPrevisto(previstosParaComparar, realizados)) {
       setErro('Isso bate com o que já era esperado — não é divergência.')
       return
     }
@@ -167,17 +212,32 @@ function DivergenciaPagamentoForm({
     const payload: MarcarDivergenciaInput = {
       tenantId: profile.tenantId,
       entregaId,
-      formaAnterior: formaEsperada,
-      pagamentosRealizados: linhas.map((linha) => ({
+      // TODOS os previstos — E4. Era `formaAnterior: FormaPagamento`,
+      // uma forma só, e ela virava o `de` do evento `pagamento_alterado`.
+      //
+      // `pagamento_alterado` tem DOIS escritores. O E3.B corrigiu o do
+      // servidor (`limit 1` → agrega todos); este é o outro, e ficou
+      // escalar. Com dois previstos ele afirmaria que a divergência foi
+      // de UMA das formas e descartaria a outra em silêncio, num evento
+      // que é append-only e nunca vai ser reescrito.
+      // O QUE O BANCO SABE, e só isso. Vale sem previsto manda lista
+      // vazia, e o evento grava `de: null` — que é a verdade.
+      previstos,
+      // O QUE A PESSOA DECLAROU, em campo próprio. Só existe quando não
+      // havia previsto; é a mesma lista usada pra decidir se houve
+      // divergência, mas ela NÃO se passa por estado persistido.
+      referenciaInformada: semPrevisto ? previstosParaComparar : null,
+      pagamentosRealizados: realizados.map((r) => ({
         id: uuidv7(),
-        forma: linha.forma,
-        valorCents: centsFromDigits(linha.valor),
+        forma: r.forma,
+        valorCents: r.valor_cents,
       })),
-      valorCentsPrevisto: valorCents,
+      // `criarPrevisto` e `pagamentoPrevistoId` SAÍRAM no E4.1. Esta tela
+      // não escreve mais pagamento previsto — o único escritor é o
+      // cadastro (e o replay dele pela fila). Ver `marcarDivergencia`.
       justificativa: normalizarParagrafo(justificativa),
       registradoPor: profile.id,
       autorNome: profile.nome,
-      criarPrevisto: formaEsperadaAtual === null,
       eventoIdempotencyKey: uuidv7(),
       registradoEmLocal: new Date().toISOString(),
     }
@@ -191,12 +251,18 @@ function DivergenciaPagamentoForm({
   return (
     <>
       <DialogDescription>
-        {formaEsperadaAtual
-          ? `Era: ${FORMA_PAGAMENTO_LABEL[formaEsperadaAtual]}. Registra como foi pago de verdade — pode ser em mais de uma forma.`
-          : 'Essa entrega não tem forma de pagamento registrada ainda — informa a esperada e como foi pago de verdade.'}
+        {semPrevisto
+          ? 'Essa entrega não tem forma de pagamento registrada ainda — informa a esperada e como foi pago de verdade.'
+          : // `textoDoPagamentoAlterado` é o MESMO formatador que o
+            // Registro de Auditoria e as Ocorrências usam pro `de` do
+            // evento. Aqui ele mostra "Pix (R$ 50,00) + Dinheiro
+            // (R$ 73,90)" — o valor por forma importa nesta tela, ao
+            // contrário da coluna da lista, porque é contra ele que o
+            // caixa confere o que recebeu.
+            `Era: ${textoDoPagamentoAlterado(previstos)}. Registra como foi pago de verdade — pode ser em mais de uma forma.`}
       </DialogDescription>
 
-      {formaEsperadaAtual === null && (
+      {semPrevisto && (
         <div className="flex flex-col gap-2">
           <Label>Forma esperada (prevista)</Label>
           <Select value={formaEsperada} onValueChange={(v) => setFormaEsperada(v as FormaPagamento)}>

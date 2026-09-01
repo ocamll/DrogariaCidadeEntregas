@@ -1,8 +1,14 @@
 import { useRef, useState, type KeyboardEvent } from 'react'
+import { X } from 'lucide-react'
 import type { AuthProfile } from '@/data/auth'
-import type { NovaEntrega } from '@/data/entregas'
+import type { NovaEntrega, FormaPrevistaDoCadastro } from '@/data/entregas'
 import { enfileirarOperacao, donoDaFila, gravacaoEnfileirada } from '@/data/filaOffline'
-import { FORMA_PAGAMENTO_OPTIONS, type FormaPagamento } from '@/data/pagamentos'
+import {
+  FORMA_PAGAMENTO_OPTIONS,
+  MAX_FORMAS_PREVISTAS,
+  validarFormasPrevistas,
+  type FormaPagamento,
+} from '@/data/pagamentos'
 import { useConveniosCadastro } from '@/data/cadastros'
 import { uuidv7 } from '@/lib/uuid'
 import { useTarifaDaLoja } from '@/data/lojas'
@@ -17,6 +23,24 @@ import { normalizarNome, normalizarEndereco } from '@/lib/texto'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
+
+/**
+ * Uma linha de forma de pagamento prevista — E4.
+ *
+ * `digitos` são os dígitos crus da máscara de centavos, igual em todo
+ * campo de dinheiro do projeto — nunca texto livre com "," ou ".".
+ *
+ * **Ele é IGNORADO enquanto houver uma linha só**, e isso é o coração do
+ * desenho: com uma forma, o valor previsto É o valor da compra, não há o
+ * que dividir, e o campo nem aparece. O caminho de 29 em cada 30
+ * entregas continua sendo exatamente o de antes do E4 — mesmo número de
+ * teclas, mesma cadeia de Enter, mesmo orçamento de 25 segundos.
+ */
+type LinhaForma = { pagamentoId: string; forma: FormaPagamento; digitos: string }
+
+function linhaNova(): LinhaForma {
+  return { pagamentoId: uuidv7(), forma: 'dinheiro', digitos: '' }
+}
 
 export function CadastroEntrega({
   profile,
@@ -55,7 +79,10 @@ function CadastroEntregaForm({
   // 1 normal, 2 em endereço distante. O caixa não digita valor de
   // entrega: a tarifa é fixa por filial e o valor sai daqui.
   const [quantidadeVales, setQuantidadeVales] = useState(1)
-  const [formaPagamento, setFormaPagamento] = useState<FormaPagamento>('dinheiro')
+  // Cada linha carrega o PRÓPRIO id, cunhado aqui e reciclado no reset —
+  // nunca dentro de `criarEntrega`, senão o reenvio da fila criaria um
+  // previsto novo a cada oscilação de rede (E3.C).
+  const [formas, setFormas] = useState<LinhaForma[]>(() => [linhaNova()])
   const [convenioId, setConvenioId] = useState('')
   const [temReceita, setTemReceita] = useState(false)
   const [erroValidacao, setErroValidacao] = useState<string | null>(null)
@@ -65,12 +92,42 @@ function CadastroEntregaForm({
   const conveniosAtivos = (convenios ?? []).filter((c) => c.ativo)
   const tarifaCents = useTarifaDaLoja(lojaId)
 
-  // O vale extra do endereço distante o cliente paga em mãos ao motoboy —
-  // não entra no acerto da farmácia com a agência. Menos quando o
-  // convênio escolhido banca a entrega inteira (caso do Minerva).
+  const umaFormaSo = formas.length === 1
+  const valorCompraCents = centsFromDigits(valorCompra)
+
+  /**
+   * As formas previstas, prontas pro payload — E4.
+   *
+   * **Com uma linha só, o valor É o da compra**, e o campo de valor nem
+   * existe na tela: não há divisão a fazer, e pedir ao caixa que
+   * redigite o total que ele acabou de digitar seria gastar o orçamento
+   * dos 25 segundos em nada.
+   *
+   * Uma derivação só, usada pela validação, pelo total exibido e pelo
+   * payload. Se fossem duas expressões, a tela poderia validar uma coisa
+   * e gravar outra.
+   */
+  const previstos: FormaPrevistaDoCadastro[] = formas.map((linha) => ({
+    pagamentoId: linha.pagamentoId,
+    forma: linha.forma,
+    valorCents: umaFormaSo ? valorCompraCents : centsFromDigits(linha.digitos),
+  }))
+
+  const totalPrevistoCents = previstos.reduce((soma, p) => soma + p.valorCents, 0)
+
+  // BASTA UMA linha ser convênio — E4, e foi decisão do usuário em
+  // 2026-08-27. O convênio pode compor o pagamento com outra forma, e a
+  // regra do `farmacia_paga_entrega_integral` (caso do Minerva) continua
+  // valendo mesmo quando ele cobre só parte da compra: quem banca a
+  // entrega é o convênio, e isso não depende de quanto da COMPRA ele
+  // pagou.
+  //
+  // `entregas.convenio_id` é uma coluna só, e é por isso que
+  // `validarFormasPrevistas` recusa duas linhas de convênio: seriam dois
+  // acordos disputando o mesmo campo.
+  const temConvenio = formas.some((linha) => linha.forma === 'convenio')
   const convenioIntegral =
-    formaPagamento === 'convenio' &&
-    !!conveniosAtivos.find((c) => c.id === convenioId)?.farmaciaPagaEntregaIntegral
+    temConvenio && !!conveniosAtivos.find((c) => c.id === convenioId)?.farmaciaPagaEntregaIntegral
 
   const valorEntregaCents = (tarifaCents ?? 0) * quantidadeVales
   const entregaPagaClienteCents =
@@ -94,13 +151,36 @@ function CadastroEntregaForm({
     }
   }
 
+  function addForma() {
+    setFormas((prev) => {
+      if (prev.length >= MAX_FORMAS_PREVISTAS) return prev
+      // A primeira linha ganha o valor da compra ao deixar de ser a
+      // única: até aqui o valor dela era implícito (a compra inteira), e
+      // ela precisa passar a ser editável já preenchida — é dela que o
+      // caixa vai TIRAR o que a segunda forma cobre.
+      const comValor =
+        prev.length === 1 && !prev[0].digitos ? [{ ...prev[0], digitos: valorCompra }] : prev
+      return [...comValor, linhaNova()]
+    })
+  }
+
+  function removeForma(index: number) {
+    setFormas((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)))
+  }
+
+  function updateForma(index: number, patch: Partial<LinhaForma>) {
+    setFormas((prev) => prev.map((linha, i) => (i === index ? { ...linha, ...patch } : linha)))
+  }
+
   function resetForm() {
     setId(uuidv7())
     setNome('')
     setEndereco('')
     setValorCompra('')
     setQuantidadeVales(1)
-    setFormaPagamento('dinheiro')
+    // Linha nova, id novo. Reaproveitar o id faria o segundo vale do dia
+    // colidir na PK com o primeiro.
+    setFormas([linhaNova()])
     setConvenioId('')
     setTemReceita(false)
     nomeRef.current?.focus()
@@ -109,14 +189,28 @@ function CadastroEntregaForm({
   function handleSalvar() {
     const nomeTrim = normalizarNome(nome)
     const enderecoTrim = normalizarEndereco(endereco)
-    const valorCompraCents = centsFromDigits(valorCompra)
 
     if (!nomeTrim || !enderecoTrim || valorCompraCents <= 0) {
       setErroValidacao('Preenche nome, endereço e valor da compra antes de salvar.')
       return
     }
-    if (formaPagamento === 'convenio' && !convenioId) {
+    if (temConvenio && !convenioId) {
       setErroValidacao('Escolhe o convênio.')
+      return
+    }
+    // A VALIDAÇÃO DAS FORMAS ACONTECE AQUI, ANTES DE ENFILEIRAR — nunca
+    // em `criarEntrega`. Revalidar na sincronização poderia recusar uma
+    // operação já aceita no balcão, e o item iria pra `erro` e pro
+    // backoff pra sempre (§50.4).
+    //
+    // Com uma forma só ela é sempre satisfeita por construção (o valor É
+    // o da compra), então o caminho rápido nunca esbarra nela.
+    const erroFormas = validarFormasPrevistas(
+      previstos.map((p) => ({ forma: p.forma, valor_cents: p.valorCents })),
+      valorCompraCents
+    )
+    if (erroFormas) {
+      setErroValidacao(erroFormas)
       return
     }
     // Sem tarifa carregada não dá pra montar o valor da entrega — melhor
@@ -129,6 +223,7 @@ function CadastroEntregaForm({
 
     const payload: NovaEntrega = {
       id,
+      formasPrevistas: previstos,
       tenantId: profile.tenantId,
       lojaId,
       criadoPor: profile.id,
@@ -138,9 +233,8 @@ function CadastroEntregaForm({
       valorEntregaCents,
       quantidadeVales,
       entregaPagaClienteCents,
-      formaPagamento,
       ocorridoEmLocal: new Date().toISOString(),
-      convenioId: formaPagamento === 'convenio' ? convenioId : null,
+      convenioId: temConvenio ? convenioId : null,
       temReceita,
     }
 
@@ -165,10 +259,13 @@ function CadastroEntregaForm({
   // convênio em vez de salvar direto. Qualquer outra forma salva na hora,
   // igual sempre foi (o checkbox de receita fica fora dessa cadeia de
   // propósito, ver campo abaixo).
-  function handleFormaKeyDown(e: KeyboardEvent<HTMLSelectElement>) {
+  // Aceita os dois elementos porque, com pagamento dividido, ele também
+  // fica no campo de VALOR de cada linha — Enter ali salva, em vez de não
+  // fazer nada, que é o que o caixa espera de um formulário deste app.
+  function handleFormaKeyDown(e: KeyboardEvent<HTMLSelectElement | HTMLInputElement>) {
     if (e.key !== 'Enter') return
     e.preventDefault()
-    if (formaPagamento === 'convenio') {
+    if (temConvenio) {
       convenioRef.current?.focus()
       return
     }
@@ -254,24 +351,86 @@ function CadastroEntregaForm({
               )}
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="forma-pagamento">Forma de pagamento</Label>
-              <select
-                id="forma-pagamento"
-                ref={formaRef}
-                className={SELECT_CLASSNAME}
-                value={formaPagamento}
-                onChange={(e) => setFormaPagamento(e.target.value as FormaPagamento)}
-                onKeyDown={handleFormaKeyDown}
-              >
-                {FORMA_PAGAMENTO_OPTIONS.map(([valor, label]) => (
-                  <option key={valor} value={valor}>
-                    {label}
-                  </option>
-                ))}
-              </select>
+              <div className="flex items-center justify-between">
+                <Label htmlFor="forma-pagamento">
+                  {umaFormaSo ? 'Forma de pagamento' : 'Formas de pagamento'}
+                </Label>
+                {/* O GATILHO DA SEGUNDA FORMA FICA FORA DA CADEIA DE
+                    ENTER, e é isso que protege os 25 segundos.
+
+                    Com uma forma, a tela é a de sempre: Enter no select
+                    salva. Quem divide o pagamento — 1 ou 2 em cada 30 —
+                    clica aqui, e o custo cai só sobre esse caso. Pôr
+                    "dividir" como opção do próprio select cobraria uma
+                    linha a mais do dropdown em TODA entrega, e ainda
+                    misturaria "como pagou" com "em quantas formas". */}
+                {formas.length < MAX_FORMAS_PREVISTAS && (
+                  <Button type="button" variant="ghost" size="sm" onClick={addForma}>
+                    + outra forma
+                  </Button>
+                )}
+              </div>
+
+              {formas.map((linha, index) => (
+                <div key={linha.pagamentoId} className="flex items-center gap-2">
+                  <select
+                    // O id/ref só na PRIMEIRA linha: é ela que está na
+                    // cadeia de Enter que vem do campo de vales.
+                    id={index === 0 ? 'forma-pagamento' : undefined}
+                    ref={index === 0 ? formaRef : undefined}
+                    className={SELECT_CLASSNAME}
+                    value={linha.forma}
+                    onChange={(e) =>
+                      updateForma(index, { forma: e.target.value as FormaPagamento })
+                    }
+                    onKeyDown={handleFormaKeyDown}
+                  >
+                    {FORMA_PAGAMENTO_OPTIONS.map(([valor, label]) => (
+                      <option key={valor} value={valor}>
+                        {label}
+                      </option>
+                    ))}
+                  </select>
+                  {/* O campo de valor só existe quando há o que dividir.
+                      Com uma forma, o valor previsto É o da compra —
+                      pedir pra redigitar o total seria gastar o
+                      orçamento dos 25s sem informação nova. */}
+                  {!umaFormaSo && (
+                    <>
+                      <CampoMoeda
+                        className="w-28"
+                        digitos={linha.digitos}
+                        onDigitos={(digitos) => updateForma(index, { digitos })}
+                        onKeyDown={handleFormaKeyDown}
+                      />
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon-sm"
+                        aria-label="Remover forma"
+                        onClick={() => removeForma(index)}
+                      >
+                        <X />
+                      </Button>
+                    </>
+                  )}
+                </div>
+              ))}
+
+              {!umaFormaSo && (
+                <p
+                  className={
+                    totalPrevistoCents === valorCompraCents
+                      ? 'text-xs text-muted-foreground'
+                      : 'text-xs text-destructive'
+                  }
+                >
+                  Total: {formatBRL(totalPrevistoCents)} de {formatBRL(valorCompraCents)} da compra
+                </p>
+              )}
             </div>
 
-            {formaPagamento === 'convenio' && (
+            {temConvenio && (
               <div className="flex flex-col gap-2">
                 <Label htmlFor="convenio">Convênio</Label>
                 <select

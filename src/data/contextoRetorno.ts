@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase, mensagemDeErro } from '@/lib/supabase'
 import { db, type ContextoRetornoEmCache } from '@/lib/db'
+import { aceito, recusado, type ConsultaComVeredito } from '@/lib/estadoDeConsulta'
 
 // =====================================================================
 // O CONTEXTO DO RETORNO — os fatos ANTIGOS, selados na saída
@@ -211,13 +212,28 @@ export async function aquecerContextosDeRetorno(corridaIds: string[]): Promise<n
   return guardados
 }
 
-export type ResultadoContexto =
-  | { estado: 'carregando' }
-  | { estado: 'pronto'; contexto: ContextoRetorno; origem: 'servidor' | 'cache' }
-  /** Offline e sem cache: o retorno desta corrida não pode ser montado. */
-  | { estado: 'indisponivel_offline' }
-  | { estado: 'nao_encontrado' }
-  | { estado: 'erro'; erro: Error }
+/**
+ * O resultado desta consulta É o vocabulário do E2 — e ele chegou aqui
+ * antes dele, com outros nomes:
+ *
+ *     carregando            →  loading
+ *     pronto + servidor     →  ready + procedencia 'servidor'
+ *     pronto + cache        →  ready + cache_sem_rede / cache_apos_falha
+ *     nao_encontrado        →  ready + recusado('nao_encontrado')
+ *     indisponivel_offline  →  unavailable
+ *     erro                  →  error
+ *
+ * A tradução não é cosmética em dois pontos:
+ *
+ *   1. `nao_encontrado` era um estado IRMÃO de `erro` e de
+ *      `indisponivel_offline`, quando na verdade ele é o oposto deles —
+ *      é uma RESPOSTA, e das boas: o servidor sabe e disse que não há
+ *      saída selada. Agora ele só é alcançável de dentro de `ready`.
+ *   2. o `origem: 'cache'` colapsava DOIS casos que a própria função já
+ *      distinguia: cache lido porque estamos offline, e cache lido
+ *      porque a chamada falhou. São avisos diferentes pro operador.
+ */
+export type ResultadoContexto = ConsultaComVeredito<ContextoRetorno, 'nao_encontrado'>
 
 /**
  * O contexto de UMA corrida, com o servidor primeiro e o cache como
@@ -235,7 +251,7 @@ export function useContextoRetorno(corridaId: string | null) {
     // Imutável por construção: não há o que revalidar.
     staleTime: Infinity,
     queryFn: async (): Promise<ResultadoContexto> => {
-      if (!corridaId) return { estado: 'carregando' }
+      if (!corridaId) return { estado: 'inactive' }
 
       const temRede = typeof navigator === 'undefined' || navigator.onLine
       if (temRede) {
@@ -243,28 +259,40 @@ export function useContextoRetorno(corridaId: string | null) {
           const contexto = await buscarDoServidor(corridaId)
           if (contexto) {
             await guardarContextoLocal(contexto)
-            return { estado: 'pronto', contexto, origem: 'servidor' }
+            return { estado: 'ready', dados: aceito(contexto), procedencia: 'servidor' }
           }
           // O servidor respondeu e não há saída selada pra esta corrida.
-          // Isso é resposta, não falta de dado — não vale cair no cache.
-          return { estado: 'nao_encontrado' }
+          // Isso é RESPOSTA, não falta de dado — não vale cair no cache,
+          // e não é irmão de `error`.
+          return {
+            estado: 'ready',
+            procedencia: 'servidor',
+            dados: recusado(
+              'nao_encontrado',
+              'Esta corrida não tem Romaneio de Saída selado, então não há documento a fechar. Corridas criadas antes da cadeia de custódia estão nessa situação.'
+            ),
+          }
         } catch (erro) {
           // Rede prometida e não entregue: o cache ainda pode salvar.
           const local = await lerContextoLocal(corridaId)
-          if (local) return { estado: 'pronto', contexto: local, origem: 'cache' }
+          if (local) {
+            return { estado: 'ready', dados: aceito(local), procedencia: 'cache_apos_falha' }
+          }
           // `mensagemDeErro` e não `String(erro)`: o erro do PostgREST é
           // um objeto simples, não um `Error`, e o `String()` o
           // transformava em "[object Object]" — apagando justamente o
           // `code` que diz se foi RLS, cache de schema ou SQLSTATE.
           // Aconteceu em uso real em 2026-08-25.
           console.error('obter_contexto_retorno falhou:', erro)
-          return { estado: 'erro', erro: new Error(mensagemDeErro(erro)) }
+          return { estado: 'error', erro: new Error(mensagemDeErro(erro)) }
         }
       }
 
       const local = await lerContextoLocal(corridaId)
-      if (local) return { estado: 'pronto', contexto: local, origem: 'cache' }
-      return { estado: 'indisponivel_offline' }
+      if (local) return { estado: 'ready', dados: aceito(local), procedencia: 'cache_sem_rede' }
+      // Offline e sem cache: o retorno desta corrida não pode ser
+      // montado, e ninguém tem como dizer se ele existe.
+      return { estado: 'unavailable' }
     },
   })
 }

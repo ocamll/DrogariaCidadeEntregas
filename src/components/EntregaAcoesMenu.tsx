@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { MoreVertical } from 'lucide-react'
 import type { AuthProfile } from '@/data/auth'
-import type { FormaPagamento } from '@/data/pagamentos'
+import type { FormaComValor } from '@/data/pagamentos'
 import { Button } from '@/components/ui/button'
 import {
   DropdownMenu,
@@ -18,7 +18,7 @@ export function EntregaAcoesMenu({
   clienteNome,
   tipo,
   statusEntrega,
-  formaEsperadaAtual,
+  previstos,
   valorCents,
   temReceita,
   profile,
@@ -28,7 +28,7 @@ export function EntregaAcoesMenu({
   clienteNome: string
   tipo: 'cliente' | 'transferencia'
   statusEntrega: string
-  formaEsperadaAtual: FormaPagamento | null
+  previstos: FormaComValor[]
   valorCents: number
   temReceita: boolean
   profile: AuthProfile
@@ -73,7 +73,7 @@ export function EntregaAcoesMenu({
         <NotificarOcorrenciaDialog
           entregaId={entregaId}
           tipo={tipo}
-          formaEsperadaAtual={formaEsperadaAtual}
+          previstos={previstos}
           valorCents={valorCents}
           temReceita={temReceita}
           profile={profile}

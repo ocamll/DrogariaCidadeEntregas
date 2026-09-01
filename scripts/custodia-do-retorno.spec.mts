@@ -268,7 +268,7 @@ console.log('\n--- (9) PIN recusado NÃO apaga o cartão ---')
   const e = correr(custodiaInicial(DOC), [
     { tipo: 'INICIAR' },
     { tipo: 'CARTAO_LIDO', publicId: '777777', motoboyId: 'm-1' },
-    { tipo: 'PIN_RECUSADO' },
+    { tipo: 'PIN_RECUSADO', mensagem: 'PIN incorreto.' },
   ])
   checa('estado próprio', e.nome === 'pin_recusado')
   checa('cartão preservado', e.credencial !== null, 'recolher aqui só faria bipar de novo à toa')
@@ -283,7 +283,7 @@ console.log('\n--- (9) PIN recusado NÃO apaga o cartão ---')
   // enquanto o certo é digitado por cima não serve pra nada.
   const recusadoDepoisDeCapturar = correr(custodiaInicial(DOC), [
     ...ATE_CAPTURADO,
-    { tipo: 'PIN_RECUSADO' },
+    { tipo: 'PIN_RECUSADO', mensagem: 'PIN incorreto.' },
   ])
   checa(
     'PIN recusado apaga o material capturado',
@@ -303,7 +303,7 @@ console.log('\n--- (9b) a JANELA que a varredura achou em 2026-08-21 ---')
   // regressão ter nome, porque "6375 transições" não diz qual quebrou.
   const e = correr(custodiaInicial(DOC), [
     ...ATE_CAPTURADO,
-    { tipo: 'PIN_RECUSADO' },
+    { tipo: 'PIN_RECUSADO', mensagem: 'PIN incorreto.' },
     { tipo: 'PIN_AUTORIZADO', autorizacaoId: 'auth-3' },
   ])
   checa('termina autorizado', e.nome === 'custodia_autorizada' && e.autorizacaoId !== null)
@@ -317,7 +317,7 @@ console.log('\n--- (9b) a JANELA que a varredura achou em 2026-08-21 ---')
   // caminho online com um PIN que ninguém conferiu.
   const voltouProOffline = correr(custodiaInicial(DOC), [
     ...ATE_AUTORIZADO,
-    { tipo: 'PIN_RECUSADO' },
+    { tipo: 'PIN_RECUSADO', mensagem: 'PIN incorreto.' },
     { tipo: 'SEGREDOS_CAPTURADOS' },
   ])
   checa('e a autorização velha não sobrevive à captura offline',
@@ -393,10 +393,10 @@ console.log('\n--- (10) A INVARIANTE, varrendo TODOS os eventos em TODOS os esta
   const eventos: EventoCustodia[] = [
     { tipo: 'INICIAR' },
     { tipo: 'CARTAO_LIDO', publicId: '777777', motoboyId: 'm-1' },
-    { tipo: 'CARTAO_RECUSADO' },
+    { tipo: 'CARTAO_RECUSADO', mensagem: 'Credencial não reconhecida.' },
     { tipo: 'PIN_AUTORIZADO', autorizacaoId: 'auth-x' },
     { tipo: 'SEGREDOS_CAPTURADOS' },
-    { tipo: 'PIN_RECUSADO' },
+    { tipo: 'PIN_RECUSADO', mensagem: 'PIN incorreto.' },
     { tipo: 'ASSINOU_RESPONSAVEL', strokes: [{ t: 'r' }] },
     { tipo: 'ASSINOU_MOTOBOY', strokes: [{ t: 'm' }] },
     { tipo: 'CONCLUIR', online: true },
@@ -405,7 +405,7 @@ console.log('\n--- (10) A INVARIANTE, varrendo TODOS os eventos em TODOS os esta
     { tipo: 'ENFILEIRADO' },
     { tipo: 'CONFLITO', detalhe: {} },
     { tipo: 'FALHA_DE_REDE_NO_SELO' },
-    { tipo: 'ERRO_REDE' },
+    { tipo: 'ERRO_REDE', mensagem: 'Failed to fetch' },
     { tipo: 'AUTORIZACAO_EXPIROU' },
     { tipo: 'TROCAR_MOTOBOY' },
     { tipo: 'CANCELAR' },
@@ -498,13 +498,13 @@ console.log('\n--- (11) todo estado do tipo é alcançável ou declarado ---')
   const vistos = new Set<string>()
   const eventos: EventoCustodia[] = [
     { tipo: 'INICIAR' }, { tipo: 'CARTAO_LIDO', publicId: 'p', motoboyId: 'm' },
-    { tipo: 'CARTAO_RECUSADO' }, { tipo: 'PIN_AUTORIZADO', autorizacaoId: 'a' },
-    { tipo: 'SEGREDOS_CAPTURADOS' }, { tipo: 'PIN_RECUSADO' },
+    { tipo: 'CARTAO_RECUSADO', mensagem: 'Credencial não reconhecida.' }, { tipo: 'PIN_AUTORIZADO', autorizacaoId: 'a' },
+    { tipo: 'SEGREDOS_CAPTURADOS' }, { tipo: 'PIN_RECUSADO', mensagem: 'PIN incorreto.' },
     { tipo: 'ASSINOU_RESPONSAVEL', strokes: [] }, { tipo: 'ASSINOU_MOTOBOY', strokes: [] },
     { tipo: 'CONCLUIR', online: true }, { tipo: 'CONCLUIR', online: false, envelope: {} },
     { tipo: 'SELADO' }, { tipo: 'ENFILEIRADO' }, { tipo: 'CONFLITO', detalhe: {} },
     { tipo: 'FALHA_DE_REDE_NO_SELO' },
-    { tipo: 'ERRO_REDE' }, { tipo: 'AUTORIZACAO_EXPIROU' },
+    { tipo: 'ERRO_REDE', mensagem: 'Failed to fetch' }, { tipo: 'AUTORIZACAO_EXPIROU' },
     { tipo: 'TROCAR_MOTOBOY' }, { tipo: 'CANCELAR' },
   ]
   while (fila.length > 0) {
@@ -526,6 +526,104 @@ console.log('\n--- (11) todo estado do tipo é alcançável ou declarado ---')
   // um dia virar um passo de verdade, este teste cobra.
   checa('e `assinando_responsavel` é rótulo, não estado produzido',
     !alcancados.has('assinando_responsavel' as EstadoNome))
+}
+
+// ---------------------------------------------------------------------
+console.log('\n--- (12) TODA FALHA CARREGA O MOTIVO — E2.3, lote D ---')
+// ---------------------------------------------------------------------
+{
+  // Antes deste bloco o motivo vivia num `erro: string | null` PARALELO
+  // à máquina, na tela. Duas fontes pro mesmo fato, e nada as amarrava:
+  // o `catch` dos handlers escrevia a string e NÃO despachava nada, então
+  // a máquina ficava em `aguardando_cartao` com um texto de erro no ar.
+  //
+  // Com o motivo dentro do evento, um estado de falha sem explicação
+  // deixa de ser representável.
+  const base = custodiaInicial(DOC)
+
+  const recusado = reduzirCustodia(base, {
+    tipo: 'CARTAO_RECUSADO',
+    mensagem: 'Credencial não reconhecida.',
+  })
+  checa('cartao_recusado carrega o motivo', recusado.mensagem?.texto === 'Credencial não reconhecida.')
+  checa('e ele é do tipo RECUSA', recusado.mensagem?.tipo === 'recusa')
+
+  const rede = reduzirCustodia(base, { tipo: 'ERRO_REDE', mensagem: 'Failed to fetch' })
+  checa('erro_rede carrega o motivo', rede.mensagem?.texto === 'Failed to fetch')
+  checa('e ele é do tipo FALHA', rede.mensagem?.tipo === 'falha')
+
+  // E OS DOIS CONTINUAM SENDO ESTADOS DIFERENTES. É a distinção que a
+  // tela usa pra escolher a cor e pra decidir se acusa alguém.
+  checa('e cartao_recusado ≠ erro_rede', recusado.nome !== rede.nome)
+
+  // Com o `INICIAR`: a partir de `documento_congelado` o `CARTAO_LIDO` é
+  // ignorado, e sem ele este bloco mediria um estado sem credencial —
+  // afirmando "não apaga o cartão" sobre um cartão que nunca foi lido.
+  const comCartao = correr(base, [
+    { tipo: 'INICIAR' },
+    { tipo: 'CARTAO_LIDO', publicId: '777777', motoboyId: 'm-1' },
+  ])
+  checa('   (o fixture de fato leu um cartão)', comCartao.credencial !== null)
+  const pinRuim = reduzirCustodia(comCartao, { tipo: 'PIN_RECUSADO', mensagem: 'PIN incorreto.' })
+  const pinRede = reduzirCustodia(comCartao, { tipo: 'ERRO_REDE', mensagem: 'Failed to fetch' })
+  checa('pin_recusado carrega o motivo', pinRuim.mensagem?.texto === 'PIN incorreto.')
+  checa('e pin_recusado ≠ erro_rede', pinRuim.nome !== pinRede.nome)
+
+  // A ASSIMETRIA QUE JÁ EXISTIA, e que não pode se perder: PIN recusado
+  // apaga o material em claro (um PIN errado não deve ficar em memória);
+  // falha de rede NÃO apaga o cartão lido, que continua válido.
+  checa('pin_recusado descarta os segredos', pinRuim.segredosCapturados === null)
+  checa('e nenhum dos dois apaga a leitura do cartão',
+    pinRuim.credencial !== null && pinRede.credencial !== null)
+
+  // O estado inicial não tem mensagem: só falha tem o que explicar.
+  checa('o estado inicial não carrega mensagem', base.mensagem === null)
+
+  // ------------------------------------------------------------------
+  // UMA CONSULTA QUE FALHA NÃO MOVE A MÁQUINA — e este caso existe por
+  // causa de um defeito real, achado medindo a tela em 2026-08-26.
+  //
+  // A primeira versão do lote D mandava a falha do cartão pra
+  // `ERRO_REDE`. Mas `erro_rede` NÃO aceita `CARTAO_LIDO` (só
+  // `aguardando_cartao`, `cartao_recusado` e `falha_selo_online`
+  // aceitam), então uma falha de rede ao bipar deixava o caixa sem
+  // conseguir bipar de novo. Beco sem saída, com o motoboy no balcão.
+  // ------------------------------------------------------------------
+  const aguardando = correr(base, [{ tipo: 'INICIAR' }])
+  const falhouAoBipar = reduzirCustodia(aguardando, {
+    tipo: 'FALHA_NA_CONSULTA',
+    mensagem: 'Failed to fetch',
+  })
+  checa('a falha na consulta NÃO move a máquina', falhouAoBipar.nome === aguardando.nome)
+  checa('mas ela passa a ter o que dizer', falhouAoBipar.mensagem?.texto === 'Failed to fetch')
+  checa('e é FALHA, não recusa', falhouAoBipar.mensagem?.tipo === 'falha')
+  // O QUE O DEFEITO CUSTAVA: o próximo passo continua possível.
+  const rebipou = reduzirCustodia(falhouAoBipar, {
+    tipo: 'CARTAO_LIDO',
+    publicId: '777777',
+    motoboyId: 'm-1',
+  })
+  checa('e BIPAR DE NOVO continua funcionando', rebipou.nome === 'aguardando_pin')
+  // E O PASSO BEM-SUCEDIDO APAGA O QUE O ANTERIOR DISSE. Sem isto a
+  // mensagem da tentativa que falhou fica no ar depois de o cartão ser
+  // lido — a tela dizendo "não consegui consultar" ao lado de uma
+  // credencial que acabou de ser reconhecida. Medido no app em 26/08.
+  checa('e o sucesso limpa a mensagem da falha', rebipou.mensagem === null)
+
+  // O mesmo no passo do PIN: falhar a consulta não pode travar a digitação.
+  const falhouNoPin = reduzirCustodia(comCartao, {
+    tipo: 'FALHA_NA_CONSULTA',
+    mensagem: 'Failed to fetch',
+  })
+  checa('no PIN também não move', falhouNoPin.nome === comCartao.nome)
+  checa('e autenticar de novo continua possível',
+    reduzirCustodia(falhouNoPin, { tipo: 'PIN_AUTORIZADO', autorizacaoId: 'a' }).nome ===
+      'custodia_autorizada')
+
+  // E `conflito` continua sendo desfecho PREVISTO, não erro genérico.
+  const conflito = reduzirCustodia(base, { tipo: 'CONFLITO', detalhe: { numero: 'R-000099' } })
+  checa('conflito é estado próprio, não erro_rede', conflito.nome === 'conflito')
+  checa('e ele preserva o detalhe pra tela mostrar o romaneio', conflito.detalhe !== null)
 }
 
 console.log(falhas === 0 ? '\ncustódia ok\n' : `\n${falhas} FALHA(S)\n`)

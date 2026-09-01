@@ -19,12 +19,25 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog'
-import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { EmAndamento } from '@/components/EmAndamento'
+import { Consulta, CampoDependente } from '@/components/Consulta'
+import { derivarEstado } from '@/lib/estadoDeConsulta'
 import { normalizarNome } from '@/lib/texto'
 
+// Estava no grupo "acidental" do inventário do E2: ela NÃO mentia
+// offline, mas só porque `data?.length === 0` dá `undefined === 0`, que é
+// `false`. Ninguém decidiu isso — e bastaria alguém trocar por
+// `(data ?? []).length === 0`, achando que é a mesma coisa, pra ela
+// passar a afirmar "nenhuma agência cadastrada" sem ter perguntado.
+//
+// O que ela realmente fazia era o terceiro estado: ficar em branco, sem
+// explicar. Duas consultas, dois estados.
 export function AgenciasCadastro({ profile }: { profile: AuthProfile }) {
-  const { data, isLoading, isError, error } = useAgenciasCadastro()
-  const { data: cidades } = useCidades()
+  const consulta = useAgenciasCadastro()
+  const consultaCidades = useCidades()
+  const estado = derivarEstado(consulta)
+  const estadoCidades = derivarEstado(consultaCidades)
+  const cidades = estadoCidades.estado === 'ready' ? estadoCidades.dados : undefined
   const [editando, setEditando] = useState<AgenciaCadastro | null>(null)
   const [dialogAberto, setDialogAberto] = useState(false)
   const alternarAtivo = useAlternarAtivoAgencia()
@@ -45,12 +58,12 @@ export function AgenciasCadastro({ profile }: { profile: AuthProfile }) {
         <Button onClick={abrirNova}>Nova agência</Button>
       </div>
 
-      {isLoading && <Carregando />}
-      {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
-      {!isLoading && !isError && data?.length === 0 && (
-        <p className="text-sm text-muted-foreground">Nenhuma agência cadastrada ainda.</p>
-      )}
-      {!isLoading && !isError && data && data.length > 0 && (
+      <Consulta
+        estado={estado}
+        vazio={<p className="text-sm text-muted-foreground">Nenhuma agência cadastrada ainda.</p>}
+        aoRecarregar={() => void consulta.refetch()}
+      >
+        {(agencias) => (
         <Table>
           <TableHeader>
             <TableRow>
@@ -63,16 +76,22 @@ export function AgenciasCadastro({ profile }: { profile: AuthProfile }) {
             </TableRow>
           </TableHeader>
           <TableBody>
-            {data.map((agencia) => (
+            {agencias.map((agencia) => (
               <TableRow key={agencia.id}>
                 <TableCell>{agencia.nome}</TableCell>
                 {/* agência sem cidade não aparece pra filial nenhuma na
-                    hora da corrida — por isso o aviso, e não um "—" mudo */}
+                    hora da corrida — por isso o aviso, e não um "—" mudo.
+                    E o terceiro caso é novo: sem a lista de cidades,
+                    `rotuloCidade(undefined)` devolvia o MESMO "—" de
+                    "cidade não encontrada", a partir da ignorância de
+                    outra consulta. */}
                 <TableCell>
-                  {agencia.cidadeId ? (
-                    rotuloCidade(cidades?.find((c) => c.id === agencia.cidadeId))
-                  ) : (
+                  {!agencia.cidadeId ? (
                     <span className="text-destructive">sem cidade</span>
+                  ) : cidades ? (
+                    rotuloCidade(cidades.find((c) => c.id === agencia.cidadeId))
+                  ) : (
+                    '…'
                   )}
                 </TableCell>
                 <TableCell>{agencia.cnpj ?? '—'}</TableCell>
@@ -97,7 +116,8 @@ export function AgenciasCadastro({ profile }: { profile: AuthProfile }) {
             ))}
           </TableBody>
         </Table>
-      )}
+        )}
+      </Consulta>
 
       <AgenciaFormDialog
         key={editando?.id ?? 'nova'}
@@ -127,7 +147,8 @@ function AgenciaFormDialog({
   const [cidadeId, setCidadeId] = useState(agencia?.cidadeId ?? '')
   const [erro, setErro] = useState<string | null>(null)
 
-  const { data: cidades } = useCidades()
+  const consultaCidades = useCidades()
+  const estadoCidades = derivarEstado(consultaCidades)
   const salvar = useSalvarAgencia()
 
   function handleSalvar() {
@@ -174,21 +195,38 @@ function AgenciaFormDialog({
           </div>
           <div className="flex flex-col gap-2">
             <Label htmlFor="agencia-cidade">Cidade que atende</Label>
-            <select
-              id="agencia-cidade"
-              className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30"
-              value={cidadeId}
-              onChange={(e) => setCidadeId(e.target.value)}
+            {/* Campo dependente: o formulário fica, só o select trava.
+                Nome e CNPJ já digitados não se perdem porque a lista de
+                cidades não chegou. */}
+            <CampoDependente
+              estado={estadoCidades}
+              rotulo="Cidades"
+              vazio={
+                <p className="text-sm text-muted-foreground">
+                  Nenhuma cidade cadastrada — criar cidade é manual, via SQL.
+                </p>
+              }
+              aoRecarregar={() => void consultaCidades.refetch()}
             >
-              <option value="" disabled>
-                Selecione…
-              </option>
-              {cidades?.map((cidade) => (
-                <option key={cidade.id} value={cidade.id}>
-                  {rotuloCidade(cidade)}
-                </option>
-              ))}
-            </select>
+              {(cidades, habilitado) => (
+                <select
+                  id="agencia-cidade"
+                  disabled={!habilitado}
+                  className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 md:text-sm dark:bg-input/30"
+                  value={cidadeId}
+                  onChange={(e) => setCidadeId(e.target.value)}
+                >
+                  <option value="" disabled>
+                    Selecione…
+                  </option>
+                  {cidades?.map((cidade) => (
+                    <option key={cidade.id} value={cidade.id}>
+                      {rotuloCidade(cidade)}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </CampoDependente>
             <p className="text-xs text-foreground/70">
               Ela só vai aparecer para as filiais desta cidade.
             </p>

@@ -13,7 +13,8 @@ import { Paginacao, ResumoPagina } from '@/components/Paginacao'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Button } from '@/components/ui/button'
-import { Carregando } from '@/components/EmAndamento'
+import { Consulta } from '@/components/Consulta'
+import { derivarEstado } from '@/lib/estadoDeConsulta'
 
 const SELECT_CLASSNAME =
   'h-9 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -23,7 +24,8 @@ export function HistoricoEntregas({ profile }: { profile: AuthProfile }) {
   const [filtros, setFiltros] = useState<FiltrosHistorico>(FILTROS_HISTORICO_VAZIOS)
   const [pagina, setPagina] = useState(1)
 
-  const { data, isLoading, isError, error, isFetching } = useHistoricoEntregas(filtros, pagina)
+  const consulta = useHistoricoEntregas(filtros, pagina)
+  const estado = derivarEstado(consulta)
   const { data: lojas } = useLojas()
 
   // Caixa já é preso à própria loja pela RLS — o select só faz sentido pra
@@ -51,8 +53,10 @@ export function HistoricoEntregas({ profile }: { profile: AuthProfile }) {
     aplicarFiltros()
   }
 
-  const total = data?.total ?? 0
-  const totalPaginas = data?.totalPaginas ?? 1
+  // `data?.total ?? 0` e `data?.totalPaginas ?? 1` saíram daqui: eram
+  // valores INVENTADOS pra quando a consulta não respondeu, e um "0
+  // resultados" fabricado é a afirmação que esta tela não pode fazer. Os
+  // números reais são lidos dentro do `ready`, onde existem.
 
   return (
     <div className="flex flex-col gap-4">
@@ -148,20 +152,33 @@ export function HistoricoEntregas({ profile }: { profile: AuthProfile }) {
         </Button>
       </div>
 
-      {isLoading && <Carregando />}
-      {isError && <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>}
-      {!isLoading && !isError && (
-        <>
-          <ResumoPagina
-            pagina={pagina}
-            tamanhoPagina={TAMANHO_PAGINA_HISTORICO}
-            total={total}
-            atualizando={isFetching}
-          />
-          <EntregasTable entregas={data?.entregas ?? []} profile={profile} mostrarData />
-          <Paginacao pagina={pagina} totalPaginas={totalPaginas} onIr={setPagina} />
-        </>
-      )}
+      {/* A BUSCA SÓ PODE CONCLUIR SOBRE DADO CONHECIDO.
+
+          Aqui o filtro roda no SERVIDOR (`like` sobre `cliente_nome_busca`,
+          a coluna gerada do E1.1), então `ready` já quer dizer "o servidor
+          respondeu PARA ESTA BUSCA" — e é só de dentro dele que
+          `EntregasTable` pode dizer "Nenhum vale encontrado".
+
+          Sem isto o E1.1 era desfeito por outra porta: ele existe porque
+          "resultado vazio é indistinguível de não existe cadastro, a pior
+          forma de errar numa busca" — e offline a tela voltava a dizer
+          exatamente isso, agora por falta de resposta em vez de por
+          acento. A frase de indisponível não fala da busca, fala da
+          consulta, que é a verdade. */}
+      <Consulta estado={estado} aoRecarregar={() => void consulta.refetch()}>
+        {(resultado) => (
+          <>
+            <ResumoPagina
+              pagina={pagina}
+              tamanhoPagina={TAMANHO_PAGINA_HISTORICO}
+              total={resultado.total}
+              atualizando={consulta.isFetching}
+            />
+            <EntregasTable entregas={resultado.entregas} profile={profile} mostrarData />
+            <Paginacao pagina={pagina} totalPaginas={resultado.totalPaginas} onIr={setPagina} />
+          </>
+        )}
+      </Consulta>
     </div>
   )
 }

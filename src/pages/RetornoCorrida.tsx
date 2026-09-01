@@ -48,6 +48,7 @@ import { useOnline } from '@/lib/useOnline'
 import { rotuloDoPapelNoMomento } from '@/lib/papeis'
 import { FORMA_PAGAMENTO_LABEL } from '@/data/pagamentos'
 import { INSUCESSO_MOTIVO_LABEL } from '@/data/corridas'
+import { mensagemDeErro } from '@/lib/supabase'
 import { uuidv7 } from '@/lib/uuid'
 import { centsFromDigits, formatBRL } from '@/lib/money'
 import { CampoMoeda } from '@/components/CampoMoeda'
@@ -59,6 +60,8 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Carregando, EmAndamento } from '@/components/EmAndamento'
+import { Consulta, AvisoDaConsulta } from '@/components/Consulta'
+import { apresentar, derivarEstado, type Procedencia } from '@/lib/estadoDeConsulta'
 import { normalizarParagrafo } from '@/lib/texto'
 
 // =====================================================================
@@ -105,11 +108,13 @@ export function RetornoCorrida({
   profile: AuthProfile
   onVoltar: () => void
 }) {
-  const { data: abertas, isLoading, isError, error } = useCorridasAbertas()
+  const consultaCorridas = useCorridasAbertas()
+  const estadoCorridas = derivarEstado(consultaCorridas)
   const fila = useFilaOperacoesPendentes()
-  // Só pra EXIBIÇÃO — quem decide o caminho lê navigator.onLine na hora
-  // da ação. Ver a nota em lib/useOnline.ts.
-  const online = useOnline()
+  // O `useOnline()` saiu daqui: ele existia só pra escolher entre duas
+  // frases de "não carregou", e essa escolha agora é do derivador. O
+  // componente de baixo tem o dele, que serve pra outra coisa — decidir
+  // o rótulo do CTA de concluir.
   const [corridaId, setCorridaId] = useState<string | null>(null)
   const [aviso, setAviso] = useState<string | null>(null)
 
@@ -117,7 +122,13 @@ export function RetornoCorrida({
   // OFERECIDA. Não é proteção de integridade — quem impede o dano é o
   // `UNIQUE (corrida_id, tipo)` — é custo: sem isto o caixa colheria
   // duas assinaturas pra descobrir depois que só uma delas pode selar.
-  const corridas = abertas ? filtrarCorridasRetornaveis(abertas, fila) : abertas
+  //
+  // `undefined` quando a consulta não respondeu, e é isso que separa
+  // "não há corrida aberta" de "não sei quais estão abertas".
+  const corridas =
+    estadoCorridas.estado === 'ready'
+      ? filtrarCorridasRetornaveis(estadoCorridas.dados, fila)
+      : undefined
 
   // Baixa o contexto das corridas abertas ENQUANTO HÁ REDE. O retorno
   // acontece no fim da tarde, no balcão, e a 2C permite registrá-lo sem
@@ -156,30 +167,6 @@ export function RetornoCorrida({
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-3">
-            {isLoading && <Carregando />}
-            {isError && (
-              <p className="text-sm text-destructive">Não consegui carregar: {error.message}</p>
-            )}
-            {!isLoading && corridas?.length === 0 && (
-              // "Nenhuma corrida em aberto" é uma AFIRMAÇÃO sobre o
-              // mundo, e sem lista carregada ela é mentira. A lista vem
-              // do servidor e NÃO fica salva — o cache do TanStack
-              // segura enquanto a aba viver, mas um F5 offline não tem
-              // de onde tirá-la.
-              //
-              // É o mesmo defeito que a Nova Corrida já pagou (§50.2), e
-              // ele aparece justamente no pior momento: sem rede, com o
-              // motoboy no balcão. O contexto de CADA corrida está
-              // cacheado — o que falta é saber QUAIS estão abertas, e
-              // isso muda no servidor.
-              <p className="text-sm text-muted-foreground">
-                {abertas === undefined || isError
-                  ? online
-                    ? 'Não consegui carregar as corridas. Tenta de novo em instantes.'
-                    : 'Sem internet e sem a lista carregada — quais corridas estão abertas vem do servidor e não fica salvo neste computador. Abra esta tela com internet antes de precisar dela offline.'
-                  : 'Nenhuma corrida em aberto agora.'}
-              </p>
-            )}
             {aviso && (
               <div className="rounded-lg border border-emerald-500/40 bg-emerald-50 p-3 text-sm dark:bg-emerald-950/40">
                 <p>{aviso}</p>
@@ -188,7 +175,24 @@ export function RetornoCorrida({
                 </Button>
               </div>
             )}
-            {corridas?.map((corrida) => (
+            {/* Mesma história da Nova Corrida (§50.2): "nenhuma corrida
+                em aberto" é afirmação sobre o MUNDO, e sem lista
+                carregada ela é mentira. O raciocínio estava certo aqui e
+                escrito à mão; agora sai do derivador, num lugar só.
+
+                O `estaVazio` é próprio porque a lista exibida é filtrada
+                pela fila local: uma corrida com retorno pendente some
+                sem a consulta ter mudado. */}
+            <Consulta
+              estado={estadoCorridas}
+              estaVazio={(todas) => filtrarCorridasRetornaveis(todas, fila).length === 0}
+              vazio={
+                <p className="text-sm text-muted-foreground">Nenhuma corrida em aberto agora.</p>
+              }
+              aoRecarregar={() => void consultaCorridas.refetch()}
+            >
+              {(todas: CorridaAberta[]) =>
+                filtrarCorridasRetornaveis(todas, fila).map((corrida) => (
               <button
                 key={corrida.id}
                 type="button"
@@ -222,7 +226,9 @@ export function RetornoCorrida({
                   ))}
                 </span>
               </button>
-            ))}
+                ))
+              }
+            </Consulta>
           </div>
         </CardContent>
       </Card>
@@ -249,7 +255,15 @@ function RetornoDaCorrida({
   onVoltar: () => void
   onConcluido: (texto: string) => void
 }) {
-  const { data, isLoading } = useContextoRetorno(corrida.id)
+  const consultaContexto = useContextoRetorno(corrida.id)
+
+  // ACHATAMENTO, e ele é honesto: esta consulta resolve a própria
+  // disponibilidade, porque tem um cache local que o TanStack não
+  // conhece — ela nunca lança, então o estado externo é sempre `ready`
+  // depois da primeira resposta. O que o externo ainda diz é o intervalo
+  // ANTES dela (loading) e o caso de a query nem correr (inactive).
+  const externo = derivarEstado(consultaContexto)
+  const estado = externo.estado === 'ready' ? externo.dados : externo
 
   const moldura = (conteudo: React.ReactNode) => (
     <div className="mx-auto max-w-3xl">
@@ -265,35 +279,39 @@ function RetornoDaCorrida({
     </div>
   )
 
-  if (isLoading || !data || data.estado === 'carregando') return moldura(<Carregando />)
+  if (estado.estado !== 'ready') {
+    return moldura(
+      estado.estado === 'loading' || estado.estado === 'inactive' ? (
+        <Carregando />
+      ) : (
+        <div className="flex flex-col gap-1">
+          <AvisoDaConsulta
+            apresentacao={apresentar(estado)}
+            aoRecarregar={() => void consultaContexto.refetch()}
+          />
+          {estado.estado === 'unavailable' && (
+            <p className="text-xs text-foreground/70">
+              O retorno é montado a partir do que o motoboy assinou ao sair, e isso não pode ser
+              reconstruído aqui. Abra esta tela com internet uma vez — depois disso ela funciona
+              offline.
+            </p>
+          )}
+        </div>
+      )
+    )
+  }
 
-  if (data.estado === 'indisponivel_offline') {
-    return moldura(
-      <p className="text-sm text-amber-700 dark:text-amber-400">
-        Sem internet e sem o documento da saída guardado neste computador. O retorno é montado a
-        partir do que o motoboy assinou ao sair, e isso não pode ser reconstruído aqui. Abra esta
-        tela com internet uma vez — depois disso ela funciona offline.
-      </p>
-    )
-  }
-  if (data.estado === 'nao_encontrado') {
-    return moldura(
-      <p className="text-sm text-muted-foreground">
-        Esta corrida não tem Romaneio de Saída selado, então não há documento a fechar. Corridas
-        criadas antes da cadeia de custódia estão nessa situação.
-      </p>
-    )
-  }
-  if (data.estado === 'erro') {
-    return moldura(
-      <p className="text-sm text-destructive">Não consegui carregar: {data.erro.message}</p>
-    )
+  // RECUSA: o servidor respondeu que esta corrida não tem saída selada.
+  // Antes isto era um estado irmão de `erro` e de `indisponivel_offline`;
+  // agora só é alcançável de dentro de uma resposta, que é o que ele é.
+  if (estado.dados.veredito === 'recusado') {
+    return moldura(<p className="text-sm text-muted-foreground">{estado.dados.mensagem}</p>)
   }
 
   return (
     <FluxoDeRetorno
-      contexto={data.contexto}
-      origem={data.origem}
+      contexto={estado.dados.valor}
+      procedencia={estado.procedencia}
       corrida={corrida}
       profile={profile}
       onVoltar={onVoltar}
@@ -345,14 +363,14 @@ type Resultado =
 
 function FluxoDeRetorno({
   contexto,
-  origem,
+  procedencia,
   corrida,
   profile,
   onVoltar,
   onConcluido,
 }: {
   contexto: ContextoRetorno
-  origem: 'servidor' | 'cache'
+  procedencia: Procedencia
   corrida: CorridaAberta
   profile: AuthProfile
   onVoltar: () => void
@@ -576,7 +594,7 @@ function FluxoDeRetorno({
         )
         return
       }
-      setErro(e instanceof Error ? e.message : String(e))
+      setErro(mensagemDeErro(e))
     } finally {
       setOcupado(null)
     }
@@ -602,7 +620,10 @@ function FluxoDeRetorno({
     setErro(null)
     const limpo = valor.trim()
     if (!publicIdDoToken(limpo)) {
-      setErro('Isso não parece um cartão do sistema. Bipa de novo.')
+      despachar({
+        tipo: 'CARTAO_RECUSADO',
+        mensagem: 'Isso não parece um cartão do sistema. Bipa de novo.',
+      })
       return
     }
     setOcupado('bipando')
@@ -612,11 +633,18 @@ function FluxoDeRetorno({
         : await identificarNoCache(limpo)
 
       if (!achada) {
-        despachar({ tipo: 'CARTAO_RECUSADO' })
-        setErro(
+        // ONLINE isto é RECUSA: o servidor respondeu que o token não
+        // existe. OFFLINE é outra coisa — o cache local é a única fonte,
+        // e ele não conhecer o cartão não prova que ele seja inválido.
+        // O texto diz qual dos dois, e o estado também.
+        despachar(
           navigator.onLine
-            ? 'Credencial não reconhecida.'
-            : 'Cartão desconhecido neste computador. Sem internet, só dá pra reconhecer cartões que já apareceram aqui antes.'
+            ? { tipo: 'CARTAO_RECUSADO', mensagem: 'Credencial não reconhecida.' }
+            : {
+                tipo: 'FALHA_NA_CONSULTA',
+                mensagem:
+                  'Cartão desconhecido neste computador. Sem internet, só dá pra reconhecer cartões que já apareceram aqui antes — isso não quer dizer que o cartão seja inválido.',
+              }
         )
         return
       }
@@ -626,10 +654,10 @@ function FluxoDeRetorno({
       // errado, e a transação recusaria `outro_motoboy` depois de duas
       // assinaturas.
       if (achada.motoboyId !== contexto.motoboyId) {
-        despachar({ tipo: 'CARTAO_RECUSADO' })
-        setErro(
-          `Este cartão é de ${achada.motoboyNome}, e esta corrida saiu com ${contexto.motoboyNome ?? 'outro motoboy'}. Quem devolve a corrida é quem a levou.`
-        )
+        despachar({
+          tipo: 'CARTAO_RECUSADO',
+          mensagem: `Este cartão é de ${achada.motoboyNome}, e esta corrida saiu com ${contexto.motoboyNome ?? 'outro motoboy'}. Quem devolve a corrida é quem a levou.`,
+        })
         return
       }
 
@@ -640,7 +668,21 @@ function FluxoDeRetorno({
         motoboyId: achada.motoboyId,
       })
     } catch (e) {
-      setErro(e instanceof Error ? e.message : String(e))
+      // ANTES ESTE `catch` NÃO DESPACHAVA NADA. A máquina ficava em
+      // `aguardando_cartao` — como se nada tivesse sido tentado — com
+      // um texto vermelho de erro no ar, vindo do canal paralelo. As
+      // duas fontes descreviam momentos diferentes, e nenhuma das duas
+      // era a autoridade.
+      // O TÉCNICO VAI PRO CONSOLE, O BALCÃO RECEBE UMA FRASE.
+      // `mensagemDeErro` junta message + details, e num erro de rede do
+      // supabase o `details` é a STACK — o caixa via um stack trace na
+      // tela. Perder o detalhe seria o §80 de novo, então ele continua
+      // existindo, só que onde se depura.
+      console.error('identificar credencial falhou:', e)
+      despachar({
+        tipo: 'FALHA_NA_CONSULTA',
+        mensagem: 'Não consegui consultar a credencial agora.',
+      })
     } finally {
       setOcupado(null)
     }
@@ -677,20 +719,30 @@ function FluxoDeRetorno({
     try {
       const autorizacao = await autorizarSaida(token, pin, congelado.documentHash)
       if (!autorizacao.ok) {
-        despachar({ tipo: 'PIN_RECUSADO' })
-        setErro(
-          autorizacao.motivo === 'pin_incorreto'
-            ? 'PIN incorreto.'
-            : autorizacao.motivo === 'bloqueado'
-              ? 'Credencial bloqueada por tentativas seguidas de PIN incorreto.'
-              : 'Não consegui autenticar o motoboy.'
-        )
+        // RECUSA: o servidor conferiu e disse não.
+        despachar({
+          tipo: 'PIN_RECUSADO',
+          mensagem:
+            autorizacao.motivo === 'pin_incorreto'
+              ? 'PIN incorreto.'
+              : autorizacao.motivo === 'bloqueado'
+                ? 'Credencial bloqueada por tentativas seguidas de PIN incorreto.'
+                : 'Não consegui autenticar o motoboy.',
+        })
         return
       }
       setExpiraEm(autorizacao.expiraEm)
       despachar({ tipo: 'PIN_AUTORIZADO', autorizacaoId: autorizacao.autorizacaoId })
     } catch (e) {
-      setErro(e instanceof Error ? e.message : String(e))
+      // FALHA, não recusa. `PIN_RECUSADO` apagaria os segredos e diria
+      // ao caixa que o motoboy errou o PIN; a falha na consulta diz que
+      // a tentativa não completou, que é o que de fato aconteceu — e
+      // deixa a máquina onde está, com o próximo passo intacto.
+      console.error('autorizar saída falhou:', e)
+      despachar({
+        tipo: 'FALHA_NA_CONSULTA',
+        mensagem: 'Não consegui conferir o PIN agora.',
+      })
     } finally {
       if (pinRef.current) pinRef.current.value = ''
       setPinCompleto(false)
@@ -785,7 +837,11 @@ function FluxoDeRetorno({
         despachar({ tipo: 'ENFILEIRADO' })
         setResultado({ kind: 'offline' })
       } catch (e) {
-        setErro(e instanceof Error ? e.message : String(e))
+        // Também não despachava nada: a máquina ficava em
+        // `enfileirando` pra sempre enquanto uma string vermelha
+        // aparecia. O caixa via "registrando…" travado sem saber que
+        // tinha falhado.
+        despachar({ tipo: 'ERRO_REDE', mensagem: mensagemDeErro(e) })
       } finally {
         setOcupado(null)
       }
@@ -911,9 +967,17 @@ function FluxoDeRetorno({
             )}
             <Badge variant="outline">Saída {contexto.saidaNumero}</Badge>
           </CardTitle>
-          {origem === 'cache' && (
+          {/* A procedência do documento da saída, e agora ela distingue
+              os DOIS casos de cache que a consulta já separava e o
+              `origem: 'cache'` colapsava: estar sem rede é diferente de
+              a chamada ter falhado com rede disponível. Quem depura "por
+              que este vale não aparece" precisa saber qual foi. */}
+          {procedencia !== 'servidor' && (
             <p className="text-xs text-foreground/70">
-              Documento da saída lido do que estava guardado neste computador.
+              Documento da saída lido do que estava guardado neste computador
+              {procedencia === 'cache_apos_falha'
+                ? ' — não consegui falar com o servidor agora.'
+                : ' — sem internet no momento.'}
             </p>
           )}
         </CardHeader>
@@ -1038,6 +1102,35 @@ function FluxoDeRetorno({
             </p>
           )}
 
+          {/* A FALHA SAI DA MÁQUINA, e a cor sai do NOME DO ESTADO.
+              Antes o motivo vinha de um `erro: string | null` paralelo, e
+              nada amarrava os dois: o `catch` escrevia a string SEM
+              despachar nada, então a máquina dizia `aguardando_cartao` e
+              a tela mostrava um erro. Agora há uma fonte só.
+
+              `cartao_recusado` e `pin_recusado` acusam (vermelho de
+              recusa); `erro_rede` não acusa ninguém (âmbar de aviso), e
+              acrescenta que a tentativa é que falhou. */}
+          {custodia?.mensagem && (
+            <div className="flex flex-col gap-1">
+              <p
+                className={
+                  custodia.mensagem.tipo === 'falha'
+                    ? 'text-sm text-amber-700 dark:text-amber-400'
+                    : 'text-sm text-destructive'
+                }
+              >
+                {custodia.mensagem.texto}
+              </p>
+              {custodia.mensagem.tipo === 'falha' && (
+                <p className="text-xs text-foreground/70">
+                  A tentativa é que não completou — nada foi recusado. Tentar de novo não conta
+                  como erro pro motoboy.
+                </p>
+              )}
+            </div>
+          )}
+
           <div className="flex flex-wrap items-center justify-between gap-3 border-t pt-4">
             <div className="text-sm">
               <p>
@@ -1065,6 +1158,11 @@ function FluxoDeRetorno({
             </Button>
           </div>
 
+          {/* O QUE SOBROU AQUI É VALIDAÇÃO LOCAL, e só ela: formato do
+              PIN, assinatura faltando, chave de ambiente ausente. Nada
+              disso é resposta de ninguém — são conferências feitas antes
+              de qualquer transição, e a máquina nem chega a ser tocada.
+              Recusa, indisponibilidade e falha vivem no bloco acima. */}
           {erro && <p className="text-sm text-destructive">{erro}</p>}
         </CardContent>
       </Card>

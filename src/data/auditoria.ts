@@ -1,6 +1,10 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { FORMA_PAGAMENTO_LABEL, type FormaPagamento } from '@/data/pagamentos'
+import {
+  textoDoPagamentoAlterado,
+  textoDaReferenciaInformada,
+  type LadoDoPagamentoAlterado,
+} from '@/data/pagamentos'
 import { formatBRL } from '@/lib/money'
 import type { FiltroPeriodo } from '@/data/relatorios'
 
@@ -134,12 +138,17 @@ function resumoEDetalhe(row: EventoAuditoriaRow): { resumo: string; detalhe: str
     case 'status_alterado':
       return { resumo: resumoStatusAlterado(row.payload.de, row.payload.para), detalhe: null }
     case 'pagamento_alterado': {
-      const de = FORMA_PAGAMENTO_LABEL[row.payload.de as FormaPagamento] ?? row.payload.de
-      const paraRaw = row.payload.para as FormaPagamento | Array<{ forma: FormaPagamento; valor_cents: number }>
-      const para = Array.isArray(paraRaw)
-        ? paraRaw.map((p) => `${FORMA_PAGAMENTO_LABEL[p.forma] ?? p.forma} (${formatBRL(p.valor_cents)})`).join(' + ')
-        : (FORMA_PAGAMENTO_LABEL[paraRaw] ?? paraRaw)
-      return { resumo: `Era ${de}, virou ${para}`, detalhe: row.payload.justificativa ?? null }
+      // Os DOIS lados aceitam string (histórico) ou lista (hoje) — ver a
+      // nota em `pagamentos.ts`. Aqui só se lê; a normalização mora lá,
+      // num lugar só, porque esta era a segunda cópia dela.
+      const de = textoDoPagamentoAlterado(row.payload.de as LadoDoPagamentoAlterado)
+      const para = textoDoPagamentoAlterado(row.payload.para as LadoDoPagamentoAlterado)
+      // E4.1 — ver a nota gêmea em `notificacoes.ts`. `de` é estado
+      // PERSISTIDO; a referência informada é declaração de uma pessoa, e
+      // as duas não podem se parecer no Registro de Auditoria.
+      const informado = textoDaReferenciaInformada(row.payload)
+      const ladoAnterior = informado ? `${de} (${informado})` : de
+      return { resumo: `Era ${ladoAnterior}, virou ${para}`, detalhe: row.payload.justificativa ?? null }
     }
     case 'falta_receita':
       return { resumo: 'Receita não retornou com o motoboy', detalhe: row.payload.justificativa ?? null }

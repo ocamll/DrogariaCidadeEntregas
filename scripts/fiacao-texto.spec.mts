@@ -36,9 +36,63 @@ function checa(nome: string, condicao: boolean, extra = '') {
   if (!condicao) falhas++
 }
 
-const ler = (caminho: string) => readFileSync(caminho, 'utf8')
+/**
+ * TODA ASSERÇÃO DE FIAÇÃO LÊ O CÓDIGO, NUNCA A PROSA — por isso `ler`
+ * tira os comentários antes de devolver o fonte.
+ *
+ * Isto entrou no E4 (2026-08-27), depois de a armadilha morder de dois
+ * jeitos no mesmo dia:
+ *
+ *   - uma asserção NEGATIVA falhou casando com o comentário que
+ *     explicava a regra recém-removida — barulho, mas inofensivo;
+ *   - uma asserção POSITIVA do E3.C **passou depois de o campo que ela
+ *     protegia ter sido removido**, casando com o comentário que
+ *     explicava a remoção. Um teste afirmando que uma proteção existe
+ *     depois de ela sair é pior que um teste que grita à toa.
+ *
+ * E o incentivo estava do lado errado, que é o que mais importa num
+ * projeto que comenta tanto quanto este: **quanto melhor documentada a
+ * regra, mais provável o falso resultado.** Documentar não pode custar
+ * um teste.
+ *
+ * Nenhuma asserção deste arquivo pergunta sobre comentário. Se um dia
+ * alguma precisar, ela usa `lerBruto` e diz por quê.
+ */
+const lerBruto = (caminho: string) => readFileSync(caminho, 'utf8')
+const semComentarios = (fonte: string) =>
+  fonte.replace(/\/\*[\s\S]*?\*\//g, '').replace(/^[ \t]*\/\/.*$/gm, '')
+const ler = (caminho: string) => semComentarios(lerBruto(caminho))
 const importa = (fonte: string) => /from '@\/lib\/texto'/.test(fonte)
 const CHAMADA = /normalizar(Linha|Nome|Paragrafo)\s*\(/g
+
+// ---------------------------------------------------------------------
+// (0) O CONTROLE NEGATIVO DO PRÓPRIO INSTRUMENTO
+//
+// Ligar o `semComentarios` não mudou uma linha da saída deste spec —
+// medido. Só que saída idêntica prova que nada QUEBROU, não que a
+// proteção MORDE. Sem isto, um `semComentarios` que devolvesse o fonte
+// intacto passaria despercebido pra sempre, e a armadilha voltaria a
+// ficar armada com um comentário tranquilizador por cima.
+// ---------------------------------------------------------------------
+console.log('\n--- (0) o instrumento: comentário não conta como código ---')
+{
+  const comLinha = "const x = 1\n// aqui alguém explica que normalizarNome(nome) saiu\n"
+  const comBloco = "const y = 2\n{/* normalizarNome(nome) foi removido daqui */}\n"
+
+  checa('o fonte CRU acusaria a chamada num comentário de linha',
+    /normalizarNome\(/.test(comLinha))
+  checa('e o limpo NÃO', !/normalizarNome\(/.test(semComentarios(comLinha)))
+
+  checa('idem no bloco JSX, que é como as telas comentam',
+    /normalizarNome\(/.test(comBloco) && !/normalizarNome\(/.test(semComentarios(comBloco)))
+
+  // E o que ele NÃO pode fazer: comer código de verdade.
+  checa('mas o código em volta continua inteiro',
+    semComentarios(comLinha).includes('const x = 1') &&
+      semComentarios(comBloco).includes('const y = 2'))
+  checa('e a chamada de VERDADE continua sendo vista',
+    /normalizarNome\(/.test(semComentarios('const n = normalizarNome(nome)')))
+}
 
 // ---------------------------------------------------------------------
 // (1) OS PONTOS DE ENTRADA — todos ligados

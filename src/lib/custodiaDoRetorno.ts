@@ -249,6 +249,31 @@ export type EstadoCustodia = {
   motoboyStrokes: Carimbada<unknown> | null
   /** Por que a custódia foi recolhida, quando foi. A tela precisa dizer. */
   motivoDoRecolhimento: string | null
+  /**
+   * O QUE A TELA MOSTRA sobre a última tentativa, e de que NATUREZA ela
+   * foi. As duas juntas, porque separá-las foi o defeito original.
+   *
+   * Existe desde o E2.3 (lote D) porque antes ele NÃO existia, e o
+   * motivo acabava num `erro: string | null` paralelo ao lado da
+   * máquina. Duas fontes pro mesmo fato: a máquina dizia
+   * `cartao_recusado` e a string dizia por quê, e nada garantia que as
+   * duas estivessem falando do mesmo evento — o `catch` dos handlers,
+   * por exemplo, escrevia a string e NÃO despachava nada, então a
+   * máquina ficava em `aguardando_cartao` com um texto de erro no ar.
+   *
+   * Distinto de `motivoDoRecolhimento`: aquele explica por que a
+   * custódia foi DESFEITA (e `pin_recusado` não desfaz nada — o cartão
+   * lido continua válido).
+   *
+   * `tipo` existe porque UMA CONSULTA QUE FALHA NÃO MOVE CUSTÓDIA. Uma
+   * recusa é um veredito e muda o estado (`cartao_recusado`); uma falha
+   * de rede na consulta não descobriu nada, então a máquina fica onde
+   * está e só ganha o que dizer. Foi o que a primeira versão deste lote
+   * errou: ela mandava a falha do cartão pra `ERRO_REDE` — que existe
+   * pro passo de CONCLUIR — e `erro_rede` não aceita `CARTAO_LIDO`.
+   * Resultado: beco sem saída, o caixa não conseguia bipar de novo.
+   */
+  mensagem: { texto: string; tipo: 'recusa' | 'falha' } | null
   /** Resultado do conflito, pra tela mostrar o número do romaneio. */
   detalhe: unknown
 }
@@ -256,7 +281,7 @@ export type EstadoCustodia = {
 export type EventoCustodia =
   | { tipo: 'INICIAR' }
   | { tipo: 'CARTAO_LIDO'; publicId: string; motoboyId: string }
-  | { tipo: 'CARTAO_RECUSADO' }
+  | { tipo: 'CARTAO_RECUSADO'; mensagem: string }
   /** Online: o servidor confirmou o PIN e emitiu a autorização. */
   | { tipo: 'PIN_AUTORIZADO'; autorizacaoId: string }
   /**
@@ -265,7 +290,7 @@ export type EventoCustodia =
    * tela é quem o guarda em memória efêmera.
    */
   | { tipo: 'SEGREDOS_CAPTURADOS' }
-  | { tipo: 'PIN_RECUSADO' }
+  | { tipo: 'PIN_RECUSADO'; mensagem: string }
   | { tipo: 'ASSINOU_RESPONSAVEL'; strokes: unknown }
   | { tipo: 'ASSINOU_MOTOBOY'; strokes: unknown }
   /**
@@ -277,6 +302,13 @@ export type EventoCustodia =
   | { tipo: 'CONCLUIR'; online: false; envelope: unknown }
   | { tipo: 'SELADO' }
   | { tipo: 'ENFILEIRADO' }
+  /**
+   * A CONSULTA falhou — cartão ou PIN. NÃO muda `nome`: nada foi
+   * descoberto, então a custódia continua exatamente onde estava e o
+   * próximo passo é o mesmo de antes (bipar de novo, digitar de novo).
+   * O que muda é a máquina passar a ter o que dizer.
+   */
+  | { tipo: 'FALHA_NA_CONSULTA'; mensagem: string }
   | { tipo: 'CONFLITO'; detalhe: unknown }
   /**
    * O selo ONLINE não completou por REDE — não por recusa do servidor.
@@ -284,7 +316,7 @@ export type EventoCustodia =
    * descarta a custódia. Ver `reduzirCustodia`.
    */
   | { tipo: 'FALHA_DE_REDE_NO_SELO' }
-  | { tipo: 'ERRO_REDE' }
+  | { tipo: 'ERRO_REDE'; mensagem: string }
   | { tipo: 'AUTORIZACAO_EXPIROU' }
   /** O motoboy apresentado não é o mesmo. Recolhe tudo. */
   | { tipo: 'TROCAR_MOTOBOY' }
@@ -303,6 +335,7 @@ export function custodiaInicial(documento: DocumentoCongelado): EstadoCustodia {
     responsavelStrokes: null,
     motoboyStrokes: null,
     motivoDoRecolhimento: null,
+    mensagem: null,
     detalhe: null,
   }
 }
@@ -383,8 +416,22 @@ export function reduzirCustodia(
           'assinaturas precisam ser refeitos, para o documento não juntar ' +
           'evidências de dois momentos diferentes'
       )
+    // A CONSULTA FALHOU, E ISSO NÃO MOVE A MÁQUINA.
+    //
+    // Vem junto dos eventos "de qualquer estado" de propósito: bipar ou
+    // digitar o PIN pode falhar em vários pontos, e nenhum deles
+    // descobriu nada — a custódia continua onde estava, e o próximo
+    // passo é o mesmo de antes.
+    //
+    // A primeira versão deste lote mandava a falha do cartão pra
+    // `ERRO_REDE`, que é do passo de CONCLUIR. `erro_rede` não aceita
+    // `CARTAO_LIDO`, então o caixa ficava sem conseguir bipar de novo —
+    // beco sem saída, achado medindo a tela.
+    case 'FALHA_NA_CONSULTA':
+      return { ...estado, mensagem: { texto: evento.mensagem, tipo: 'falha' } }
+
     case 'CARTAO_RECUSADO':
-      return { ...estado, nome: 'cartao_recusado' }
+      return { ...estado, nome: 'cartao_recusado', mensagem: { texto: evento.mensagem, tipo: 'recusa' } }
     case 'PIN_RECUSADO':
       // Não recolhe TUDO: ainda não há assinatura nenhuma, e o caixa vai
       // tentar o PIN de novo. Recolher aqui só apagaria a leitura do
@@ -393,12 +440,17 @@ export function reduzirCustodia(
       // Mas o material em claro SAI. Um PIN recusado é um PIN errado, e
       // não há razão pra ele continuar em memória enquanto o certo é
       // digitado por cima.
-      return { ...estado, nome: 'pin_recusado', segredosCapturados: null }
+      return {
+        ...estado,
+        nome: 'pin_recusado',
+        segredosCapturados: null,
+        mensagem: { texto: evento.mensagem, tipo: 'recusa' },
+      }
     case 'ERRO_REDE':
       // A operação não completou. Offline ela foi pra fila; online não
       // há envelope pra mandar, e a saída é refazer a autenticação —
       // nunca inventar um envelope sem PIN. Não recolhe.
-      return { ...estado, nome: 'erro_rede' }
+      return { ...estado, nome: 'erro_rede', mensagem: { texto: evento.mensagem, tipo: 'falha' } }
     case 'CONFLITO':
       // TERMINAL desta tentativa, e NÃO um erro retryable: o servidor
       // preservou a prova de propósito. Sugerir "tente de novo" aqui
@@ -429,6 +481,10 @@ export function reduzirCustodia(
           // entre "credencial reconhecida" e "credencial informada".
           credencial: carimbar(estado, { publicId: evento.publicId, validadaPeloServidor: false }),
           motivoDoRecolhimento: null,
+          // Um PASSO BEM-SUCEDIDO APAGA O QUE O ANTERIOR DISSE. Sem
+          // isto, a mensagem da tentativa que falhou fica na tela
+          // depois de o cartão ser lido — medido no app em 26/08.
+          mensagem: null,
         }
       }
       return estado
@@ -451,6 +507,7 @@ export function reduzirCustodia(
           nome: 'custodia_autorizada',
           autorizacaoId: carimbar(estado, evento.autorizacaoId),
           segredosCapturados: null,
+          mensagem: null,
           credencial: estado.credencial
             ? carimbar(estado, { ...estado.credencial.valor, validadaPeloServidor: true })
             : null,
@@ -472,6 +529,7 @@ export function reduzirCustodia(
           nome: 'segredos_capturados',
           autorizacaoId: null,
           segredosCapturados: carimbar(estado, true),
+          mensagem: null,
         }
       }
       return estado

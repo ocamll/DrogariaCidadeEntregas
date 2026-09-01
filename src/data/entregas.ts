@@ -1,7 +1,11 @@
 import { useEffect } from 'react'
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
-import { criarPagamentoPrevisto, type FormaPagamento } from '@/data/pagamentos'
+import {
+  criarPagamentoPrevisto,
+  type FormaPagamento,
+  type FormaComValor,
+} from '@/data/pagamentos'
 import { inserirEventoIdempotente } from '@/data/eventos'
 import { centsFromDigits } from '@/lib/money'
 import { normalizarParaBusca } from '@/lib/texto'
@@ -21,8 +25,43 @@ import { normalizarParaBusca } from '@/lib/texto'
  */
 const GERAM_DOCUMENTO_FISICO: FormaPagamento[] = ['convenio', 'crediario']
 
+/**
+ * Uma forma de pagamento PREVISTA no cadastro — E4.
+ *
+ * O `pagamentoId` é cunhado por quem monta o payload, antes de
+ * enfileirar, e nunca dentro de `criarEntrega` — é a regra do E3.C, e o
+ * motivo continua o mesmo: `criarPagamentoPrevisto` insere e trata
+ * `23505` como sucesso, o que só é idempotente se o id for O MESMO a
+ * cada reenvio. Cunhado dentro da função, cada oscilação de rede criaria
+ * um previsto novo.
+ *
+ * Antes do E3 o id era derivado da entrega, e era essa derivação que
+ * fazia a segunda forma colidir na PK. O E3 tirou a premissa do modelo;
+ * este tipo é quem passa a usar.
+ */
+export type FormaPrevistaDoCadastro = {
+  pagamentoId: string
+  forma: FormaPagamento
+  valorCents: number
+}
+
 export type NovaEntrega = {
   id: string
+  /**
+   * As formas previstas — UMA OU MAIS, e a soma tem que bater com
+   * `valorCompraCents`.
+   *
+   * Era `formaPagamento: FormaPagamento` + `pagamentoPrevistoId: string`,
+   * que juntos só sabiam descrever um previsto valendo a compra inteira.
+   *
+   * **A validação NÃO acontece aqui nem em `criarEntrega`**, e isso é
+   * deliberado: quem valida é a tela, ANTES de enfileirar
+   * (`validarFormasPrevistas`). Revalidar na sincronização poderia
+   * recusar uma operação que já foi aceita no balcão — e o item iria
+   * pra `erro` e pro backoff pra sempre, que é o pior sintoma conhecido
+   * do projeto (§50.4).
+   */
+  formasPrevistas: FormaPrevistaDoCadastro[]
   tenantId: string
   lojaId: string
   criadoPor: string
@@ -39,7 +78,6 @@ export type NovaEntrega = {
   // que portanto NÃO entra no acerto da farmácia com a agência. É o vale
   // extra do endereço distante — zero quando o convênio banca tudo.
   entregaPagaClienteCents: number
-  formaPagamento: FormaPagamento
   ocorridoEmLocal: string
   convenioId: string | null
   temReceita: boolean
@@ -55,6 +93,33 @@ export type NovaEntrega = {
 // numero_vale só é gerado pelo default na PRIMEIRA vez; num upsert que já
 // existe, o valor antigo é preservado (não regenera).
 export async function criarEntrega(input: NovaEntrega): Promise<{ numeroVale: string }> {
+  // A JANELA DA FILA — E4, e ela é só de desenvolvimento.
+  //
+  // Um item enfileirado ANTES do E4 traz `formaPagamento` +
+  // `pagamentoPrevistoId` (ou nem isso, se for anterior ao E3.C) e não
+  // traz `formasPrevistas`. O tipo governa o que se escreve de agora em
+  // diante; o `??` tolera o que já está no IndexedDB de alguém.
+  //
+  // Ela sobe pro TOPO da função porque `status_documental` agora depende
+  // dela — antes o previsto só era tocado depois do upsert.
+  //
+  // Morre no corte pré-V1, que apaga a fila.
+  const legado = input as unknown as {
+    formaPagamento?: FormaPagamento
+    pagamentoPrevistoId?: string
+  }
+  const formas: FormaPrevistaDoCadastro[] =
+    input.formasPrevistas ??
+    (legado.formaPagamento
+      ? [
+          {
+            pagamentoId: legado.pagamentoPrevistoId ?? input.id,
+            forma: legado.formaPagamento,
+            valorCents: input.valorCompraCents,
+          },
+        ]
+      : [])
+
   const { data, error } = await supabase
     .from('entregas')
     .upsert({
@@ -85,7 +150,18 @@ export async function criarEntrega(input: NovaEntrega): Promise<{ numeroVale: st
       // com ninguém. A regra é a mesma que
       // `romaneio_documentos_esperados` usa no servidor, e as duas
       // precisam continuar concordando.
-      status_documental: GERAM_DOCUMENTO_FISICO.includes(input.formaPagamento)
+      //
+      // `.some()` e não `.includes()` — E4. BASTA UMA das formas
+      // previstas gerar papel pra o vale nascer com pendência
+      // documental: um pagamento metade convênio, metade dinheiro emite
+      // o documento do convênio do mesmo jeito.
+      //
+      // É exatamente o que o servidor faz. `romaneio_documentos_esperados`
+      // varre TODAS as linhas `p` do canônico assinado e devolve
+      // `distinct (entrega_id, tipo_documento)` — as duas regras
+      // continuam concordando, e divergirem faria o retorno recusar
+      // `documentos_nao_conferem` depois de colhidas duas assinaturas.
+      status_documental: formas.some((f) => GERAM_DOCUMENTO_FISICO.includes(f.forma))
         ? 'pendente'
         : 'nao_aplica',
       tem_receita: input.temReceita,
@@ -96,15 +172,24 @@ export async function criarEntrega(input: NovaEntrega): Promise<{ numeroVale: st
   if (error) throw error
   const row = data as unknown as { numero_vale: string }
 
-  await criarPagamentoPrevisto({
-    id: input.id,
-    tenantId: input.tenantId,
-    entregaId: input.id,
-    forma: input.formaPagamento,
-    valorCents: input.valorCompraCents,
-    registradoPor: input.criadoPor,
-    registradoEmLocal: input.ocorridoEmLocal,
-  })
+  // SEQUENCIAL, não `Promise.all` — E4.
+  //
+  // Não é medo de concorrência: cada insert é independente e idempotente
+  // por id próprio. É que uma falha no meio de um lote paralelo deixa um
+  // subconjunto ARBITRÁRIO gravado, e o reenvio da fila teria que
+  // reconciliar isso; em série o estado parcial é sempre um PREFIXO, e
+  // reenviar completa de onde parou. O volume é 1 a 3 linhas.
+  for (const forma of formas) {
+    await criarPagamentoPrevisto({
+      id: forma.pagamentoId,
+      tenantId: input.tenantId,
+      entregaId: input.id,
+      forma: forma.forma,
+      valorCents: forma.valorCents,
+      registradoPor: input.criadoPor,
+      registradoEmLocal: input.ocorridoEmLocal,
+    })
+  }
 
   return { numeroVale: row.numero_vale }
 }
@@ -260,7 +345,19 @@ export type EntregaRecente = {
   valorEntregaCents: number
   statusEntrega: string
   ocorridoEmLocal: string
-  formaPrevista: FormaPagamento | null
+  /**
+   * TODAS as formas previstas — E4. Era `formaPrevista`, singular, via
+   * `.find(p => p.momento === 'previsto')`, e essa era a dívida que o
+   * E3 registrou como BLOQUEANTE: ela só passa a mentir quando existe um
+   * segundo previsto, e quem cria o segundo é o E4.
+   *
+   * `FormaComValor` (snake_case) e não um tipo camelCase próprio, contra
+   * a convenção do projeto e de propósito: esta lista alimenta o `de` do
+   * evento `pagamento_alterado`, que é jsonb com essa forma exata.
+   * Converter na fronteira criaria mais uma cópia do mesmo conversor —
+   * o defeito que o §65 documentou tendo achado TRÊS.
+   */
+  formasPrevistas: FormaComValor[]
   formasRealizadas: FormaPagamento[]
   temReceita: boolean
   receitaRecebidaEm: string | null
@@ -277,7 +374,7 @@ export type EntregaRecente = {
 // devolve PGRST201 por ambiguidade — o mesmo erro que o embed de lojas
 // deu no Registro de Auditoria.
 const ENTREGA_RECENTE_SELECT =
-  'id, numero_vale, tipo, cliente_nome, cliente_endereco, valor_compra_cents, valor_entrega_cents, status_entrega, ocorrido_em_local, tem_receita, receita_recebida_em, criado_por, profiles!entregas_criado_por_fkey(nome), pagamentos(forma, momento)'
+  'id, numero_vale, tipo, cliente_nome, cliente_endereco, valor_compra_cents, valor_entrega_cents, status_entrega, ocorrido_em_local, tem_receita, receita_recebida_em, criado_por, profiles!entregas_criado_por_fkey(nome), pagamentos(forma, momento, valor_cents)'
 
 type EntregaRecenteRow = {
   id: string
@@ -293,7 +390,15 @@ type EntregaRecenteRow = {
   receita_recebida_em: string | null
   criado_por: string
   profiles: { nome: string } | null
-  pagamentos: Array<{ forma: FormaPagamento; momento: 'previsto' | 'realizado' }>
+  // `valor_cents` entrou no E4: o `de` do evento `pagamento_alterado`
+  // carrega valor por forma, e sem ele o dialog de divergência teria que
+  // inventar um número ou omiti-lo — e inventar é o defeito que este
+  // projeto já pagou três vezes.
+  pagamentos: Array<{
+    forma: FormaPagamento
+    momento: 'previsto' | 'realizado'
+    valor_cents: number
+  }>
 }
 
 function mapEntregaRecente(row: EntregaRecenteRow): EntregaRecente {
@@ -307,7 +412,9 @@ function mapEntregaRecente(row: EntregaRecenteRow): EntregaRecente {
     valorEntregaCents: row.valor_entrega_cents,
     statusEntrega: row.status_entrega,
     ocorridoEmLocal: row.ocorrido_em_local,
-    formaPrevista: row.pagamentos.find((p) => p.momento === 'previsto')?.forma ?? null,
+    formasPrevistas: row.pagamentos
+      .filter((p) => p.momento === 'previsto')
+      .map((p) => ({ forma: p.forma, valor_cents: p.valor_cents })),
     formasRealizadas: row.pagamentos.filter((p) => p.momento === 'realizado').map((p) => p.forma),
     temReceita: row.tem_receita,
     receitaRecebidaEm: row.receita_recebida_em,

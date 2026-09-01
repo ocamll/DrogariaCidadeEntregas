@@ -9,7 +9,8 @@ import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Label } from '@/components/ui/label'
 import { StatusDeGravacao, type Gravacao } from '@/components/StatusDeGravacao'
-import { Carregando } from '@/components/EmAndamento'
+import { CampoDependente } from '@/components/Consulta'
+import { derivarEstado } from '@/lib/estadoDeConsulta'
 
 const SELECT_CLASSNAME =
   'h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 md:text-sm dark:bg-input/30'
@@ -43,8 +44,16 @@ function CadastroTransferenciaForm({
   lojaId: string
   onVoltar: () => void
 }) {
-  const { data: lojas, isLoading, isError } = useLojas()
-  const fornecedoras = (lojas ?? []).filter((loja) => loja.id !== lojaId)
+  // CAMPO DEPENDENTE, não conteúdo de tela. A consulta alimenta UM select
+  // no meio de um lançamento — se ela cair, o formulário fica e só o
+  // campo trava. Substituir a tela pela mensagem tiraria do caixa o que
+  // ele já digitou.
+  const consultaLojas = useLojas()
+  const estadoLojas = derivarEstado(consultaLojas)
+  const lojas = estadoLojas.estado === 'ready' ? estadoLojas.dados : undefined
+  // `undefined` quando NÃO SABEMOS quais são as filiais — diferente de
+  // `[]`, que é "não há outra filial". O `?? []` de antes fundia os dois.
+  const fornecedoras = lojas?.filter((loja) => loja.id !== lojaId)
   // mesma tarifa fixa da entrega de cliente: a transferência também é uma
   // corrida que a agência faz e cobra. Sempre 1 vale.
   const tarifaCents = useTarifaDaLoja(lojaId)
@@ -66,6 +75,16 @@ function CadastroTransferenciaForm({
   }
 
   function handleSalvar() {
+    // "Não sei quais são as filiais" e "você não escolheu uma" pedem
+    // coisas OPOSTAS do caixa, e antes davam a mesma frase: com a lista
+    // não carregada, `(lojas ?? [])` deixava o `find` falhar e a tela
+    // mandava escolher — inclusive quando ele já tinha escolhido.
+    if (!fornecedoras) {
+      setErroValidacao(
+        'Ainda não sei quais são as outras filiais, então não dá pra registrar a transferência. Assim que a lista carregar, o campo libera.'
+      )
+      return
+    }
     const origem = fornecedoras.find((loja) => loja.id === lojaOrigemId)
     if (!origem) {
       setErroValidacao('Escolhe a filial que tem o produto.')
@@ -130,30 +149,46 @@ function CadastroTransferenciaForm({
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
               <Label htmlFor="loja-origem">Filial que tem o produto</Label>
-              {isLoading && <Carregando texto="Carregando filiais" />}
-              {isError && (
-                <p className="text-sm text-destructive">Não consegui carregar as filiais.</p>
-              )}
-              {!isLoading && !isError && (
-                <select
-                  id="loja-origem"
-                  ref={selectRef}
-                  autoFocus
-                  className={SELECT_CLASSNAME}
-                  value={lojaOrigemId}
-                  onChange={(e) => setLojaOrigemId(e.target.value)}
-                  onKeyDown={handleKeyDown}
-                >
-                  <option value="" disabled>
-                    Selecione…
-                  </option>
-                  {fornecedoras.map((loja) => (
-                    <option key={loja.id} value={loja.id}>
-                      {loja.nome}
+              {/* O select NUNCA é desmontado — ele trava. Desmontá-lo
+                  mudaria o foco e o layout no meio do lançamento, e o
+                  `autoFocus` voltaria a disparar quando a lista chegasse.
+
+                  E a seleção que já existir NÃO é apagada: quem revalida
+                  é o `handleSalvar`. Transformar indisponibilidade em
+                  perda de trabalho é pior que o problema. */}
+              <CampoDependente
+                estado={estadoLojas}
+                rotulo="Filiais"
+                estaVazio={(todas) => todas.filter((l) => l.id !== lojaId).length === 0}
+                vazio={
+                  <p className="text-sm text-muted-foreground">
+                    Nenhuma outra filial cadastrada — transferência precisa de duas.
+                  </p>
+                }
+                aoRecarregar={() => void consultaLojas.refetch()}
+              >
+                {(_todas, habilitado) => (
+                  <select
+                    id="loja-origem"
+                    ref={selectRef}
+                    autoFocus
+                    disabled={!habilitado}
+                    className={`${SELECT_CLASSNAME} disabled:opacity-50`}
+                    value={lojaOrigemId}
+                    onChange={(e) => setLojaOrigemId(e.target.value)}
+                    onKeyDown={handleKeyDown}
+                  >
+                    <option value="" disabled>
+                      Selecione…
                     </option>
-                  ))}
-                </select>
-              )}
+                    {(fornecedoras ?? []).map((loja) => (
+                      <option key={loja.id} value={loja.id}>
+                        {loja.nome}
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </CampoDependente>
               <p className="text-xs text-foreground/70">
                 O motoboy passa nela pra pegar o produto e entrega aqui.
               </p>
