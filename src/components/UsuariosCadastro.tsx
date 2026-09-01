@@ -175,10 +175,23 @@ function UsuarioFormDialog({
       setErro('Nome é obrigatório.')
       return
     }
-    // Caixa sem loja não consegue nem lançar entrega (a tela exige
-    // profile.lojaId), então barra aqui em vez de deixar descobrir depois.
-    if (papel === 'caixa' && !lojaId) {
-      setErro('Caixa precisa de uma filial — sem ela não consegue lançar entrega.')
+    // SEM FILIAL, CAIXA E GERENTE NÃO ENXERGAM NADA.
+    //
+    // O caixa nem consegue lançar entrega (a tela exige `profile.lojaId`).
+    // O gerente é pior, porque falha em silêncio: desde 2026-08-12 ele é
+    // escopado por filial igual ao caixa, e a policy compara
+    // `loja_id = current_loja_id()` — com loja nula isso nunca casa, e
+    // ele abre o sistema e vê zero vale, sem erro nenhum.
+    //
+    // O gerente entrou aqui junto com a correção do texto de ajuda logo
+    // abaixo, que dizia o CONTRÁRIO ("admin e gerente enxergam todas as
+    // filiais") e por isso induzia exatamente essa configuração.
+    if ((papel === 'caixa' || papel === 'gerente') && !lojaId) {
+      setErro(
+        papel === 'caixa'
+          ? 'Caixa precisa de uma filial — sem ela não consegue lançar entrega.'
+          : 'Gerente precisa de uma filial — ele enxerga só a própria, e sem ela não veria nada.'
+      )
       return
     }
     setErro(null)
@@ -217,8 +230,8 @@ function UsuarioFormDialog({
           <DialogTitle>{editando ? 'Editar usuário' : 'Novo usuário'}</DialogTitle>
           <DialogDescription>
             {editando
-              ? 'E-mail e senha não mudam por aqui — isso é feito direto no Supabase.'
-              : 'O e-mail é só pra entrar no sistema; pode ser curto e interno, não precisa existir de verdade.'}
+              ? 'Usuário e senha não mudam por aqui — isso é feito direto no Supabase.'
+              : 'O usuário é o que a pessoa digita pra entrar. O endereço técnico que o Auth guarda é derivado dele — ninguém digita e-mail.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -311,7 +324,14 @@ function UsuarioFormDialog({
               ))}
             </select>
             <p className="text-xs text-muted-foreground">
-              Admin e gerente enxergam todas as filiais; caixa fica preso à que estiver aqui.
+              {/* ERRADO DESDE 2026-08-12, corrigido em 2026-09-01.
+                  Dizia "Admin e gerente enxergam todas as filiais", que
+                  é o que valia ANTES de o item 27 prender o gerente à
+                  própria loja. O texto não acompanhou, e não era
+                  cosmético: ele induzia a deixar gerente "Sem filial", e
+                  aí a policy nunca casa `loja_id` e ele não vê NADA. */}
+              Só o admin enxerga todas as filiais. Gerente e caixa ficam presos à que
+              estiver aqui.
             </p>
           </div>
 
