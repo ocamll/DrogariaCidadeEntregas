@@ -7597,17 +7597,75 @@ E5 — IMPLEMENTAÇÃO
 ✓ senha/PIN/token continuam fora de lib/texto
 ✓ specs + tsc + build verdes
 
-E5 — ACEITE OPERACIONAL
-◷ Edge Function publicada
-◷ contas de teste convertidas
-◷ primeiro login real por username
-◷ senha errada comprovada como recusado
-◷ offline comprovado como indisponível, sem acusar senha
-◷ erro técnico comprovado separado de recusa
+E5 — ACEITE OPERACIONAL           (2026-09-01)
+✓ Edge Function publicada
+✓ usuário NOVO criado pelo painel — `camiloadmin`, papel admin
+✓ primeiro login real usando SOMENTE o username
+✓ senha errada comprovada como recusado
+✓ offline comprovado como indisponível, sem acusar senha
+◷ `profiles.email` consistente com o Auth
+~ contas antigas NÃO convertidas — por decisão, ver abaixo
+~ erro técnico (5xx) separado de recusa — só no spec, não em produção
 ```
 
-Branch: `feat/e5-login-username`, empilhada sobre o E4 (`adbe1f7`). Ela
-não entra no PR #1, que segue esperando o gate do E4.
+Branch: `feat/e5-login-username`, rebaseada sobre `fd263fa` depois do
+merge do E4. Diff contra a `main`: só E5 — os oito arquivos de E3/E4
+foram conferidos um a um e estão limpos.
+
+### O gêmeo se provou no LOGIN, não no dashboard
+
+Vale registrar porque muda o que o gate significa: **entrar digitando só
+`camiloadmin` É a prova.** O cliente compôs
+`camiloadmin@drogariacidade.invalid` e o servidor aceitou — se a Edge
+Function tivesse gravado qualquer outro endereço, o login teria falhado
+com "senha inválida" e sem pista, que é exatamente o modo de falha que o
+`username.spec.mts` existe pra impedir.
+
+As duas cópias concordaram contra dado real, fora dos specs. Olhar o
+dashboard depois é confirmação, não prova.
+
+### A distinção offline × recusa, medida no app rodando
+
+Mesmas credenciais falsas, mesmo 400 do servidor, só o estado de rede
+mudando:
+
+```
+online    "Usuário ou senha inválidos."
+offline   "Sem conexão — não deu pra verificar o usuário."
+```
+
+E a segunda **não fala em senha**. Antes do E5 as duas eram a mesma
+frase, e offline o app mandava a pessoa trocar uma senha que estava
+certa — o defeito do E2 na décima tela, a que ele não cobriu por ser
+escrita e não consulta.
+
+O ramo exercitado foi o do `navigator.onLine`. O do `TypeError` do
+`fetch` (rede morta com `onLine` ainda `true`) continua coberto só por
+spec — é caminho secundário para a mesma resposta, e existe justamente
+porque `onLine` mente nesse caso.
+
+### As contas antigas NÃO foram convertidas, e não serão
+
+O plano original era converter `adminteste` e `caixateste` uma por vez.
+**Não deu**: o painel do Supabase não expõe edição de e-mail, e mexer
+direto em `auth.users` foi recusado — o GoTrue também guarda o endereço
+em `auth.identities`, e não havia como verificar daqui se atualizar só um
+dos dois deixa a conta meio-quebrada. Arriscar isso na conta que É o
+acesso não vale.
+
+A saída foi melhor que o plano: **criar conta nova em vez de converter.**
+A sessão do Supabase vive no `localStorage` e sobrevive à troca de
+branch, então bastou entrar com a conta antiga e criar a nova já pelo
+fluxo novo.
+
+Consequência aceita: `adminteste` e `caixateste` continuam no domínio
+antigo e **param de conseguir entrar**, porque o login compõe
+`<username>@drogariacidade.invalid` e mais nada. Isso é o desejado — o
+usuário pediu explicitamente que não coexistissem os dois modos — e elas
+somem no corte pré-V1 de qualquer jeito.
+
+**A saída de emergência, enquanto o corte não vem:** a `main` ainda tem o
+login por e-mail. Servindo a `main`, entra-se com as contas antigas.
 
 ### A restrição congelada escreveu o desenho
 
