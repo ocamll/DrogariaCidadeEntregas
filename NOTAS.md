@@ -8812,27 +8812,64 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: aplicar e medir o E10.1 (já escrito)
+### PRÓXIMA SESSÃO: E10.2 — o snapshot da loja operacional no cliente
 
 > **Esta é a seção atual.** As de baixo são históricas: descrevem como
-> "próximo" coisas que já foram feitas. Escrita em 2026-09-01, no
-> checkpoint depois do merge do E5 — fronteira limpa entre o que
-> aconteceu e a próxima execução.
+> "próximo" coisas que já foram feitas. Atualizada em 2026-09-02, com o
+> E10.1 fechado no servidor.
 
-#### Estado exato
+#### Estado exato — LIDO DO `git log`, não de memória
 
 ```
 main                    29e93e1   E5 mergeado
-feat/e10-admin-filial   10348ae   contrato do E10 (item 91)
-                                  ÚNICO diff contra a main, e é só NOTAS.md
+feat/e10-admin-filial   5012e31   E10.1 aplicado e medido
 PR #1  MERGED  fd263fa  E3 + E4
 PR #2  MERGED  29e93e1  E5
 ```
 
-**CORREÇÃO — a primeira versão desta seção estava errada.** Ela dizia "o
-E10 ainda não alterou código nenhum" e apontava o E10.1 como próximo a
-escrever. **Ele já está escrito**, no commit `c8afdc5`, com a migration
-`20260902120000_admin_operando_por_filial_saida.sql` e o item 92.
+A branch tem sete commits e toca cinco arquivos — **nenhum deles de
+cliente**:
+
+```
+NOTAS.md
+.gitignore
+scripts/patch-selar-saida-e10.mts
+scripts/e10-cenarios-competencia.sql
+supabase/migrations/20260902120000_admin_operando_por_filial_saida.sql
+```
+
+#### O E10.1 FECHOU. O que falta é cliente.
+
+```
+E10.1  servidor    ✓ aplicado · gate antes==depois · 5 cenários medidos
+E10.2  cliente     ← AQUI: snapshot da loja operacional + fila
+E10.3  seletor no cabeçalho (sessionStorage por auth.uid)
+E10.4  as três telas de escrita
+```
+
+Detalhe no item 92. O essencial para retomar: a guarda está viva em
+`selar_romaneio_interno`, provada por diff independente e medida com
+cinco cenários; `admin` com `loja_id` NULO **opera** numa filial válida
+do tenant, que é o caso que o `camiloadmin` existe para provar.
+
+**Um item do servidor continua sem prova, e nenhum SQL o alcança:** a
+saída offline via `service_role`. Ele fica coberto naturalmente quando o
+cliente existir e alguém fizer uma saída offline de verdade — não vale
+forçar antes.
+
+**O contrato do cliente está no item 91** e não se rediscute:
+`sessionStorage` por `auth.uid` (não `localStorage`); a operação
+**congela** a loja ao iniciar e trocar o cabeçalho depois não retargeta
+formulário, fila nem corrida; `donoDaFila` **não** é sobrecarregado —
+dono e loja operacional são eixos distintos; caixa e gerente não mudam.
+
+#### A LIÇÃO QUE ESTA SEÇÃO CUSTOU — leia antes de escrever estado aqui
+
+**A primeira versão desta seção estava errada.** Ela dizia "o E10 ainda
+não alterou código nenhum" e apontava o E10.1 como próximo a escrever.
+Ele já estava escrito, no commit `c8afdc5` — feito por outro agente
+(ChatGPT), por engano, e por isso invisível para quem só olhasse a
+conversa.
 
 Eu compus o handoff a partir do meu modelo do repositório em vez do
 repositório, e o modelo estava velho. Fica registrado porque é
@@ -8840,15 +8877,28 @@ exatamente a classe de defeito que esta sessão inteira perseguiu: afirmar
 o que não se verificou. **Antes de escrever estado no NOTAS, leia o
 `git log`.**
 
+Aconteceu **três vezes na mesma sessão**, sempre igual: afirmei estado do
+repositório sem ler o repositório. Disse que o E10 não tinha código
+(tinha), que a prova não existia (existia, em
+`scripts/patch-selar-saida-e10.mts`), e deixei placeholders num SQL que
+mandei rodar dizendo "comece pelo passo 0" — instrução em comentário não
+substitui o arquivo se comportar direito.
+
+**Duas regras que saíram disso:**
+
 ```
-a7babd6  retomada (esta seção)
-c8afdc5  feat: protege a porta de saída do E10 por filial   ← E10.1
-10348ae  docs: item 91 — o contrato
+antes de afirmar estado    → git log / ls / grep
+antes de mandar SQL        → conferir cada coluna contra o schema
 ```
 
-O que falta no E10.1 **não é código: é aplicação e medição.** A migration
-foi conferida contra a armadilha do contrato e passa — lê o perfil de
-`p_caixa_id`, usa `v_papel`, e os únicos `auth.uid()`/`is_admin()` no
+A segunda também custou três bugs: `eventos.registrado_em` (é
+`ocorrido_em`), `max(uuid)` (não existe) e `jsonb_array_length` sobre o
+`de` escalar legado (estoura).
+
+*(o resto deste bloco descreve o estado de antes da aplicação, mantido
+como registro:)* a migration foi conferida contra a armadilha do
+contrato e passa — lê o perfil de `p_caixa_id`, usa `v_papel`, e os
+únicos `auth.uid()`/`is_admin()` no
 arquivo estão em comentários explicando por que não podem ser usados.
 Nenhum dos gates abaixo foi rodado ainda.
 
