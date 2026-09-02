@@ -45,3 +45,8 @@ AGENTS.md
 # de scripts/patch-selar-retorno-e3b.mts. A migration final está em
 # supabase/migrations/, versionada; esta é só a etapa do meio.
 scripts/.e3b-proposta.sql
+
+# Artefato intermediário do patch do E10 — mesma disciplina do E3.B.
+# A migration final é versionada; esta proposta existe só para provar o
+# diff e as invariantes antes de o arquivo definitivo nascer.
+scripts/.e10-proposta.sql

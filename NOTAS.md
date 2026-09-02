@@ -109,19 +109,14 @@ E2   estados visuais de consulta     ✓  item 86 — 18 de 18 migrados
 E3   id próprio do pagamento previsto  ✓  item 87 — aplicada e conferida
 E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
 E5   login por username                 ✓  item 89 — aceite medido
-E10  admin operando por filial   contrato fechado (91) ← construir
+E10  admin operando por filial   servidor pronto no branch (91–92)
 E6..E9  router, divergência, agência, endereço
 ```
 
-**O E5 NÃO ESTÁ FECHADO, e a distinção é o ponto do item 89.** O código
-está pronto e medido; o que falta é operacional e depende de acesso que
-eu não tenho — publicar a Edge Function e converter as contas. **Nenhum
-login por usuário aconteceu ainda.**
-
-E a ordem importa: **o E4 E2E vem ANTES**, enquanto o ambiente de
-autenticação continua conhecido. Mexer em conta antes de fechar o gate do
-E4 embaralharia um problema de login com o gate que decide o merge do
-PR #1.
+**E4 e E5 fecharam depois deste texto original.** O E4 passou no E2E real
+com duas formas previstas e retorno fiel; o E5 criou `camiloadmin` pelo
+painel e entrou digitando só o username. Os dois PRs foram mergeados na
+`main` antes de o E10 começar.
 
 **O E3 achou uma SEGUNDA suposição 1:1**, escondida onde ninguém
 olharia: o evento `pagamento_alterado` escolhia UM previsto com
@@ -8352,6 +8347,62 @@ mudança mínima, imprime o diff e **prova as invariantes antes de o
 arquivo da migration existir**. `selar_romaneio_interno` é a função mais
 crítica do projeto, e reescrevê-la à mão é a forma mais provável de mover
 sem querer uma linha de `digest(...)`.
+
+## 92. E10 — porta de saída pronta no branch; aplicação pendente
+
+Primeiro passo do contrato acima concluído em 2026-09-02. O cliente, o
+snapshot da fila, o seletor do cabeçalho e as três telas **ainda não
+começaram** — esta etapa é só a fronteira de autorização do servidor.
+
+Arquivos:
+
+```
+scripts/patch-selar-saida-e10.mts
+supabase/migrations/20260902120000_admin_operando_por_filial_saida.sql
+```
+
+O script extrai a terceira definição de `selar_romaneio_interno` da
+migration `20260819160000`, faz três substituições locais e só grava a
+proposta se todas as invariantes passarem. A primeira rodada recusou a
+própria ferramenta: duas asserções liam comentários/delimitadores como
+código. O instrumento foi corrigido antes de a proposta existir; a
+segunda rodada passou inteira.
+
+O diff de produção é um só:
+
+```
+perfil de p_caixa_id  →  tenant_id + papel + loja_id
+p_loja_id             →  precisa existir no tenant do ator
+papel admin           →  qualquer loja daquele tenant
+papel caixa/gerente   →  somente a loja do perfil
+```
+
+O que foi provado localmente:
+
+```
+4 digest()                         byte a byte idênticos
+assinatura/atributos da função     idênticos
+reenvio, conflito e canônico       literais
+autorização, escritas e evento     literais
+decisão por auth.uid()             nenhuma
+guarda de competência              antes do canônico e do 1º digest
+migration                          contém exatamente a proposta provada
+build                              ok
+canônico DCR1                      15 de 15
+lint                               0 erros; 9 avisos pré-existentes
+```
+
+A própria migration captura **todas** as linhas de
+`verificar_romaneios_selados()` antes do `create or replace`, recalcula
+depois e levanta exceção se qualquer linha mudou ou sumiu. Não existe
+baseline numérico codificado: o gate é `antes == depois`.
+
+**Estado operacional:** o antes informado ao retomar era `20 · 20 · 0`.
+A migration ainda não foi aplicada no Supabase, portanto o depois não foi
+medido e esta etapa ainda não pode ser marcada como aceita. Próxima ação:
+executar o arquivo inteiro no SQL Editor; se o gate passar, conferir
+`select * from public.verificar_integridade_resumo();` e registrar o
+resultado.
 
 ## Commits desta sessão
 
