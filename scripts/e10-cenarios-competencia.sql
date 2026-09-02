@@ -1,158 +1,168 @@
 -- =====================================================================
 -- E10.1 — OS CENÁRIOS DE COMPETÊNCIA
 --
--- Rode COMO ADMIN no SQL Editor, DEPOIS de aplicar
+-- Rode COMO ADMIN, depois de aplicar
 -- `20260902120000_admin_operando_por_filial_saida.sql`.
 --
+-- ⚠️ UM BLOCO POR VEZ. **Todo caso termina em exceção** — é esse o
+-- ponto: a guarda recusa, ou deixa passar e a função morre adiante por
+-- falta de vale. Rodando o arquivo inteiro, o editor para no primeiro.
+--
+-- Sem placeholder: cada bloco resolve o ator e a filial sozinho.
+--
 -- ---------------------------------------------------------------------
--- COMO ELES FUNCIONAM, E POR QUE NADA É SELADO
+-- COMO LER O RESULTADO
 -- ---------------------------------------------------------------------
--- A guarda está no TOPO de `selar_romaneio_interno`, antes de qualquer
--- escrita, antes do canônico e antes do primeiro `digest()`. Então:
+--   RECUSA   'Filial inválida para este tenant.'
+--            'Sem competência sobre esta filial.'
 --
---   caso de RECUSA   → a guarda levanta e nada é gravado
---   caso de ACEITE   → a guarda deixa passar, e a função morre logo
---                      adiante por outro motivo (romaneio sem vale,
---                      autorização inválida)
+--   ACEITE   QUALQUER OUTRA mensagem — tipicamente sobre vale/romaneio.
+--            Aceitar NÃO é selar: é a guarda ter deixado passar.
 --
--- **É a MENSAGEM que distingue os dois.** Aceitar não significa selar:
--- significa que o erro que volta NÃO é de competência.
---
--- Tudo dentro de `begin … rollback`, e nenhum caso chega perto de gravar
--- romaneio. Ainda assim, veja o aviso da sequência no fim do arquivo.
+-- Nada é gravado em nenhum caso: a guarda está antes de qualquer
+-- escrita, e os casos de aceite morrem antes de inserir romaneio.
 --
 -- ---------------------------------------------------------------------
 -- AS TRÊS ARMADILHAS DO PLANO ORIGINAL, RESOLVIDAS
 -- ---------------------------------------------------------------------
--- 1. "admin → loja de outro tenant": só existe UM tenant. Não dá pra
---    montar. Mas um uuid que não é loja nenhuma dispara a MESMA linha
---    (`not exists ... l.tenant_id = v_tenant`), que é justamente a que
---    protege contra tenant alheio. Mesmo ramo, sem fabricar tenant.
+-- 1. "admin → loja de outro tenant" não é montável: só existe um tenant.
+--    Um uuid que não é loja nenhuma dispara a MESMA linha da guarda
+--    (`not exists ... l.tenant_id = v_tenant`).
 --
--- 2. "caixa → outra filial" e "caixa → própria filial": a `caixateste`
---    não consegue mais logar (ficou no domínio antigo no E5). Mas a
---    guarda lê o perfil de **p_caixa_id**, não da sessão — então dá pra
---    testá-la passando o uuid dela como parâmetro, sem logar como ela.
---    É a mesma propriedade que quase quebrou a selagem offline.
+-- 2. "caixa → outra filial" e "→ própria filial": a `caixateste` não
+--    consegue mais logar (ficou no domínio antigo no E5). Mas a guarda
+--    lê o perfil de **p_caixa_id**, não da sessão — dá pra testá-la
+--    passando o uuid dela, sem logar. É a mesma propriedade que quase
+--    quebrou a selagem offline.
 --
--- 3. "admin com loja_id NULL": o `camiloadmin` é o sujeito, e ele não
---    alcança a Nova Corrida pela tela (ela bloqueia com `!lojaId`). Aqui
---    ele é alcançável direto.
+-- 3. "admin com loja_id NULL": o `camiloadmin` não alcança a Nova
+--    Corrida pela tela (ela bloqueia com `!lojaId`). Aqui, sim.
 -- =====================================================================
 
 
 -- =====================================================================
--- PASSO 0 · OS ATORES E AS FILIAIS
+-- PASSO 0 · QUEM OS BLOCOS VÃO USAR
 --
--- Anote os uuids: os blocos abaixo os usam. Se algum papel não existir
--- (ex.: nenhum caixa ativo), o cenário correspondente não é rodável e
--- deve ser marcado como NÃO EXERCITADO — nunca como aprovado.
+-- Rode PRIMEIRO. Se algum `uuid` vier NULL, aquele cenário NÃO é
+-- rodável — marque como NÃO EXERCITADO, nunca como aprovado.
 -- =====================================================================
 
-select p.id, p.nome, p.papel, p.loja_id, l.nome as filial, p.ativo
-  from public.profiles p
-  left join public.lojas l on l.id = p.loja_id
- order by p.papel, p.nome;
-
-select id, nome, tenant_id from public.lojas order by nome;
+select 'admin sem filial' as papel_no_teste,
+       (select p.id from public.profiles p
+         where p.papel = 'admin' and p.loja_id is null and p.ativo
+         order by p.id limit 1) as uuid
+union all
+select 'caixa com filial',
+       (select p.id from public.profiles p
+         where p.papel = 'caixa' and p.loja_id is not null and p.ativo
+         order by p.id limit 1)
+union all
+select 'uma filial qualquer',
+       (select l.id from public.lojas l order by l.id limit 1);
 
 
 -- =====================================================================
--- OS CENÁRIOS
+-- (1) ADMIN SEM FILIAL  →  LOJA VÁLIDA   →  a guarda DEIXA PASSAR
 --
--- Troque só os uuids marcados. Todo bloco é `begin … rollback`.
+--     esperado: mensagem que NÃO fala em competência nem em filial
+--
+--     Se vier 'Sem competência sobre esta filial', o E10 falhou: admin
+--     não pode ficar preso por não ter filial no perfil. É o caso que o
+--     `camiloadmin` existe pra provar.
 -- =====================================================================
 
--- ---------------------------------------------------------------------
--- (1) ADMIN COM loja_id NULL  →  a guarda DEIXA PASSAR
---
---     esperado: erro que NÃO fala em competência nem em filial
---     (algo como romaneio sem vale / autorização inválida)
---
---     Se vier 'Sem competência sobre esta filial', o E10 falhou: um
---     admin não pode ficar preso por não ter filial no perfil.
--- ---------------------------------------------------------------------
-begin;
+with ator as (
+  select p.id, p.tenant_id from public.profiles p
+   where p.papel = 'admin' and p.loja_id is null and p.ativo
+   order by p.id limit 1
+)
 select public.selar_romaneio_interno(
-  '<UUID_DO_ADMIN_SEM_LOJA>'::uuid,          -- p_caixa_id   (camiloadmin)
-  gen_random_uuid(),                          -- p_romaneio_id
-  gen_random_uuid(),                          -- p_corrida_id
-  '<UUID_DE_UMA_LOJA_VALIDA>'::uuid,          -- p_loja_id    (Matriz)
-  null, null,                                 -- agencia, motoboy
-  '{}'::uuid[],                               -- p_entrega_ids (vazio)
-  'hash-de-teste',
-  gen_random_uuid(),                          -- p_autorizacao_id
-  '[]'::jsonb, '[]'::jsonb,
-  now(), 'online', null, null
-);
-rollback;
-
--- ---------------------------------------------------------------------
--- (2) ADMIN  →  LOJA QUE NÃO É DO TENANT   →  RECUSA
---
---     esperado: 'Filial inválida para este tenant.'
---     (uuid aleatório: não é loja nenhuma, logo não é loja deste tenant)
--- ---------------------------------------------------------------------
-begin;
-select public.selar_romaneio_interno(
-  '<UUID_DO_ADMIN_SEM_LOJA>'::uuid,
+  (select id from ator),
   gen_random_uuid(), gen_random_uuid(),
-  gen_random_uuid(),                          -- p_loja_id INEXISTENTE
+  (select l.id from public.lojas l
+    where l.tenant_id = (select tenant_id from ator) order by l.id limit 1),
   null, null, '{}'::uuid[], 'hash-de-teste', gen_random_uuid(),
   '[]'::jsonb, '[]'::jsonb, now(), 'online', null, null
 );
-rollback;
 
--- ---------------------------------------------------------------------
+
+-- =====================================================================
+-- (2) ADMIN  →  UUID QUE NÃO É LOJA NENHUMA   →  RECUSA
+--
+--     esperado: 'Filial inválida para este tenant.'
+--     Mesma linha que protege contra loja de outro tenant.
+-- =====================================================================
+
+select public.selar_romaneio_interno(
+  (select p.id from public.profiles p
+    where p.papel = 'admin' and p.ativo order by p.id limit 1),
+  gen_random_uuid(), gen_random_uuid(),
+  gen_random_uuid(),                       -- não existe em `lojas`
+  null, null, '{}'::uuid[], 'hash-de-teste', gen_random_uuid(),
+  '[]'::jsonb, '[]'::jsonb, now(), 'online', null, null
+);
+
+
+-- =====================================================================
 -- (3) CAIXA  →  OUTRA FILIAL   →  RECUSA
 --
 --     esperado: 'Sem competência sobre esta filial.'
---     Use uma loja REAL do tenant que NÃO seja a do caixa.
--- ---------------------------------------------------------------------
-begin;
+-- =====================================================================
+
+with ator as (
+  select p.id, p.tenant_id, p.loja_id from public.profiles p
+   where p.papel = 'caixa' and p.loja_id is not null and p.ativo
+   order by p.id limit 1
+)
 select public.selar_romaneio_interno(
-  '<UUID_DO_CAIXA>'::uuid,                    -- caixateste (Filial 02)
+  (select id from ator),
   gen_random_uuid(), gen_random_uuid(),
-  '<UUID_DE_OUTRA_FILIAL>'::uuid,             -- Matriz
+  (select l.id from public.lojas l
+    where l.tenant_id = (select tenant_id from ator)
+      and l.id is distinct from (select loja_id from ator)
+    order by l.id limit 1),
   null, null, '{}'::uuid[], 'hash-de-teste', gen_random_uuid(),
   '[]'::jsonb, '[]'::jsonb, now(), 'online', null, null
 );
-rollback;
 
--- ---------------------------------------------------------------------
+
+-- =====================================================================
 -- (4) CAIXA  →  A PRÓPRIA FILIAL   →  a guarda DEIXA PASSAR
 --
---     esperado: erro que NÃO fala em competência nem em filial
+--     esperado: mensagem que NÃO fala em competência nem em filial
 --
---     Este é o controle negativo do (3): sem ele, uma guarda que
---     recusasse TUDO passaria no (3) e ninguém notaria.
--- ---------------------------------------------------------------------
-begin;
+--     CONTROLE NEGATIVO DO (3). Sem ele, uma guarda que recusasse TUDO
+--     passaria no (3) e ninguém notaria.
+-- =====================================================================
+
+with ator as (
+  select p.id, p.loja_id from public.profiles p
+   where p.papel = 'caixa' and p.loja_id is not null and p.ativo
+   order by p.id limit 1
+)
 select public.selar_romaneio_interno(
-  '<UUID_DO_CAIXA>'::uuid,
+  (select id from ator),
   gen_random_uuid(), gen_random_uuid(),
-  '<UUID_DA_FILIAL_DO_CAIXA>'::uuid,          -- a loja_id do perfil dele
+  (select loja_id from ator),
   null, null, '{}'::uuid[], 'hash-de-teste', gen_random_uuid(),
   '[]'::jsonb, '[]'::jsonb, now(), 'online', null, null
 );
-rollback;
 
--- ---------------------------------------------------------------------
--- (5) ATOR INEXISTENTE OU INATIVO   →  RECUSA
+
+-- =====================================================================
+-- (5) ATOR INEXISTENTE   →  RECUSA
 --
 --     esperado: 'Caixa inexistente ou inativo.'
---     Checagem que já existia; confirma que a guarda nova não passou na
---     frente dela.
--- ---------------------------------------------------------------------
-begin;
+--     Confirma que a guarda nova não passou na frente da que já existia.
+-- =====================================================================
+
 select public.selar_romaneio_interno(
-  gen_random_uuid(),                          -- ator que não existe
+  gen_random_uuid(),
   gen_random_uuid(), gen_random_uuid(),
-  '<UUID_DE_UMA_LOJA_VALIDA>'::uuid,
+  (select l.id from public.lojas l order by l.id limit 1),
   null, null, '{}'::uuid[], 'hash-de-teste', gen_random_uuid(),
   '[]'::jsonb, '[]'::jsonb, now(), 'online', null, null
 );
-rollback;
 
 
 -- =====================================================================
@@ -160,34 +170,30 @@ rollback;
 --
 -- (6) OFFLINE VIA EDGE/service_role  →  CONTINUA SELANDO
 --
--- É o cenário mais importante do conjunto, e nenhum SQL o alcança.
---
--- A prova estática mostra que o código não usa `auth.uid()`; só uma
--- saída offline REAL, sincronizando pela Edge Function, mostra que ela
+-- O mais importante do conjunto, e nenhum SQL o alcança. A prova
+-- estática mostra que o código não usa `auth.uid()`; só uma saída
+-- offline REAL, sincronizando pela Edge Function, mostra que ela
 -- continua conseguindo selar. Era exatamente aqui que a primeira versão
 -- da guarda (com `is_admin()`) teria quebrado tudo em silêncio.
 --
 -- Roteiro: Nova Corrida com a rede desligada → religar → a fila
--- sincroniza → conferir que o romaneio nasceu `offline_sincronizada` e
--- que o verificador o aceita.
+-- sincroniza → o romaneio nasce `offline_sincronizada` e o verificador
+-- o aceita.
 --
--- (7) ONLINE, USUÁRIO NORMAL, ponta a ponta — pela tela, como sempre.
+-- (7) ONLINE, ponta a ponta, pela tela.
 -- =====================================================================
 
 
 -- =====================================================================
--- DEPOIS DE TUDO — a sequência vai ter buracos NOVOS
+-- DEPOIS DE TUDO — registre o novo estado da sequência
 --
--- `nextval` NÃO faz rollback. Cada chamada acima que chegou a puxar
--- número deixou um vazio em `R-0000XX`, mesmo com o `rollback`.
---
--- Isso é esperado e inofensivo, mas precisa estar previsto: sem isto,
--- a próxima conferência da sequência acusa "documento perdido" onde só
--- houve teste.
+-- `nextval` NÃO faz rollback: as chamadas acima que chegaram a puxar
+-- número deixaram vazios novos em `R-0000XX`. É esperado e inofensivo,
+-- mas precisa estar registrado — senão a próxima conferência acusa
+-- "documento perdido" onde só houve teste.
 -- =====================================================================
 
 select right(numero, 6)::int as n, numero, tipo, status
-  from public.romaneios
- order by n;
+  from public.romaneios order by n;
 
 select * from public.verificar_integridade_resumo();
