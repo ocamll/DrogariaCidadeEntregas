@@ -109,7 +109,7 @@ E2   estados visuais de consulta     ✓  item 86 — 18 de 18 migrados
 E3   id próprio do pagamento previsto  ✓  item 87 — aplicada e conferida
 E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
 E5   login por username                 ✓  item 89 — aceite medido
-E10  admin operando por filial   servidor ESCRITO (91–92) — aplicar e medir
+E10  admin operando por filial   SERVIDOR FECHADO (91–92) — falta cliente
 E11  visibilidade do offline     backlog, sem contrato
 ordem ate producao: E10 E11 E6 E9 E7 E8 → STAGING → corte → producao → piloto
 E6..E9  router, divergência, agência, endereço
@@ -8350,7 +8350,7 @@ arquivo da migration existir**. `selar_romaneio_interno` é a função mais
 crítica do projeto, e reescrevê-la à mão é a forma mais provável de mover
 sem querer uma linha de `digest(...)`.
 
-## 92. E10 — porta de saída pronta no branch; aplicação pendente
+## 92. E10.1 — a porta de saída: aplicada e medida
 
 Primeiro passo do contrato acima concluído em 2026-09-02. O cliente, o
 snapshot da fila, o seletor do cabeçalho e as três telas **ainda não
@@ -8399,12 +8399,86 @@ A própria migration captura **todas** as linhas de
 depois e levanta exceção se qualquer linha mudou ou sumiu. Não existe
 baseline numérico codificado: o gate é `antes == depois`.
 
-**Estado operacional:** o antes informado ao retomar era `20 · 20 · 0`.
-A migration ainda não foi aplicada no Supabase, portanto o depois não foi
-medido e esta etapa ainda não pode ser marcada como aceita. Próxima ação:
-executar o arquivo inteiro no SQL Editor; se o gate passar, conferir
-`select * from public.verificar_integridade_resumo();` e registrar o
-resultado.
+### APLICADA E MEDIDA em 2026-09-02
+
+```
+antes    saida 15 · retorno 5 · TOTAL 20 · 20 · 0 · conflito 3
+depois   saida 15 · retorno 5 · TOTAL 20 · 20 · 0 · conflito 3
+```
+
+O gate `antes == depois` fechou **por construção, antes mesmo da leitura
+humana**: o bloco de conferência roda na MESMA transação do
+`create or replace`, então a guarda estar viva já prova que nenhuma linha
+do verificador mudou ou sumiu — se tivesse mudado, a transação inteira
+teria desfeito, incluindo a troca da função.
+
+E o gate não compara número: compara o CONJUNTO de linhas por documento.
+Pega "um documento mudou" mesmo com o total igual, que `20 == 20` não
+pegaria.
+
+### Os cinco cenários de competência
+
+```
+(1) admin sem filial → loja válida     Romaneio sem vale nenhum.       l.72
+(2) admin → uuid que não é loja        Filial inválida para o tenant   l.58
+(3) caixa → outra filial               Sem competência sobre a filial  l.67
+(4) caixa → a própria filial           Romaneio sem vale nenhum.       l.72
+(5) ator inexistente                   Caixa inexistente ou inativo.   l.46
+```
+
+**Os números de linha provam a ORDEM**, que nenhum dos cinco pedia
+explicitamente: 46 → 58 → 67 → 72. A guarda nova entrou ENTRE as duas
+checagens que já existiam, sem passar na frente da verificação de ator.
+O caso (5) é o que mostra isso — se ela tivesse subido demais, um ator
+inexistente teria dado erro de filial em vez de erro de ator.
+
+Os `errcode` são coerentes: `42501` (insufficient_privilege) nos três de
+autorização, `23514` no de vale.
+
+**O (1) é o que o E10 existe pra provar:** admin com `loja_id` NULO opera
+numa filial válida do seu tenant. Foi por isso que o `camiloadmin` ficou
+sem filial de propósito — o contrato tinha que funcionar sem enfiar
+filial artificial no perfil.
+
+**O (4) é o controle negativo do (3).** Sem ele, uma guarda que recusasse
+TUDO passaria no (3) e ninguém notaria. Mesma disciplina dos specs de
+fiação.
+
+Nenhum documento foi criado: a contagem antes e depois é a mesma, e as
+duas checagens disparam antes de qualquer escrita.
+
+#### A verificação independente, antes de aplicar
+
+O script de prova que acompanhava a migration tem o MESMO AUTOR que ela,
+e este projeto já sabe que dois gêmeos concordando não provam estar
+certos — podem ter copiado o mesmo engano. Foi feito um diff cru das duas
+definições, por outro método:
+
+```
++ v_loja_do_ator uuid;
+~ a MESMA leitura de perfil, com uma coluna a mais
++ as duas checagens
+```
+
+Nada além disso. Nenhum `digest()`, canônico, insert ou `ON CONFLICT`
+tocado. Balanço `if`/`end if` de 9 para 11, casado nos dois lados.
+
+### O QUE AINDA NÃO FOI PROVADO
+
+```
+◷ offline via Edge/service_role  →  CONTINUA SELANDO
+◷ online ponta a ponta pela tela
+```
+
+**O primeiro é o mais importante do conjunto, e nenhum SQL o alcança.** A
+prova estática mostra que o código não lê `auth.uid()`; só uma saída
+offline REAL, sincronizando pela Edge Function como `service_role`,
+mostra que ela continua conseguindo selar. Era exatamente aí que a
+primeira versão da guarda — com `is_admin()` — teria quebrado tudo em
+silêncio, meses depois, sem ninguém ligar o sintoma à guarda.
+
+**E10.1 FECHADO no servidor.** Falta a parte cliente: o snapshot da loja
+operacional, a fila, o seletor do cabeçalho e as três telas.
 
 ## Commits desta sessão
 
