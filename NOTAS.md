@@ -166,7 +166,7 @@ configuração pendente, é infra inteira, e os passos 5 e 6 do roteiro do
 corte dependem dela.
 
 **Se você está retomando, comece por "PRÓXIMA SESSÃO", perto do fim deste
-arquivo.** É lá que está o trabalho combinado — hoje o **E5**, com as
+arquivo.** É lá que está o trabalho combinado — hoje o **E10.1**, com as
 decisões já fechadas (React Router entra na stack; username usa
 identificador técnico interno) e os achados da auditoria que mudaram a
 ordem das etapas.
@@ -8736,261 +8736,222 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: fechar dois aceites, não começar frente nova
+### PRÓXIMA SESSÃO: E10.1 — a porta de saída
 
 > **Esta é a seção atual.** As de baixo são históricas: descrevem como
-> "próximo" coisas que já foram feitas.
+> "próximo" coisas que já foram feitas. Escrita em 2026-09-01, no
+> checkpoint depois do merge do E5 — fronteira limpa entre o que
+> aconteceu e a próxima execução.
 
-**O que está aberto não é código — é ACEITE.** Duas frentes estão
-implementadas e medidas, e nenhuma das duas está fechada:
-
-```
-E4  código na main? não — PR #1, esperando o E2E     item 88
-E5  código commitado, aceite operacional pendente     item 89
-```
-
-**A ordem é única e não deve ser invertida:**
+#### Estado exato
 
 ```
-1. E4 E2E completo          o cadastro dividido, o DCR1 com duas linhas `p`,
-                            o retorno FIEL que não pode virar divergência
-2. verifier admin           antes == depois, não "tem que dar 16"
-3. decidir merge do PR #1
-   ──────────────────────   só depois disto se mexe em conta
-4. publicar criar-usuario   dashboard; salvar no editor NÃO publica
-5. converter UMA conta      adminteste, e só ela
-6. testar os três desfechos senha certa · senha errada · offline
-7. converter caixateste
-8. repetir o login como caixa
+main                    29e93e1   E5 mergeado
+feat/e10-admin-filial   10348ae   contrato do E10 (item 91)
+                                  ÚNICO diff contra a main, e é só NOTAS.md
+PR #1  MERGED  fd263fa  E3 + E4
+PR #2  MERGED  29e93e1  E5
 ```
 
-**Os passos 1–3 acontecem com o ambiente de autenticação INTACTO**, e é
-isso que a ordem protege: um problema de login no meio do gate do E4
-embaralharia duas investigações. E uma conta por vez no 5–7 preserva a
-outra como acesso conhecido — converter as duas juntas é trancar-se do
-lado de fora, e o modo de falha deste desenho é silencioso.
+Árvore limpa. **O E10 ainda não alterou código nenhum.**
 
-O gate que fecha o E5 está no fim do item 89: criar um usuário NOVO pelo
-fluxo administrativo, conferir no Auth que o identificador nasceu como
-`username_normalizado@drogariacidade.invalid`, e entrar usando só o
-username. É a única prova de que os dois gêmeos concordam fora do spec.
-
-**Só depois disso o E6 (React Router) começa.**
-
-**A cadeia de custódia (2A–2D) está FECHADA e não deve ser reaberta sem
-necessidade.** O que corre agora é uma frente de produto/UX de nove
-itens, decidida em 2026-08-25, que roda ANTES do corte pré-V1.
-
-#### Onde a frente de produto está
+#### O que está fechado, e não se rediscute
 
 ```
-E1   normalização central          ✓  itens 84 e 85
-E1.1 busca sem acento              ✓  migration aplicada, 16·16·0
-E2   estados visuais de consulta   ✓  item 86 — 18 de 18
-E3   id próprio do pagamento previsto   ✓  item 87
-E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
-E5   login por username                    ✓  item 89 — aceite medido
-E10  admin operando por filial   CONTRATO FECHADO — item 91  <- construir
-E6   React Router + /notificacoes e /auditoria
-E7   divergência/regularização de valores
-E8   portal da agência (RLS antes da tela)
-E9   endereço estruturado
+E1    normalização de texto na entrada        itens 84, 85
+E1.1  busca sem acento                        migration aplicada
+E2    estados de consulta                     item 86
+E3    id próprio do pagamento previsto        item 87
+E4    duas formas de pagamento                itens 88 e 90 — E2E aceito
+E4.1  o previsto retroativo deixou de existir ce84756
+E5    login por usuário                       item 89 — aceite medido
 ```
 
-**A FRENTE MUDOU DE NATUREZA NO E3, e continua assim daqui pra frente.**
-De E1 a E2 o trabalho foi de UI e de estado, sem tocar em dado gravado;
-do E3 em diante mexe em banco. Daí o checkpoint na `main` entre os dois,
-e daí o E3 ter sido feito em **branch** (`feat/e3-pagamentos-previstos`)
-— com a ressalva que vale repetir: **branch do git NÃO isola o
-Supabase.** A migration é aplicada no mesmo banco de desenvolvimento,
-então a disciplina adotada foi a ADITIVA: nada destrutivo, nenhum
-backfill, e a `main` capaz de operar durante todo o desenvolvimento.
+**As decisões que continuam valendo, em uma linha cada:**
 
-~~**O E4 HERDA DUAS DÍVIDAS BLOQUEANTES do E3**~~ — **pagas no item 88**,
-e eram **quatro**, não duas. Além das de exibição (`entregas.ts`,
-`fechamento.ts`), o levantamento achou o `de` escalar de
-`marcarDivergencia` — que ESCREVE auditoria — e o `ehDivergente` por
-contagem de linhas, que discordava do servidor. Ver o item 88.
+- **`pagamentos` é 1:N nos DOIS momentos.** Previsto até 3 formas no
+  cadastro; realizado até 4 no dialog. A assimetria é deliberada: prever
+  e registrar não são a mesma afirmação.
+- **`criarEntrega` (e o replay dela) é o ÚNICO escritor de pagamento
+  previsto.** O fallback retroativo foi eliminado no E4.1 — ele abria
+  corrida com o replay, e `pagamentos` não tem DELETE nem UPDATE, então
+  a linha era irremovível. O que o operador informa vai em
+  `referencia_informada` no evento, nunca em `de`, que é estado
+  persistido.
+- **`divergiuDoPrevisto` é gêmeo do SQL** — compara conjuntos de
+  `forma|valor`, nunca conta linhas.
+- **Login compõe `<username>@drogariacidade.invalid`.** Sem lookup, sem
+  RPC que enumere. `normalizarUsername` tem cópia na Edge Function e o
+  spec compara os dois corpos.
+- **Asserção de fiação lê CÓDIGO, nunca prosa.** Cinco specs usam
+  `semComentarios`; uma asserção já passou falsamente por casar com o
+  comentário que explicava a remoção.
 
-**O E5 não herda dívida de ninguém.** O que ele herda é o oposto: o E2
-já construiu o `<Consulta>` com a variante `verificacao`, e a distinção
-`recusado` × `unavailable` × `error` está congelada e testada. O
-"verificando usuário…" do login novo já existe.
-
-**E o E4 deixou uma regra que vale pra qualquer etapa daqui pra frente:**
-asserção de fiação lê o CÓDIGO, nunca a prosa. Uma asserção do E3.C
-**passou falsamente** depois de o campo que ela protegia ter sido
-removido, casando com o comentário que explicava a remoção.
-
-**Varrido — os CINCO specs que afirmam sobre texto estão limpos:**
-`formas-previstas`, `pagamento-alterado`, `fiacao-texto`,
-`fiacao-estado-de-consulta` e `despacho-sync-romaneio`. Os outros dois
-que leem fonte (`envelope`, `offline-hash`) extraem função pra EXECUTAR,
-e ali comentário é inofensivo. As três saídas mexidas ficaram idênticas
-ao baseline, e a `fiacao-texto` ganhou um controle negativo do próprio
-instrumento. Detalhe no item 88.
-
-**O padrão que fica: `ler` devolve código.** Não `codigo(ler(...))` no
-call site — um call site esquecido não dá erro, dá asserção lendo prosa
-sem ninguém notar. Quem precisar da prosa usa `lerBruto` e diz por quê.
-
-**E o E3 deixou o modelo pronto:** `pagamentos` nunca teve unique em
-`(entrega_id, momento)` — o banco sempre aceitou N, e o 1:1 vivia só no
-id derivado do cliente, que saiu. **Confirmado no E4: nenhuma migration**
-— e nem só pela tabela. O canônico do DCR1, o gêmeo TypeScript, o
-payload, `romaneio_documentos_esperados`, o contexto do retorno e o
-pré-preenchimento da tela de retorno já varriam N previstos.
-
-**O que o E2 deixou pronto pro E5**, e que já está construído: o
-"verificando usuário…" do login novo é o `<Consulta>` com a variante
-`verificacao`, e a distinção `recusado` × `unavailable` × `error` já
-está congelada e testada. O E5 não precisa inventar nada disso.
-
-**A auditoria das nove frentes está na conversa, não num arquivo** — o
-que sobreviveu dela em forma durável são as decisões abaixo e os cinco
-achados que mudaram o plano.
-
-#### As decisões já fechadas, que não se rediscutem
-
-- **React Router ENTRA na stack** (decisão explícita do usuário,
-  2026-08-25). O `useState<View>` do `Painel` passou do tamanho em que
-  compensa. A migração é GRADUAL: o E6 instala e move o shell, e as
-  telas existentes viram rota aos poucos.
-- **Login por username usa a arquitetura A**: o username mapeia pra um
-  identificador técnico interno do Supabase Auth, invisível ao usuário.
-  Sem RPC pública que enumere usernames, sem autenticação caseira.
-  `auth.uid` continua sendo a identidade; o username é credencial
-  humana e PODE MUDAR, então nunca entra em hash nem em auditoria.
-  **Username é globalmente único na V1** — antes de autenticar não há
-  tenant pra desempatar.
-- **E9 não pode obrigar DCR2.** A trava: campos estruturados de entrada
-  → composição determinística → `cliente_endereco` → snapshot. O DCR1
-  continua assinando `cliente_endereco`; as colunas novas entram na
-  trigger de imutabilidade mas NÃO no canônico. Só se isso se mostrar
-  impossível é que se discute DCR2.
-
-#### Os cinco achados da auditoria que mudam o plano
-
-1. ~~**E4 está bloqueado por colisão de chave primária.**~~ —
-   **resolvido no item 87 (E3).** E o levantamento corrigiu o
-   diagnóstico: não era só a colisão. O `limit 1` no evento
-   `pagamento_alterado` era uma SEGUNDA suposição 1:1, escondida, que
-   teria gravado auditoria errada — e o banco nunca impôs 1:1 (não há
-   unique em `(entrega_id, momento)`), então nem havia constraint a
-   derrubar.
-2. **E9 toca o DCR1 e a trigger.** `cliente_endereco` está no canônico
-   assinado (`canonico.ts:96`) e na lista congelada
-   (`schema_inicial.sql:344`). Colunas novas precisam entrar na trigger,
-   senão viram porta dos fundos.
-3. **E8 é a frente maior.** `profiles.papel` aceita `'agencia'` desde o
-   schema inicial e existem ZERO policies pra ele. É RLS nova em ~8
-   tabelas, e RLS vem antes da tela.
-4. ~~**E2 não tem padrão central hoje**~~ — **resolvido no item 86.** E
-   o levantamento corrigiu o número: são **12** leituras, não 13, e elas
-   se resolvem em 4 operações — duas consultas (que migraram) e duas
-   escritas (que ficaram com `ocupado`, de propósito).
-5. **E7 precisa de tabela nova** (regularizações append-only), e o
-   projeto exige SQL aprovado antes.
-
-#### (feito) O contrato do E2
-
-Foi escrito como `idle → loading → success | not_found/invalid | error`
-e o levantamento **mudou duas coisas**, as duas registradas no item 86:
-
-- `not_found` e `invalid` COLAPSARAM em `recusado(motivo)` — os dois
-  produzem a mesma consequência de UI, e o código já votava assim em
-  `custodiaDoRetorno.ts`, que separa por QUAL credencial falhou e não
-  por razão da recusa;
-- entrou `unavailable`, que não estava no desenho: "não há resposta
-  autoritativa e não há dado local" é diferente de "a tentativa falhou",
-  e era a metade que faltava pro defeito das nove telas.
-
-Contrato final: `inactive · loading · ready · unavailable · error`, com
-`aceito`/`recusado` só DENTRO de `ready`.
-
-#### (feito) O contrato do E3 e do E4
-
-Os dois fecharam — itens 87 e 88. O que sobrevive deles como aviso, e
-que quem mexer em pagamento tem que ler antes:
-
-- **a armadilha do §78** continua valendo integralmente: o
-  `pagamento_id` do PREVISTO nasce do cliente e **nunca** pode ser
-  copiado pro realizado, senão o romaneio de retorno SELA afirmando um
-  pagamento que não existe — o `on conflict (id) do nothing` engole o
-  insert em silêncio;
-- **`pagamento_alterado` tem DOIS escritores** (`marcarDivergencia` e
-  `selar_romaneio_retorno_interno`). Consertar um e esquecer o outro foi
-  exatamente o que aconteceu entre o E3.B e o E4;
-- **o cliente e o servidor decidem divergência pela MESMA regra** desde
-  o E4 (`divergiuDoPrevisto` × `array_agg` de `forma|valor`). Voltar a
-  decidir por contagem de linhas de um dos lados recria a discordância.
-
-#### O que fica DEPOIS de toda a frente
+#### Baseline de integridade — MEDIR DE NOVO
 
 ```
-corte pré-V1        scripts/corte-pre-v1.sql (nada executado)
-Dexie v7            escrita, não executada
-regressão pós-corte
-deploy/infra        não existe conta na Cloudflare
+última medição   20 verificados · 20 íntegros · 0 divergências
+                 (2026-09-01, antes do merge do E5, como ADMIN)
 ```
 
-E o **bloco 4** do corte (sementes) está fechado pra São Gabriel — oito
-lojas a R$ 9,00 e a agência Gabrielense —, esperando só **os convênios**
-(informação de dentro) e a criação do primeiro admin no Auth.
+**Este número NÃO é o gate.** Ele sobe a cada saída/retorno novo. O gate
+é sempre `antes == depois` na mesma medição, e a contagem explicada
+contra a sequência (selados + conflitos + buracos de rollback).
 
-#### Credencial e ambiente
+**Buracos na sequência são esperados**: `nextval` não faz rollback, então
+toda selagem desfeita deixa número sem documento. O §64 apresentava
+`selados + conflitos = maior número` como identidade — **não é**, e só
+valia naquele dia. O que protege contra documento perdido é o conjunto
+não encolher entre duas medições.
+
+Rode SEMPRE como admin: `verificar_integridade_resumo` é
+`security invoker` e devolve baseline parcial sem avisar.
+
+#### E10 — o contrato está no item 91. O essencial:
+
+**Metade já existe.** Enxergar/filtrar por filial está pronto em cinco
+telas, e a RLS já tem `is_admin() or loja_id = current_loja_id()` no
+`with check` do `entregas_insert` — cadastro e transferência **não
+precisam de migration**.
+
+**Um único ponto de servidor**, confirmado por dois gates:
+`registrar_conflito_romaneio` não é alcançável (revoke, sem grant), e as
+portas sincronizadas são `to service_role`. A guarda entra no
+**`selar_romaneio_interno`**, que as quatro atravessam.
+
+**A REGRA QUE NÃO PODE SER ESQUECIDA, e que quase quebrou tudo:**
+
+```
+o ator é o PARÂMETRO, não a sessão
+
+  p_caixa_id        NUNCA auth.uid()
+  v_papel <> 'admin'  NUNCA is_admin()
+  v_loja_do_ator      NUNCA current_loja_id()
+```
+
+Porque a porta sincronizada é chamada pela Edge Function como
+`service_role`, onde **`auth.uid()` é NULL**. `is_admin()` e
+`current_loja_id()` leem `auth.uid()` — retornariam nulo e **toda saída
+offline passaria a ser recusada**, meses depois, sem ninguém ligar o
+sintoma à guarda. É por isso que a função já derivava o tenant do perfil
+de `p_caixa_id`.
+
+A guarda aprovada:
+
+```sql
+select p.tenant_id, p.papel, p.loja_id
+  into v_tenant, v_papel, v_loja_do_ator
+  from public.profiles p where p.id = p_caixa_id and p.ativo;
+
+if not exists (select 1 from public.lojas l
+                where l.id = p_loja_id and l.tenant_id = v_tenant) then
+  raise exception 'Filial inválida para este tenant.'
+    using errcode = 'insufficient_privilege';
+end if;
+
+if v_papel <> 'admin' and p_loja_id is distinct from v_loja_do_ator then
+  raise exception 'Sem competência sobre esta filial.'
+    using errcode = 'insufficient_privilege';
+end if;
+```
+
+Ela **não afrouxa nada hoje** — torna explícito o que a RLS garantia por
+acidente. E a prova de tenant é necessária: no caminho de conflito,
+`registrar_conflito_romaneio` gravaria uma linha com o tenant do ator e
+uma loja alheia.
+
+**Contrato de cliente (item 91):** `sessionStorage` por `auth.uid` (não
+`localStorage` — herdar a filial da semana passada lança na errada, e
+isso não se reescreve); a operação **congela** a loja ao iniciar e trocar
+o cabeçalho depois não retargeta nada; `donoDaFila` não é sobrecarregado
+— dono e loja operacional são eixos distintos. Caixa/gerente não mudam.
+
+#### Os gates do E10.1
+
+```
+CENÁRIOS DE COMPETÊNCIA
+  online, usuário normal              passa/rejeita corretamente
+  offline via Edge/service_role       CONTINUA SELANDO
+  admin com loja_id NULL              sela para loja válida do tenant
+  admin → loja de outro tenant        rejeita
+  caixa/gerente → outra filial        rejeita
+  caixa/gerente → própria filial      continua funcionando
+
+GATES DE SEMPRE
+  os 4 digest() byte a byte idênticos
+  canônico antes == canônico depois
+  verificador antes == depois, como admin
+```
+
+Método: **patch por script**, como no E3.B — extrai a função, aplica a
+mudança mínima, imprime o diff e **prova as invariantes antes de o
+arquivo da migration existir**. `selar_romaneio_interno` é a função mais
+crítica do projeto; reescrevê-la à mão é a forma mais provável de mover
+sem querer uma linha de `digest(...)`.
+
+#### DEPOIS DO E10: staging e multidispositivo, antes das outras frentes
+
+**Decisão de 2026-09-01, e ela reordena o roadmap.** O deploy sai do fim
+da fila e vem logo depois do E10:
+
+```
+E10  →  staging (deploy real)  →  teste multidispositivo  →  E6/E7/E8/E9
+```
+
+Duas razões. O deploy é o único item cujo prazo **não depende de mim** —
+conta, build, variáveis, origens OAuth do Google. E **nada neste projeto
+jamais rodou fora do localhost, numa máquina só**: a premissa de dois
+dispositivos (PC do caixa + superfície de assinatura) nunca foi
+exercitada. Descobrir isso com quatro frentes pela frente é muito melhor
+que na véspera de apresentar.
+
+#### Backlog sem contrato
+
+**E11 · visibilidade do que está offline.** Conversado em 01/09, **não
+escrito**. O vale registrado sem internet não aparece na lista "Hoje" —
+só um badge com a contagem — e o Fechamento não avisa quando há
+pendências. O desenho conversado:
+
+- o vale da fila aparece na lista "Hoje", **marcado e sem número**
+  (a sequência é do banco; por isso ele também não pode sair offline);
+- o Fechamento **se declara incompleto** quando há pendências, em vez de
+  somar a fila local — merge criaria duas versões dos números do dia;
+- **não** fazer aba separada: o vale mudaria de lugar ao sincronizar.
+
+Restante do roadmap: **E6** React Router · **E7** divergência/
+regularização (tabela nova, SQL aprovado antes) · **E8** portal da
+agência (a maior — RLS em ~8 tabelas, zero policies hoje) · **E9**
+endereço estruturado (não pode obrigar DCR2).
+
+Depois de tudo: corte pré-V1 (`scripts/corte-pre-v1.sql`, nada
+executado), Dexie v7, regressão pós-corte.
+
+#### Ambiente
 
 - Node em `C:\Program Files\nodejs`, **fora do PATH**. Prefixe
   `export PATH="/c/Program Files/nodejs:$PATH"`.
-- Os specs desta frente: `texto` e `fiacao-texto` (E1);
-  `estado-de-consulta`, `fiacao-estado-de-consulta` e `consulta-render`
-  (E2); `pagamento-alterado` (E3); `formas-previstas` (E4); `username` e
-  `falha-de-login` (E5). Os da cadeia
-  de custódia continuam sendo o gate de regressão:
-  `canonico`, `canonico-retorno`, `dcrr1-vetores`, `congelar-retorno`,
+- `gh` em `C:\Program Files\GitHub CLI\gh.exe`, **também fora do PATH**.
+  Autenticado como `ocamll`.
+- **Não rodo SQL nem entro no app** — conferência no banco e login são
+  clique do usuário. A tela dá pra exercitar montando o componente
+  isolado (§86), e o estado **não sobrevive entre chamadas** do
+  `javascript_tool`: faça tudo num script só.
+- Specs desta frente: `formas-previstas`, `previsto-escritor-unico`,
+  `pagamento-alterado` (E3/E4); `username`, `falha-de-login` (E5);
+  `texto`, `fiacao-texto`, `estado-de-consulta`,
+  `fiacao-estado-de-consulta` (E1/E2). Gate de custódia: `canonico`,
+  `canonico-retorno`, `dcrr1-vetores`, `congelar-retorno`,
   `custodia-do-retorno`, `envelope`, `offline-hash`,
-  `despacho-sync-romaneio`, `dependencia-da-fila`,
-  `corridas-bloqueadas`, `romaneio-pdf`.
-- **`consulta-render` é o único spec que precisa de `--tsconfig`**, e
-  sem ele o erro não é óbvio (`React is not defined`): o esbuild do
-  `tsx` compila JSX no runtime clássico, e quem tem `"jsx": "react-jsx"`
-  é o tsconfig do app.
-
-```bash
-npx tsx --tsconfig tsconfig.app.json scripts/consulta-render.spec.mts
-```
-
-- **O verificador é o gate de tudo que toca `entregas` ou `romaneios`:**
-
-```
-select count(*) as verificados,
-       count(*) filter (where divergencias = 0) as validos,
-       coalesce(sum(divergencias), 0) as divergencias
-  from public.verificar_romaneios_selados();
-```
-
-  Hoje: **16 · 16 · 0** (13 saídas + 3 retornos). Rode como ADMIN,
-  senão a RLS devolve baseline parcial sem avisar.
-- **O que eu NÃO consigo fazer daqui:** entrar no app (não digito
-  senha) e rodar SQL. Conferência no banco e cronômetro no balcão são
-  clique do usuário.
-
-  **Mas em 26/08 o usuário logou**, e isso mudou o que dá pra provar: a
-  verificação do E2 passou a ser medida no app rodando, com controle
-  negativo no mesmo instante (telas migradas dizendo `unavailable`
-  enquanto as ainda-antigas mentiam "nenhum…"). O roteiro que funcionou
-  está no item 86; o resumo é `javascript_tool` disparando a sequência
-  completa de eventos de ponteiro, e leitura do DOM em vez de
-  screenshot — o pane do navegador segue não compondo frames de forma
-  confiável.
-
-  Duas armadilhas medidas no caminho, e as duas voltam se alguém
-  repetir: `queryClient.clear()` esvazia o cache mas **não
-  re-renderiza**, então o DOM antigo fica no ar e parece que a migração
-  falhou (navegue pra uma tela ainda não buscada em vez disso); e montar
-  componente por fora da árvore exige importar os deps com o `?v=<hash>`
-  que o Vite serve, senão o `QueryClientProvider` é de outra instância e
-  os hooks não o enxergam.
+  `despacho-sync-romaneio`, `dependencia-da-fila`, `corridas-bloqueadas`,
+  `romaneio-pdf`.
+- `consulta-render` é o único que precisa de
+  `--tsconfig tsconfig.app.json`.
+- **Escrever SQL de memória custou três bugs nesta sessão**
+  (`eventos.registrado_em` é `ocorrido_em`; não existe `max(uuid)`;
+  `jsonb_array_length` estoura sobre o `de` escalar legado). Confira cada
+  coluna contra o schema antes de mandar.
+- Bash come crase e barra invertida: para bloco com template literal, use
+  `Write`/`Edit`, não heredoc.
 
 ### (histórico) A retomada de antes da 2C
 
