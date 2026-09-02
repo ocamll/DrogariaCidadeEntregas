@@ -109,7 +109,9 @@ E2   estados visuais de consulta     ✓  item 86 — 18 de 18 migrados
 E3   id próprio do pagamento previsto  ✓  item 87 — aplicada e conferida
 E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
 E5   login por username                 ✓  item 89 — aceite medido
-E10  admin operando por filial   servidor pronto no branch (91–92)
+E10  admin operando por filial   servidor ESCRITO (91–92) — aplicar e medir
+E11  visibilidade do offline     backlog, sem contrato
+ordem ate producao: E10 E11 E6 E9 E7 E8 → STAGING → corte → producao → piloto
 E6..E9  router, divergência, agência, endereço
 ```
 
@@ -8736,7 +8738,7 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: E10.1 — a porta de saída
+### PRÓXIMA SESSÃO: aplicar e medir o E10.1 (já escrito)
 
 > **Esta é a seção atual.** As de baixo são históricas: descrevem como
 > "próximo" coisas que já foram feitas. Escrita em 2026-09-01, no
@@ -8753,7 +8755,28 @@ PR #1  MERGED  fd263fa  E3 + E4
 PR #2  MERGED  29e93e1  E5
 ```
 
-Árvore limpa. **O E10 ainda não alterou código nenhum.**
+**CORREÇÃO — a primeira versão desta seção estava errada.** Ela dizia "o
+E10 ainda não alterou código nenhum" e apontava o E10.1 como próximo a
+escrever. **Ele já está escrito**, no commit `c8afdc5`, com a migration
+`20260902120000_admin_operando_por_filial_saida.sql` e o item 92.
+
+Eu compus o handoff a partir do meu modelo do repositório em vez do
+repositório, e o modelo estava velho. Fica registrado porque é
+exatamente a classe de defeito que esta sessão inteira perseguiu: afirmar
+o que não se verificou. **Antes de escrever estado no NOTAS, leia o
+`git log`.**
+
+```
+a7babd6  retomada (esta seção)
+c8afdc5  feat: protege a porta de saída do E10 por filial   ← E10.1
+10348ae  docs: item 91 — o contrato
+```
+
+O que falta no E10.1 **não é código: é aplicação e medição.** A migration
+foi conferida contra a armadilha do contrato e passa — lê o perfil de
+`p_caixa_id`, usa `v_papel`, e os únicos `auth.uid()`/`is_admin()` no
+arquivo estão em comentários explicando por que não podem ser usados.
+Nenhum dos gates abaixo foi rodado ainda.
 
 #### O que está fechado, e não se rediscute
 
@@ -8889,21 +8912,64 @@ arquivo da migration existir**. `selar_romaneio_interno` é a função mais
 crítica do projeto; reescrevê-la à mão é a forma mais provável de mover
 sem querer uma linha de `digest(...)`.
 
-#### DEPOIS DO E10: staging e multidispositivo, antes das outras frentes
-
-**Decisão de 2026-09-01, e ela reordena o roadmap.** O deploy sai do fim
-da fila e vem logo depois do E10:
+#### A ORDEM ATÉ A PRODUÇÃO — congelada em 2026-09-02
 
 ```
-E10  →  staging (deploy real)  →  teste multidispositivo  →  E6/E7/E8/E9
+E10  admin operando por filial
+E11  visibilidade do offline
+E6   React Router / páginas dedicadas
+E9   endereço estruturado
+E7   divergência / regularização
+E8   portal da agência + RLS
+     ─────────────────────────────
+STAGING
+teste real em 2+ computadores
+corte pré-V1 / Dexie v7 / limpeza
+produção
+piloto em 1 filial
 ```
 
-Duas razões. O deploy é o único item cujo prazo **não depende de mim** —
-conta, build, variáveis, origens OAuth do Google. E **nada neste projeto
-jamais rodou fora do localhost, numa máquina só**: a premissa de dois
-dispositivos (PC do caixa + superfície de assinatura) nunca foi
-exercitada. Descobrir isso com quatro frentes pela frente é muito melhor
-que na véspera de apresentar.
+**O staging vem DEPOIS de todas as funções, e isso reverte a decisão do
+dia anterior.** Eu tinha sugerido trazê-lo para logo depois do E10, com o
+argumento de que o deploy é o único item cujo prazo não depende de mim e
+que nada jamais rodou fora do localhost.
+
+O usuário desfez, com um argumento melhor: **o objetivo do staging não é
+ver se builda fora do localhost — é provar o produto como multiusuário e
+multiperfil.** Subindo antes do E8, dá pra exercitar admin, caixa e
+gerente, mas **não a agência** — que é justamente a parte mais delicada,
+com RLS própria, visão limitada e interação com operações criadas por
+outro papel. Seria um segundo ciclo de staging quase completo depois.
+
+```
+código funcional  →  staging como PROVA DO PRODUTO  →  corte  →  produção
+```
+
+e não staging como ambiente de desenvolvimento intermediário.
+
+**O que o staging vira, então, é um gate de aceitação real:**
+
+```
+PC 1 — admin      escolhe filial · cadastra · acompanha · audita
+PC 2 — agência    login próprio · vê só o que a RLS permite
+PC 3 — caixa      filial fixa, operação normal
+
+a rede cai num deles  →  opera offline  →  volta  →  sincroniza
+                      →  o outro dispositivo recebe o estado
+```
+
+O que isso exercita junto, e que **localhost numa máquina só mascara**:
+autenticação real em domínio, `service_role` nas Edge Functions, RLS
+entre papéis, admin sem `loja_id`, agência, Realtime e cache, IndexedDB
+separada por máquina, fila offline, concorrência entre dispositivos.
+
+**A ressalva que sobrevive da decisão antiga:** não deixar a
+infraestrutura esquecida até aquele dia. Não precisa subir agora, mas
+**mantenha uma checklist de deploy** e **não arquitete nada que dependa
+implicitamente de `localhost`**. Os pontos já conhecidos: `VITE_*` são
+embutidos no build (exigem rebuild), as origens JavaScript autorizadas
+do cliente OAuth do Google precisam da URL do Pages, e `.invalid` no
+domínio técnico do login precisa ser aceito pelo Auth do ambiente.
 
 #### Backlog sem contrato
 
