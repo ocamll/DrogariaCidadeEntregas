@@ -4,9 +4,12 @@ import type { AuthProfile } from '@/data/auth'
 import type { NovaEntrega, FormaPrevistaDoCadastro } from '@/data/entregas'
 import { enfileirarOperacao, donoDaFila, gravacaoEnfileirada } from '@/data/filaOffline'
 import {
+  FORMA_PAGAMENTO_LABEL,
   FORMA_PAGAMENTO_OPTIONS,
   MAX_FORMAS_PREVISTAS,
   validarFormasPrevistas,
+  resolverValoresDasFormas,
+  digitosDoValor,
   type FormaPagamento,
 } from '@/data/pagamentos'
 import { useConveniosCadastro } from '@/data/cadastros'
@@ -107,13 +110,51 @@ function CadastroEntregaForm({
    * payload. Se fossem duas expressões, a tela poderia validar uma coisa
    * e gravar outra.
    */
-  const previstos: FormaPrevistaDoCadastro[] = formas.map((linha) => ({
+  const { valoresCents, indiceDerivado } = resolverValoresDasFormas(
+    formas.map((linha) => linha.digitos),
+    valorCompraCents
+  )
+
+  const previstos: FormaPrevistaDoCadastro[] = formas.map((linha, i) => ({
     pagamentoId: linha.pagamentoId,
     forma: linha.forma,
-    valorCents: umaFormaSo ? valorCompraCents : centsFromDigits(linha.digitos),
+    valorCents: valoresCents[i],
   }))
 
   const totalPrevistoCents = previstos.reduce((soma, p) => soma + p.valorCents, 0)
+
+  /**
+   * O AVISO DA DIVISÃO — e ele diz QUANTO falta, não só que não bate.
+   *
+   * O texto antigo era `Total: X de Y da compra`, e ele informava que a
+   * soma estava errada sem nunca dizer o tamanho do erro. Num valor
+   * quebrado é exatamente o número que falta que o caixa precisa, e
+   * calculá-lo de cabeça com fila no balcão é o que essa mudança veio
+   * tirar do caminho.
+   *
+   * Nada disto aparece com uma forma só: lá não há divisão, e o bloco
+   * inteiro fica fora da tela.
+   */
+  const faltaCents = valorCompraCents - totalPrevistoCents
+  const nenhumaDigitada = formas.every((linha) => linha.digitos === '')
+  const avisoDaDivisao: { texto: string; erro: boolean } = nenhumaDigitada
+    ? // Estado de partida, logo depois do "+ outra forma": nada foi
+      // decidido ainda, então cobrar a soma seria acusar o caixa de um
+      // erro que ele não cometeu. O aviso ENSINA a regra no exato
+      // momento em que ela passa a valer.
+      { texto: 'Informe o valor de uma das formas — a outra recebe o restante.', erro: false }
+    : {
+        texto:
+          `Total: ${formatBRL(totalPrevistoCents)} de ${formatBRL(valorCompraCents)} da compra` +
+          (faltaCents > 0
+            ? ` — faltam ${formatBRL(faltaCents)}`
+            : faltaCents < 0
+              ? ` — ${formatBRL(-faltaCents)} a mais que a compra`
+              : indiceDerivado !== null
+                ? `. ${FORMA_PAGAMENTO_LABEL[formas[indiceDerivado].forma]} recebe o restante.`
+                : ''),
+        erro: faltaCents !== 0,
+      }
 
   // BASTA UMA linha ser convênio — E4, e foi decisão do usuário em
   // 2026-08-27. O convênio pode compor o pagamento com outra forma, e a
@@ -154,18 +195,37 @@ function CadastroEntregaForm({
   function addForma() {
     setFormas((prev) => {
       if (prev.length >= MAX_FORMAS_PREVISTAS) return prev
-      // A primeira linha ganha o valor da compra ao deixar de ser a
-      // única: até aqui o valor dela era implícito (a compra inteira), e
-      // ela precisa passar a ser editável já preenchida — é dela que o
-      // caixa vai TIRAR o que a segunda forma cobre.
-      const comValor =
-        prev.length === 1 && !prev[0].digitos ? [{ ...prev[0], digitos: valorCompra }] : prev
-      return [...comValor, linhaNova()]
+      // AS DUAS LINHAS FICAM VAZIAS, e isso é o inverso do que se fazia
+      // aqui antes. A primeira herdava o valor cheio da compra pra o
+      // caixa TIRAR dela o que a segunda cobrisse — o que custava apagar
+      // um campo já preenchido antes de digitar (a máscara continua da
+      // direita, então digitar por cima de "137,43" empurra o número em
+      // vez de trocá-lo).
+      //
+      // Com a derivação, ele digita numa linha vazia e a outra se
+      // resolve: menos teclas, e nenhuma subtração de cabeça.
+      return [...prev, linhaNova()]
     })
   }
 
   function removeForma(index: number) {
-    setFormas((prev) => (prev.length <= 1 ? prev : prev.filter((_, i) => i !== index)))
+    setFormas((prev) => {
+      if (prev.length <= 1) return prev
+      const restantes = prev.filter((_, i) => i !== index)
+      // VOLTANDO A UMA LINHA, ela precisa voltar a ser vazia — e este é
+      // o único ponto onde o invariante poderia se perder.
+      //
+      // Com uma forma só o campo de valor não é renderizado, então um
+      // resto de dígitos ali seria um valor que o caixa não vê e não
+      // consegue corrigir: a soma passaria a não bater e o erro
+      // apareceria no submit apontando pra um campo invisível.
+      //
+      // Limpar aqui é o que sustenta "linha única ⇒ vale a compra
+      // inteira" (o caminho de 29 em cada 30 entregas) sem precisar de
+      // um segundo caso especial na derivação — que é onde ele viraria
+      // uma regra duplicada, capaz de discordar da que grava.
+      return restantes.length === 1 ? [{ ...restantes[0], digitos: '' }] : restantes
+    })
   }
 
   function updateForma(index: number, patch: Partial<LinhaForma>) {
@@ -399,9 +459,20 @@ function CadastroEntregaForm({
                     <>
                       <CampoMoeda
                         className="w-28"
-                        digitos={linha.digitos}
+                        // A LINHA DERIVADA EXIBE O QUE VAI SER GRAVADO —
+                        // `valoresCents` é a mesma derivação que monta
+                        // `previstos` e o total. Reformatar aqui a
+                        // partir de outra expressão deixaria a tela
+                        // capaz de mostrar um número e gravar outro.
+                        digitos={
+                          index === indiceDerivado
+                            ? digitosDoValor(valoresCents[index])
+                            : linha.digitos
+                        }
                         onDigitos={(digitos) => updateForma(index, { digitos })}
                         onKeyDown={handleFormaKeyDown}
+                        selecionaAoFocar={index === indiceDerivado}
+                        aria-label={`Valor em ${FORMA_PAGAMENTO_LABEL[linha.forma]}`}
                       />
                       <Button
                         type="button"
@@ -420,12 +491,10 @@ function CadastroEntregaForm({
               {!umaFormaSo && (
                 <p
                   className={
-                    totalPrevistoCents === valorCompraCents
-                      ? 'text-xs text-muted-foreground'
-                      : 'text-xs text-destructive'
+                    avisoDaDivisao.erro ? 'text-xs text-destructive' : 'text-xs text-foreground/70'
                   }
                 >
-                  Total: {formatBRL(totalPrevistoCents)} de {formatBRL(valorCompraCents)} da compra
+                  {avisoDaDivisao.texto}
                 </p>
               )}
             </div>

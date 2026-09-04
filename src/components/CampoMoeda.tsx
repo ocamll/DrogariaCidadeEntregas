@@ -18,6 +18,8 @@ export function CampoMoeda({
   ref,
   className,
   autoFocus,
+  selecionaAoFocar,
+  'aria-label': ariaLabel,
 }: {
   id?: string
   digitos: string
@@ -26,6 +28,13 @@ export function CampoMoeda({
   ref?: Ref<HTMLInputElement>
   className?: string
   autoFocus?: boolean
+  // Para o campo cujo valor a TELA calculou (a linha que absorve o resto
+  // da divisão de pagamento). Sem isso a máscara continuaria a partir do
+  // que já está lá — clicar num campo que mostra "37,43" e digitar "5"
+  // daria "374,35", que é o oposto de sobrescrever. Digitar num valor
+  // que o caixa não escolheu é sempre intenção de trocá-lo.
+  selecionaAoFocar?: boolean
+  'aria-label'?: string
 }) {
   const texto = digitos ? formatCentsInput(centsFromDigits(digitos)) : ''
 
@@ -39,6 +48,8 @@ export function CampoMoeda({
         // sem vírgula/ponto, que aqui não têm uso nenhum.
         inputMode="numeric"
         autoFocus={autoFocus}
+        aria-label={ariaLabel}
+        onFocus={selecionaAoFocar ? (e) => e.target.select() : undefined}
         // alinhado à esquerda, logo depois do "R$" — o número cresce no
         // sentido da leitura, e o cursor fica onde o caixa está olhando.
         className={cn('pl-9 tabular-nums', className)}

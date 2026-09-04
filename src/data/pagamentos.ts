@@ -20,6 +20,11 @@ export {
   MAX_FORMAS_PREVISTAS,
   validarFormasPrevistas,
   divergiuDoPrevisto,
+  // A linha que o caixa não digitou absorve o resto da divisão. Pura
+  // como as de cima, e usada pelas DUAS telas que dividem pagamento —
+  // cadastro de entrega e o dialog de divergência.
+  resolverValoresDasFormas,
+  digitosDoValor,
   ORIGEM_INFORMADA,
   referenciaInformadaDoEvento,
   textoDaReferenciaInformada,

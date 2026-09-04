@@ -24,9 +24,11 @@ import {
   MAX_FORMAS_PREVISTAS,
   validarFormasPrevistas,
   divergiuDoPrevisto,
+  resolverValoresDasFormas,
+  digitosDoValor,
   type FormaComValor,
 } from '../src/lib/formasDePagamento.ts'
-import { formatBRL } from '../src/lib/money.ts'
+import { centsFromDigits, formatBRL } from '../src/lib/money.ts'
 import { readFileSync } from 'node:fs'
 
 // Dinheiro formatado pelo MESMO `formatBRL` do app, nunca digitado à
@@ -229,7 +231,114 @@ console.log('\n--- (7) o caso de UMA forma continua se comportando ---')
 }
 
 // ---------------------------------------------------------------------
-console.log('\n--- (8) fiacao: as regras nao tem segunda copia ---')
+console.log('\n--- (8) a linha nao digitada absorve o resto ---')
+// ---------------------------------------------------------------------
+{
+  // O caixa dividia R$ 137,43 e calculava a segunda parcela de cabeça.
+  // Esta é a conta que a tela passou a fazer — e ela é a MESMA expressão
+  // que monta o payload, então errar aqui é gravar errado, não só exibir
+  // errado.
+  const resolve = (digitos: string[], total: number) => resolverValoresDasFormas(digitos, total)
+
+  {
+    const r = resolve(['10000', ''], 13743)
+    igual('a segunda recebe o resto', r.valoresCents[1], 3743)
+    igual('e ela e a derivada', r.indiceDerivado, 1)
+    igual('a digitada nao e tocada', r.valoresCents[0], 10000)
+  }
+
+  // SIMÉTRICO — o caixa pode digitar a segunda e deixar a primeira
+  // derivar ("o cliente vai pagar R$ 37,43 em dinheiro"). Sem isso ele
+  // teria que se lembrar de qual campo é o "livre", que é justamente o
+  // tipo de regra que não cabe na cabeça de quem está com fila.
+  {
+    const r = resolve(['', '3743'], 13743)
+    igual('a PRIMEIRA tambem deriva', r.valoresCents[0], 10000)
+    igual('e o indice acompanha', r.indiceDerivado, 0)
+  }
+
+  // UMA LINHA SÓ é o caso do E4, e a derivação o cobre sem caso
+  // especial: ela é a única vazia, então absorve a compra inteira. É o
+  // que sustenta o caminho de 29 em cada 30 entregas, onde o campo de
+  // valor nem chega a ser renderizado.
+  {
+    const r = resolve([''], 13743)
+    igual('linha unica vale a compra inteira', r.valoresCents[0], 13743)
+    igual('e ela e a derivada', r.indiceDerivado, 0)
+  }
+
+  // TRÊS LINHAS: só deriva quando sobra exatamente uma vazia.
+  {
+    const duasVazias = resolve(['10000', '', ''], 13743)
+    igual('com DUAS vazias ninguem deriva', duasVazias.indiceDerivado, null)
+    // Repartir o resto entre as duas seria a tela inventando uma divisão
+    // que ninguém pediu — e num campo de dinheiro.
+    igual('e o resto nao e distribuido', duasVazias.valoresCents[1], 0)
+
+    const umaVazia = resolve(['10000', '3000', ''], 13743)
+    igual('preenchida a segunda, a terceira deriva', umaVazia.valoresCents[2], 743)
+    igual('no indice certo', umaVazia.indiceDerivado, 2)
+  }
+
+  // NENHUMA VAZIA — o caixa determinou tudo, e conferir a soma volta a
+  // ser de `validarFormasPrevistas`. A derivação não corrige nada aqui:
+  // ajustar em silêncio um valor que ele digitou seria pior que recusar.
+  {
+    const r = resolve(['10000', '3000'], 13743)
+    igual('nada e derivado', r.indiceDerivado, null)
+    igual('e os valores sao os digitados', r.valoresCents.join('|'), '10000|3000')
+    checa(
+      'e a validacao continua recusando a soma errada',
+      validarFormasPrevistas([f('pix', 10000), f('dinheiro', 3000)], 13743) !== null
+    )
+  }
+
+  // RESTO ZERO E NEGATIVO não derivam, e os dois casos existem de
+  // verdade: a primeira forma cobrindo tudo, e o caixa digitando um
+  // valor maior que a compra. Preencher R$ 0,00 daria uma linha que a
+  // validação recusa logo em seguida; negativo é irrepresentável num
+  // campo de dígitos.
+  {
+    const exato = resolve(['13743', ''], 13743)
+    igual('resto zero nao deriva', exato.indiceDerivado, null)
+    igual('e a linha fica vazia, nao zerada a forca', exato.valoresCents[1], 0)
+
+    const demais = resolve(['20000', ''], 13743)
+    igual('resto negativo nao deriva', demais.indiceDerivado, null)
+    igual('e o digitado e preservado pra tela poder explicar', demais.valoresCents[0], 20000)
+  }
+
+  // O PAR DE INVERSAS que leva o valor calculado de volta ao campo. Se
+  // `digitosDoValor` e `centsFromDigits` discordarem, a tela exibe um
+  // número e grava outro — e o campo derivado é justamente aquele que o
+  // caixa não tem como conferir digitando.
+  for (const cents of [1, 5, 743, 3743, 13743, 99999999]) {
+    igual(`ida e volta preserva ${cents}`, centsFromDigits(digitosDoValor(cents)), cents)
+  }
+  igual('valor nao positivo vira campo vazio', digitosDoValor(0), '')
+
+  // A DERIVAÇÃO SATISFAZ A VALIDAÇÃO — as duas regras têm que concordar,
+  // senão a tela preenche sozinha um valor que ela mesma recusa no
+  // submit. É o mesmo defeito do §88 noutra roupa: dois escritores do
+  // mesmo fato.
+  {
+    const r = resolve(['10000', ''], 13743)
+    igual(
+      'o que a derivacao produz passa na validacao',
+      validarFormasPrevistas(
+        [
+          { forma: 'pix', valor_cents: r.valoresCents[0] },
+          { forma: 'dinheiro', valor_cents: r.valoresCents[1] },
+        ],
+        13743
+      ),
+      null
+    )
+  }
+}
+
+// ---------------------------------------------------------------------
+console.log('\n--- (9) fiacao: as regras nao tem segunda copia ---')
 // ---------------------------------------------------------------------
 {
   // "Não é decidido em outro lugar" é afirmação sobre o CÓDIGO, e o
@@ -291,6 +400,42 @@ console.log('\n--- (8) fiacao: as regras nao tem segunda copia ---')
   )
   // O gatilho fora da cadeia de Enter é o que protege os 25 segundos.
   checa('o convenio olha todas as linhas', /formas\.some\(\(linha\) => linha\.forma === 'convenio'\)/.test(cadastro))
+
+  // A DERIVAÇÃO É UMA SÓ, e as duas telas a chamam. Uma cópia local em
+  // qualquer uma delas poderia calcular o resto de um jeito e gravar de
+  // outro — o defeito que este arquivo inteiro existe pra impedir.
+  checa('o cadastro deriva pela lib', /resolverValoresDasFormas\(/.test(semComentarios(cadastro)))
+  checa('o dialog deriva pela lib', /resolverValoresDasFormas\(/.test(semComentarios(dialog)))
+
+  // O PAYLOAD SAI DA DERIVAÇÃO, nunca dos dígitos crus. A linha derivada
+  // não TEM dígitos — é justamente ela que valeria zero se alguém
+  // voltasse a ler `linha.digitos`/`linha.valor` aqui, e o vale sairia
+  // com a forma que a tela mostrava preenchida valendo nada.
+  checa(
+    'o cadastro grava `valoresCents`, nao os digitos crus',
+    /valorCents: valoresCents\[i\]/.test(semComentarios(cadastro)) &&
+      !/valorCents: umaFormaSo \?/.test(semComentarios(cadastro))
+  )
+  checa(
+    'o dialog grava `valoresCents`, nao os digitos crus',
+    /valor_cents: valoresCents\[i\]/.test(semComentarios(dialog)) &&
+      !/valor_cents: centsFromDigits\(linha\.valor\)/.test(semComentarios(dialog))
+  )
+
+  // A LINHA INICIAL DO DIALOG NASCE VAZIA — se voltasse a nascer com o
+  // valor cheio, ela contaria como digitada, e ao adicionar a segunda
+  // forma o resto seria zero: a derivação existiria e nunca dispararia,
+  // que é a pior forma de uma regra falhar (sem erro nenhum).
+  checa(
+    'a linha inicial do dialog nasce vazia',
+    !/valor: String\(valorCents\)/.test(semComentarios(dialog))
+  )
+
+  // O CAMPO DERIVADO SELECIONA AO FOCAR. Sem isso a máscara continua a
+  // partir do que já está lá: clicar num campo que mostra "37,43" e
+  // digitar "5" daria "374,35" em vez de "0,05".
+  checa('o cadastro seleciona ao focar a derivada', /selecionaAoFocar=/.test(cadastro))
+  checa('o dialog seleciona ao focar a derivada', /selecionaAoFocar=/.test(dialog))
 
   const lib = ler('src/lib/formasDePagamento.ts')
   // O `.*` precisa alcançar o CAMINHO do módulo, senão a linha casada

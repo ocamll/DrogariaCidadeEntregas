@@ -2,9 +2,12 @@ import { useState } from 'react'
 import { X } from 'lucide-react'
 import type { AuthProfile } from '@/data/auth'
 import {
+  FORMA_PAGAMENTO_LABEL,
   FORMA_PAGAMENTO_OPTIONS,
   textoDoPagamentoAlterado,
   divergiuDoPrevisto,
+  resolverValoresDasFormas,
+  digitosDoValor,
   type FormaPagamento,
   type FormaComValor,
   type MarcarDivergenciaInput,
@@ -12,7 +15,7 @@ import {
 import type { NotificarFaltaReceitaInput } from '@/data/documentos'
 import { enfileirarOperacao, donoDaFila } from '@/data/filaOffline'
 import { uuidv7 } from '@/lib/uuid'
-import { centsFromDigits, formatBRL } from '@/lib/money'
+import { formatBRL } from '@/lib/money'
 import { CampoMoeda } from '@/components/CampoMoeda'
 import { Button } from '@/components/ui/button'
 import { Textarea } from '@/components/ui/textarea'
@@ -37,8 +40,16 @@ type Opcao = 'pagamento' | 'receita'
 // de entrega — nunca texto livre com "," ou ".".
 type Linha = { forma: FormaPagamento; valor: string }
 
-function linhaInicial(valorCents: number): Linha {
-  return { forma: FORMA_PADRAO, valor: String(valorCents) }
+// NASCE VAZIA, e continua exibindo o valor cheio — quem o põe lá é a
+// derivação (`resolverValoresDasFormas`): com uma linha só, ela é a
+// única vazia e absorve o esperado inteiro.
+//
+// Preencher `valor` aqui daria a MESMA tela e quebraria a divisão: ao
+// clicar "+ Adicionar forma", a linha 1 contaria como digitada, sobraria
+// resto zero, e o caixa teria que apagar um campo cheio antes de digitar
+// — que é exatamente o atrito que a derivação veio tirar.
+function linhaInicial(): Linha {
+  return { forma: FORMA_PADRAO, valor: '' }
 }
 
 export function NotificarOcorrenciaDialog({
@@ -136,7 +147,7 @@ function DivergenciaPagamentoForm({
   const [formaEsperada, setFormaEsperada] = useState<FormaPagamento>(
     previstos[0]?.forma ?? FORMA_PADRAO
   )
-  const [linhas, setLinhas] = useState<Linha[]>([linhaInicial(valorCents)])
+  const [linhas, setLinhas] = useState<Linha[]>([linhaInicial()])
   const [justificativa, setJustificativa] = useState('')
   const [erro, setErro] = useState<string | null>(null)
 
@@ -152,8 +163,38 @@ function DivergenciaPagamentoForm({
     setLinhas((prev) => prev.map((linha, i) => (i === index ? { ...linha, ...patch } : linha)))
   }
 
-  const totalRealizadoCents = linhas.reduce((soma, linha) => soma + centsFromDigits(linha.valor), 0)
+  // A LINHA QUE O CAIXA NÃO DIGITOU ABSORVE O RESTO — a mesma regra do
+  // cadastro de entrega, e aqui ela pesa mais: são até QUATRO linhas
+  // para dividir, e este dialog registra um fato já consumado (o cliente
+  // pagou metade em pix, metade em dinheiro), quase sempre em valor
+  // quebrado.
+  const { valoresCents, indiceDerivado } = resolverValoresDasFormas(
+    linhas.map((linha) => linha.valor),
+    valorCents
+  )
+  const totalRealizadoCents = valoresCents.reduce((soma, cents) => soma + cents, 0)
   const totalBate = totalRealizadoCents === valorCents
+
+  // Diz QUANTO falta, não só que não bate — ver o comentário gêmeo em
+  // `CadastroEntrega`. O vocabulário aqui é "esperado", não "da compra":
+  // este dialog compara com o previsto do vale.
+  const faltaCents = valorCents - totalRealizadoCents
+  const nenhumaDigitada = linhas.every((linha) => linha.valor === '')
+  const avisoDaDivisao: { texto: string; erro: boolean } =
+    nenhumaDigitada && linhas.length > 1
+      ? { texto: 'Informe o valor de uma das formas — a outra recebe o restante.', erro: false }
+      : {
+          texto:
+            `Total: ${formatBRL(totalRealizadoCents)} de ${formatBRL(valorCents)} esperado` +
+            (faltaCents > 0
+              ? ` — faltam ${formatBRL(faltaCents)}`
+              : faltaCents < 0
+                ? ` — ${formatBRL(-faltaCents)} a mais que o esperado`
+                : indiceDerivado !== null && linhas.length > 1
+                  ? `. ${FORMA_PAGAMENTO_LABEL[linhas[indiceDerivado].forma]} recebe o restante.`
+                  : ''),
+          erro: !totalBate,
+        }
 
   const semPrevisto = previstos.length === 0
 
@@ -176,7 +217,10 @@ function DivergenciaPagamentoForm({
     : previstos
 
   function handleConfirmar() {
-    if (linhas.some((linha) => centsFromDigits(linha.valor) <= 0)) {
+    // `valoresCents`, nunca `centsFromDigits(linha.valor)`: a linha
+    // derivada não tem dígitos, e reler os crus aqui gravaria zero
+    // justamente na forma que a tela mostrava preenchida.
+    if (valoresCents.some((cents) => cents <= 0)) {
       setErro('Toda linha precisa de um valor maior que zero.')
       return
     }
@@ -196,9 +240,9 @@ function DivergenciaPagamentoForm({
     // `selar_romaneio_retorno_interno`, que compara conjuntos de
     // `forma|valor`. Os dois escritores do mesmo fato afirmando coisas
     // diferentes.
-    const realizados: FormaComValor[] = linhas.map((linha) => ({
+    const realizados: FormaComValor[] = linhas.map((linha, i) => ({
       forma: linha.forma,
-      valor_cents: centsFromDigits(linha.valor),
+      valor_cents: valoresCents[i],
     }))
     if (!divergiuDoPrevisto(previstosParaComparar, realizados)) {
       setErro('Isso bate com o que já era esperado — não é divergência.')
@@ -306,8 +350,14 @@ function DivergenciaPagamentoForm({
             </Select>
             <CampoMoeda
               className="w-28"
-              digitos={linha.valor}
+              // A derivada exibe o que vai ser GRAVADO — `valoresCents` é
+              // a mesma expressão que monta `realizados`.
+              digitos={
+                index === indiceDerivado ? digitosDoValor(valoresCents[index]) : linha.valor
+              }
               onDigitos={(valor) => updateLinha(index, { valor })}
+              selecionaAoFocar={index === indiceDerivado}
+              aria-label={`Valor em ${FORMA_PAGAMENTO_LABEL[linha.forma]}`}
             />
             {linhas.length > 1 && (
               <Button
@@ -323,9 +373,12 @@ function DivergenciaPagamentoForm({
           </div>
         ))}
 
-        <p className={totalBate ? 'text-xs text-muted-foreground' : 'text-xs text-destructive'}>
-          Total: {formatBRL(totalRealizadoCents)} de {formatBRL(valorCents)} esperado
-          {!totalBate && ' — não bate'}
+        <p
+          className={
+            avisoDaDivisao.erro ? 'text-xs text-destructive' : 'text-xs text-foreground/70'
+          }
+        >
+          {avisoDaDivisao.texto}
         </p>
       </div>
 

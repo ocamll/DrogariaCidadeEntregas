@@ -29,7 +29,7 @@
 // cliente antigo receber um payload que ele não sabe interpretar, e o
 // sintoma apareceria numa tela de auditoria.
 
-import { formatBRL } from '@/lib/money'
+import { centsFromDigits, formatBRL } from '@/lib/money'
 
 export type FormaPagamento =
   | 'dinheiro'
@@ -55,6 +55,85 @@ export const FORMA_PAGAMENTO_LABEL: Record<FormaPagamento, string> = {
 export const FORMA_PAGAMENTO_OPTIONS = Object.entries(FORMA_PAGAMENTO_LABEL) as Array<
   [FormaPagamento, string]
 >
+
+/**
+ * O VALOR DE CADA LINHA, com a que o caixa não digitou absorvendo o
+ * resto.
+ *
+ * O caixa tem fila no balcão. Dividindo R$ 137,43 em Pix e Dinheiro, ele
+ * digitava o valor de uma forma e calculava a outra DE CABEÇA — e é
+ * justamente no número quebrado, que é quando a divisão costuma
+ * acontecer, que a subtração custa mais. A tela sabe fazer essa conta.
+ *
+ * **A regra generaliza o que o E4 já fazia com uma forma só.** Lá o
+ * valor previsto É o da compra e o campo nem aparece, porque não há o
+ * que dividir: com uma linha, ela está determinada. Com N linhas, as
+ * N-1 que o caixa preencheu determinam a última do mesmo jeito — a soma
+ * bater com a compra é regra dura (`validarFormasPrevistas`), não
+ * preferência, então o resto não é palpite.
+ *
+ * ```
+ * Pix       R$ 100,00   ← digitado
+ * Dinheiro  R$  37,43   ← daqui
+ * ```
+ *
+ * **Vazio é o sinal, e ele não precisa de estado paralelo.** `digitos`
+ * já distingue "ainda não preenchi" de "é zero" — é o mesmo contrato do
+ * `CampoMoeda`, que mostra campo vazio em vez de "0,00" exatamente pra
+ * essa distinção existir. Apagar o campo devolve a linha à derivação,
+ * que é o gesto certo pra "recalcule pra mim".
+ *
+ * **Só deriva com EXATAMENTE uma linha vazia**, e as duas exclusões
+ * importam:
+ *
+ *   - com duas ou mais vazias o resto não teria como ser repartido sem
+ *     a tela inventar uma divisão que ninguém pediu;
+ *   - com nenhuma vazia o caixa determinou tudo, e conferir a soma volta
+ *     a ser de `validarFormasPrevistas` — que continua sendo quem
+ *     recusa. Aqui não se valida nada.
+ *
+ * **Resto zero ou negativo NÃO é derivado.** Preencher R$ 0,00 daria uma
+ * linha que a validação recusa logo em seguida, e negativo é
+ * irrepresentável num campo de dígitos. Nos dois casos a linha fica
+ * vazia e quem explica é a tela, que tem vocabulário pra isso.
+ *
+ * Puro e sem opinião de tela: devolve os valores e QUAL índice foi
+ * calculado. Quem exibe decide o que dizer.
+ */
+export function resolverValoresDasFormas(
+  digitosPorLinha: string[],
+  totalCents: number
+): { valoresCents: number[]; indiceDerivado: number | null } {
+  const valoresCents = digitosPorLinha.map((digitos) => centsFromDigits(digitos))
+
+  const vazias = digitosPorLinha.reduce<number[]>(
+    (indices, digitos, i) => (digitos === '' ? [...indices, i] : indices),
+    []
+  )
+  if (vazias.length !== 1) return { valoresCents, indiceDerivado: null }
+
+  // A linha vazia contribui com 0, então o resto é o total menos a soma
+  // de TODAS — não é preciso somar "as outras" em separado.
+  const resto = totalCents - valoresCents.reduce((soma, cents) => soma + cents, 0)
+  if (resto <= 0) return { valoresCents, indiceDerivado: null }
+
+  const indiceDerivado = vazias[0]
+  const comResto = [...valoresCents]
+  comResto[indiceDerivado] = resto
+  return { valoresCents: comResto, indiceDerivado }
+}
+
+/**
+ * Os dígitos que o campo derivado exibe.
+ *
+ * `centsFromDigits` e esta função são inversas sobre inteiro positivo
+ * (`'3743'` ↔ `3743`), então a linha calculada atravessa o `CampoMoeda`
+ * pela MESMA porta que a digitada — sem um segundo caminho de formatação
+ * que pudesse divergir do primeiro.
+ */
+export function digitosDoValor(cents: number): string {
+  return cents > 0 ? String(cents) : ''
+}
 
 /** Uma forma com valor, como o evento novo grava. */
 export type FormaComValor = { forma: FormaPagamento; valor_cents: number }
