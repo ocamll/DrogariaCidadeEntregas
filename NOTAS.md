@@ -111,7 +111,8 @@ E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
 E5   login por username                 ✓  item 89 — aceite medido
 E10  admin operando por filial   SERVIDOR FECHADO (91–92) — falta cliente
 E11  visibilidade do offline     backlog, sem contrato
-ordem ate producao: E10 E11 E6 E9 E7 E8 → STAGING → corte → producao → piloto
+E12  continuidade operacional offline  CONTRATO FECHADO (94), sem código
+ordem ate producao: E10 E11 E12 E6 E9 E7 E8 → STAGING → corte → producao → piloto
 E6..E9  router, divergência, agência, endereço
 ```
 
@@ -305,8 +306,8 @@ Filtrável por período (De/Até) e por filial.
   (duplica um pouco de texto-por-tipo em vez de compartilhar) — decisão
   consciente pra não arriscar regressão numa feature já testada.
 - **Contexto de negócio que veio à tona aqui e foi pro CLAUDE.md:** a
-  farmácia real tem 17 filiais (hoje só 2 nos dados de teste). Não criei
-  as outras 15 — só confirmei que `useLojas()` já escala sem mudança de
+  farmácia real tem 18 filiais (hoje só 2 nos dados de teste). Não criei
+  as outras 16 — só confirmei que `useLojas()` já escala sem mudança de
   código. Aproveitei pra corrigir uma entrada ambígua na lista "Fora" do
   CLAUDE.md que citava só "multi-loja" (parecia dizer que múltiplas lojas
   não são suportadas, quando na verdade só a *criação* de loja pela UI
@@ -472,7 +473,7 @@ página 1. Restaurado pra 50 e reconferido depois.
 
 `buscarEntregasDeHoje` era o que sobrava sem teto e ordenado
 descendente: pro caixa nunca chegaria perto (um dia, uma loja), mas
-admin/gerente enxergam as 17 filiais juntas e num dia movimentado o
+admin/gerente enxergam as 18 filiais juntas e num dia movimentado o
 corte silencioso derrubaria justamente os vales da manhã.
 
 Antes de mexer, conferi as outras queries sem limite (documentos de
@@ -6357,6 +6358,15 @@ CLAUDE.md é o total da rede, não o desta cidade — e isso explica a
 sequência esburacada (02, 04, 09, 10, 12, 15, 18): os que faltam estão
 nas outras cidades. **Ninguém deve renumerar pra fechar os buracos.**
 
+> **CORRIGIDO EM 2026-09-03: são DEZOITO, não dezessete.** O usuário
+> corrigiu o total da rede, e a filial a mais é de **cidade já mapeada**
+> — ou seja, `cidades` não ganha linha nova. O que continua valendo
+> inteiro é o parágrafo acima: o número é o total da REDE, a sequência é
+> esburacada de propósito, e ninguém renumera. Os seis pontos que
+> repetiam "17" foram atualizados (três no CLAUDE.md, três aqui); este
+> ficou com a correção à vista porque é o que DEFINE o número, e um
+> total trocado em silêncio é a classe de defeito que o §92 registra.
+
 E cada cidade nova custa mais que lojas: pela regra de uma agência de
 tele por cidade, é `cidades → lojas → agencias → mototaxistas →`
 `credenciais`. Acrescentar só as lojas as deixaria sem agência que as
@@ -8480,6 +8490,356 @@ silêncio, meses depois, sem ninguém ligar o sintoma à guarda.
 **E10.1 FECHADO no servidor.** Falta a parte cliente: o snapshot da loja
 operacional, a fila, o seletor do cabeçalho e as três telas.
 
+## 93. A linha que o caixa não digitou absorve o resto
+
+Pedido em 2026-09-03, **fora da frente do E10** e antes de ela continuar.
+O relato do usuário foi operacional, não de tela: dividindo o pagamento,
+ele digitava o valor de uma forma e **calculava a outra de cabeça** — e é
+justamente no número quebrado, que é quando a divisão costuma acontecer,
+que a subtração custa mais tempo com fila no balcão.
+
+O pedido literal era *mostrar* quanto falta. A justificativa era tempo.
+As duas leituras dão trabalhos diferentes, então foram levadas ao
+usuário, que escolheu **preencher sozinha** — e nas **duas** telas.
+
+### O que existia, e por que o rodapé não resolvia
+
+```
+Total: R$ 100,00 de R$ 137,43 da compra
+```
+
+Ele dizia que a soma **não bate**, nunca **quanto** falta. E o
+`addForma` piorava o gesto: a primeira linha herdava o valor cheio da
+compra pra o caixa TIRAR dela o que a segunda cobrisse — o que obriga a
+apagar um campo já preenchido antes de digitar, porque a máscara de
+centavos continua da direita (digitar "5" sobre "137,43" dá "1.374,35",
+não "0,05").
+
+### A regra, e por que ela não é uma conveniência nova
+
+**A única linha vazia absorve o resto.** Isso **generaliza o que o E4 já
+fazia com uma forma só**: lá o valor previsto É o da compra e o campo nem
+aparece, porque com uma linha ela está determinada. Com N linhas, as N-1
+preenchidas determinam a última do mesmo jeito — e a soma bater com a
+compra é regra dura (`validarFormasPrevistas`), não preferência, então o
+resto não é palpite da tela.
+
+```
+Pix       R$ 100,00   ← digitado
+Dinheiro  R$  37,43   ← daqui
+```
+
+**Vazio é o sinal, sem estado paralelo.** `digitos` já distingue "ainda
+não preenchi" de "é zero" — é o contrato que o `CampoMoeda` sustenta ao
+mostrar campo vazio em vez de "0,00". Apagar o campo devolve a linha à
+derivação, que é o gesto certo pra "recalcule pra mim".
+
+**É SIMÉTRICO, e isso não é enfeite.** O caixa pode digitar a segunda e
+deixar a primeira derivar ("o cliente vai pagar R$ 37,43 em dinheiro").
+Se só a última derivasse, ele teria que lembrar qual campo é o livre — o
+tipo de regra que não cabe na cabeça de quem está com fila.
+
+**Três exclusões, cada uma por um motivo:**
+
+| caso | comportamento | por quê |
+|---|---|---|
+| duas ou mais vazias | ninguém deriva | repartir o resto seria a tela inventando uma divisão que ninguém pediu, num campo de dinheiro |
+| nenhuma vazia | ninguém deriva | o caixa determinou tudo; ajustar em silêncio um valor digitado é pior que recusar |
+| resto ≤ 0 | não deriva, campo fica vazio | R$ 0,00 seria uma linha que a validação recusa em seguida, e negativo é irrepresentável num campo de dígitos |
+
+### O aviso passou a dizer o NÚMERO
+
+E ele cobre inclusive o caso em que a derivação não pode agir — três
+linhas com duas vazias —, que era o buraco original:
+
+```
+todas vazias    Informe o valor de uma das formas — a outra recebe o restante.
+derivando       Total: R$ 137,43 de R$ 137,43 da compra. Dinheiro recebe o restante.
+faltando        Total: R$ 30,00 de R$ 137,43 da compra — faltam R$ 107,43
+excedendo       Total: R$ 200,00 de R$ 137,43 da compra — R$ 62,57 a mais que a compra
+```
+
+O primeiro é o estado logo depois do "+ outra forma", e ele é **neutro,
+não vermelho**: nada foi decidido ainda, então cobrar a soma acusaria o
+caixa de um erro que ele não cometeu. Ele ensina a regra no instante em
+que ela passa a valer.
+
+### As três armadilhas que o desenho teve que desarmar
+
+**1. A tela não pode exibir um número e gravar outro.** `valoresCents` é
+a MESMA expressão que monta o campo, o total, o aviso e o payload. A
+linha derivada **não tem dígitos** — quem voltasse a ler `linha.digitos`
+ali gravaria **zero** justamente na forma que a tela mostrava
+preenchida. Duas asserções de fiação existem só pra isso, uma por tela.
+
+**2. O campo derivado seleciona ao focar.** Sem isso a máscara continua a
+partir do que já está lá, e digitar por cima de um valor que o caixa não
+escolheu empurraria o número em vez de trocá-lo. `selecionaAoFocar` é
+prop nova do `CampoMoeda`, usada só onde o valor foi calculado.
+
+**3. Voltar a UMA linha tem que limpar os dígitos.** É o único ponto onde
+o invariante poderia se perder: com uma forma só o campo não é
+renderizado, então um resto de dígitos seria um valor que o caixa **não
+vê e não consegue corrigir** — a soma passaria a não bater e o erro
+apareceria no submit apontando pra um campo invisível. Limpar em
+`removeForma` é o que sustenta "linha única ⇒ vale a compra inteira" sem
+um segundo caso especial dentro da derivação, que é onde ele viraria uma
+regra duplicada capaz de discordar da que grava.
+
+**A linha inicial do dialog nasce VAZIA**, e isso é a mesma armadilha
+pelo avesso. Ela exibe o valor cheio pela derivação — visualmente
+idêntico ao de antes. Se voltasse a nascer com `valor: String(valorCents)`
+ela contaria como digitada, e ao adicionar a segunda forma o resto seria
+zero: **a derivação existiria e nunca dispararia**, que é a pior forma de
+uma regra falhar, porque não produz erro nenhum.
+
+### O que foi medido
+
+```
+formas-previstas.spec.mts   TUDO OK   seção (8) nova, 15 casos
+                                      seção (9) com 8 asserções de fiação
+pagamento-alterado                    TUDO OK
+previsto-escritor-unico               TUDO OK
+canonico (DCR1)                       TODOS PASSARAM
+congelar-retorno                      ok
+typecheck / build                     limpos
+lint                                  0 erros; 7 avisos, todos em ui/ e auth.tsx
+```
+
+**E no navegador, com o banco conferido nos dois caminhos** — porque
+dialog fechado não é prova de escrita (a nota de 10/08 vale aqui):
+
+```
+V-000061  compra R$ 137,43
+  previsto   pix        10000   ← digitado no cadastro
+  previsto   dinheiro    3743   ← DERIVADO
+  realizado  dinheiro    8000   ← digitado no dialog
+  realizado  dinheiro    5743   ← DERIVADO
+  status_financeiro = divergente
+  evento `pagamento_alterado` com `de` trazendo os DOIS previstos
+```
+
+Os cinco estados de tela foram exercitados um a um: derivação normal, o
+caso **simétrico** (digitar na segunda e ver a primeira virar R$ 100,00,
+com o aviso dizendo "Pix recebe o restante"), três formas com duas vazias
+(não deriva, e o aviso entrega os R$ 107,43 que faltam), excedente
+(derivada esvazia, aviso em vermelho com os R$ 62,57), e a volta a uma
+linha só (campo some, dígitos limpos, rodapé some).
+
+### O que NÃO mudou, e é o que mais importa
+
+**O caminho de uma forma só não tem um passo novo.** Nenhum campo,
+nenhuma tecla, a mesma cadeia de Enter, o mesmo orçamento de 25
+segundos — o bloco inteiro da divisão continua fora da tela em 29 de
+cada 30 entregas. O teste da regra do §90 continua valendo: *"o que muda
+pra quem NÃO usa a feature?"* — nada. **O cronômetro não foi rodado de
+novo, e pela mesma razão não precisou**: não há passo novo no caminho
+medido.
+
+## 94. E12 — Continuidade operacional offline: CONTRATO FECHADO, código não começado
+
+Decidido em 2026-09-03, e **deliberadamente não implementado**: a decisão
+do usuário foi registrar agora e **não interromper o E10** por ela. *"É
+uma mudança boa demais e central demais para ser feita no meio de outra
+frente."*
+
+Nasceu de uma pergunta simples — *"hoje, se cair a net, eu consigo fazer
+o fluxo todo?"* — e a resposta levantada contra o código foi **a espinha
+dorsal sim, o fluxo inteiro não**.
+
+### O objetivo, na frase do usuário
+
+> Se a filial começou o expediente **preparada**, e a internet cair, ela
+> continua atendendo, despachando e recebendo entregas até a conexão
+> voltar.
+
+E o argumento operacional que descarta o "deixar como está": se a
+internet cair por duas horas numa filial movimentada, **ninguém vai
+segurar as entregas**. As pessoas criam um processo paralelo em papel e
+WhatsApp e depois tentam reconstruir o sistema — *"é exatamente aí que a
+digitalização perde valor"*. É a mesma regra que a regra 7 já enuncia
+noutro contexto: proibir tudo não protege, só empurra o registro pra
+fora do sistema.
+
+### O que o levantamento achou — três classes, não uma
+
+```
+A  só não foi feito    cancelar, documentos, conferência do dia
+                       → escrita direta por decisão; vão pra fila com
+                         `dependeDeChave`, mecanismo que já existe
+
+B  falta cache         lista de vales, lista de corridas abertas
+                       → mesmo padrão do `credenciaisCache` e do
+                         `contextosRetorno`, que já vivem no Dexie
+
+C  `numero_vale`       decisão de ARQUITETURA, sem caminho óbvio
+```
+
+Só a C impede o fluxo inteiro, e ela **não é resolvível com cache**: o
+número vem da sequência do banco e entra no canônico que as duas partes
+assinam. Vale que não subiu não tem número, logo não pode constar de um
+documento assinado.
+
+### A saída: o TALONÃO — reserva antecipada de numeração
+
+**O vale offline não recebe número provisório. Ele recebe um número REAL,
+já consumido do servidor antes da queda.** É essa frase que faz o resto
+do desenho desaparecer:
+
+```
+não existe DCR1 alternativo
+não existe assinatura provisória
+não existe trocar o número depois
+```
+
+```
+Terminal Caixa 02 — Filial 09     reserva V-001840 … V-001869
+                                  (já indisponíveis para o banco)
+        ↓ a internet cai
+cria localmente  V-001840  V-001841  V-001842
+        ↓
+o motoboy leva o V-001840 — ele JÁ TEM numero_vale definitivo
+o DCR1 contém V-001840 e é assinado normalmente
+        ↓ a rede volta
+o servidor CONFIRMA:  pertence à reserva X
+                    + reserva é do tenant/filial/terminal certos
+                    + número ainda não foi utilizado
+                    → aceita
+```
+
+Nada muda no documento depois. A cadeia de custódia atravessa a queda
+**sem exceção nova** — que é o motivo de esta opção ter vencido.
+
+**NÚMERO RESERVADO NUNCA VOLTA PARA O POOL.** Reservou 1840–1869 e usou
+até 1857? Os demais ficam `não utilizado / reserva encerrada`, e jamais
+são redistribuídos. Isso cria buracos — e **buraco explicável e auditável
+é muito melhor que reutilização de número.** É literalmente a lógica do
+talonário numerado, que é o que a farmácia já usa quando o Trier cai.
+
+### A regra de completude, que é o ganho inesperado
+
+O modelo de auditoria da numeração deixa de ser por contagem e passa a
+ser por explicação:
+
+```
+número emitido → usado por uma entrega
+              OU
+número emitido → pertence a reserva → não utilizado / abandonado
+
+qualquer número sem uma dessas duas explicações  →  ANOMALIA
+```
+
+**E isto ACRESCENTA auditoria onde não havia nenhuma — não adapta uma
+existente.** Levantado contra o código em 2026-09-03, contra uma
+afirmação minha imprecisa feita na mesma conversa:
+
+- `verificar_romaneios_selados()` varre `public.romaneios`, **não
+  `entregas`**. O método `11 + 3 = 14 = maior emitido` do §57 sempre foi
+  sobre a sequência de ROMANEIOS, e foi conferido à mão no NOTAS;
+- `entregas_numero_vale_seq` aparece em **dois** lugares no repositório
+  inteiro: a migration que a cria e o `corte-pre-v1.sql`. Não há
+  conferência de completude de vale em lugar nenhum.
+
+Logo o E12 **não tem verificador de vales a quebrar** — ele constrói o
+primeiro. Eu havia dito o contrário antes de ler; fica registrado porque
+é a mesma classe de defeito do §92: afirmar estado sem medir.
+
+### Reservar o número não basta — as travas de ENCADEAMENTO
+
+Este é o ponto que o desenho do usuário acrescentou, e sem ele a reserva
+resolveria só o primeiro passo:
+
+```
+ENTREGA LOCAL   V-001840        uuidv7 A
+      ↓ depende de
+SAÍDA LOCAL     romaneio/snapshot/hash   uuidv7 B
+      ↓ depende de
+RETORNO LOCAL                   uuidv7 C
+
+a rede volta →  sincroniza A → B → C
+```
+
+Hoje o servidor é o ponto que **confirma cada etapa antes de a seguinte
+existir**. Para o expediente continuar, o Dexie precisa representar a
+cadeia inteira localmente. `dependeDeChave` já é a base conceitual certa
+disso — e foi construído no 2C.3 exatamente para ordenar dependências.
+
+**E o retorno não pode mais depender só de "buscar corridas abertas no
+servidor".** Saída local já selada e ainda pendente de sincronização
+precisa aparecer **localmente** como corrida passível de retorno.
+
+### O CONTRATO
+
+```
+E12 — CONTINUIDADE OPERACIONAL OFFLINE
+
+NUMERAÇÃO
+→ reserva antecipada de numero_vale, por terminal
+→ pool local no Dexie
+→ número reservado NUNCA é reutilizado
+→ entrega offline nasce com número DEFINITIVO
+→ sobra vira "não utilizado / reserva encerrada"
+
+CADEIA LOCAL
+→ vales locais aparecem em Nova Corrida
+→ saída local selada aparece como corrida aberta LOCAL
+→ retorno pode ser feito contra essa saída
+→ dependências entrega → saída → retorno
+→ cancelamento/documentos/conferência entram na cadeia quando aplicável
+
+SINCRONIZAÇÃO
+→ respeita dependências
+→ falha numa etapa SEGURA as dependentes
+→ reconciliação depois da rede
+→ servidor confirma reserva: tenant/filial/terminal + não utilizado
+
+AUDITORIA
+→ verificador passa a compreender reservas e buracos justificados
+→ número sem explicação = anomalia
+
+FORA — provisionamento de segurança
+→ criar usuário, emitir credencial/cartão, configurar PIN novo
+→ continuam exigindo servidor, e isso NÃO é omissão:
+  é administração/provisionamento, não continuidade de expediente
+→ além disso é impossível por construção: HMAC e bcrypt são do servidor
+```
+
+### O E12 REVOGA UMA PREMISSA DO E11 — achado do levantamento
+
+O desenho do E11, conversado em 01/09 e registrado no backlog, diz:
+
+> o vale da fila aparece na lista "Hoje", **marcado e sem número**
+> (a sequência é do banco; por isso ele também não pode sair offline)
+
+**Com o talonão, as duas metades dessa frase deixam de ser verdade.** O
+vale offline TEM número e PODE sair. Quem construir o E11 antes do E12
+precisa marcar o vale por *"aguardando sincronização"*, nunca por
+*"sem número"* — senão a marca vira mentira no dia em que o E12 entrar,
+e ela estará espalhada por uma lista que o caixa lê o dia inteiro.
+
+A outra metade do E11 sobrevive intacta, e por razão própria: o
+Fechamento **se declara incompleto** em vez de somar a fila local, porque
+merge criaria duas versões dos números do dia.
+
+### A ordem, e por que o E12 não entra no meio do E10
+
+```
+E10  admin operando por filial   ← EM CURSO, não interromper
+E11  visibilidade do offline     ← já sabendo do E12 (ver acima)
+E12  continuidade operacional offline
+```
+
+O usuário foi explícito nas duas coisas: **não** enfiar isso dentro do
+E10, e **não** tratá-lo como uma melhoria pequena do E11. São frentes de
+tamanhos diferentes — o E11 torna visível o offline que já existe; o E12
+elimina as travas de encadeamento.
+
+E fica anotado o enquadramento comercial que o usuário levantou, porque
+ele descreve melhor o que o sistema passa a ter: não é *"possui modo
+offline"*, é **continuidade operacional durante indisponibilidade de
+internet, preservando número do vale, assinatura, cadeia de custódia e
+sincronização posterior.**
+
 ## Commits desta sessão
 
 
@@ -9041,6 +9401,7 @@ sem querer uma linha de `digest(...)`.
 ```
 E10  admin operando por filial
 E11  visibilidade do offline
+E12  continuidade operacional offline   ← acrescentado em 03/09, item 94
 E6   React Router / páginas dedicadas
 E9   endereço estruturado
 E7   divergência / regularização
@@ -9104,6 +9465,11 @@ pendências. O desenho conversado:
 
 - o vale da fila aparece na lista "Hoje", **marcado e sem número**
   (a sequência é do banco; por isso ele também não pode sair offline);
+  — ⚠️ **ESTE BULLET FOI REVOGADO PELO E12 em 03/09** (item 94). Com a
+  reserva antecipada de numeração, o vale offline TEM número e PODE
+  sair. Marque-o por *"aguardando sincronização"*, **nunca** por *"sem
+  número"*: a segunda vira mentira no dia do E12, e estará espalhada
+  por uma lista que o caixa lê o dia inteiro;
 - o Fechamento **se declara incompleto** quando há pendências, em vez de
   somar a fila local — merge criaria duas versões dos números do dia;
 - **não** fazer aba separada: o vale mudaria de lugar ao sincronizar.
@@ -9728,7 +10094,7 @@ Admin `adminteste@drogcidade.sg` / senha `2026`.
 Caixa `caixateste@drogcidade.sg` / senha `2026` (perfil "Camilo", papel
 `caixa`, **Filial 02**) — indispensável pra testar RLS, porque com admin
 todo teste de restrição passa por engano (ele enxerga tudo do tenant de
-qualquer jeito). Lojas "Matriz" e "Filial 02" (mais 15 filiais reais que
+qualquer jeito). Lojas "Matriz" e "Filial 02" (mais 16 filiais reais que
 ainda não têm registro no banco — ver seção 6 acima). Agência "Ágil
 Motos", motoboys João Silva e Pedro Souza.
 
@@ -9885,6 +10251,16 @@ apagar isso pela interface.
   retorno e o verificador são funções **puras ou read-only**, e
   `conferir_canonico_retorno` não grava nada — dá pra rodar em cima de
   produção sem consequência.
+
+**Acrescentado em 3 de setembro:**
+
+- **`V-000061` (Teste Divisao)** — o vale do item 93, compra de R$ 137,43
+  dividida em Pix R$ 100,00 (digitado) + Dinheiro R$ 37,43 (**derivado
+  pela tela**), e depois marcado como divergente com Dinheiro R$ 80,00 +
+  R$ 57,43 (o segundo também derivado). É o único vale do banco em que
+  **os dois lados do pagamento têm uma linha calculada**, então ele é a
+  prova de que o valor derivado chega ao banco nos dois caminhos. Tem um
+  evento `pagamento_alterado` cujo `de` traz os dois previstos.
 
 **Pra quando a limpeza acontecer** (é o último passo antes de
 apresentar): apagar romaneio selado agora custa mais do que custava. Eles

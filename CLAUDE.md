@@ -12,7 +12,7 @@ esperando no balcão. Velocidade de digitação é o requisito número um.
 
 Usuário secundário: mototaxista, que só encosta num tablet para assinar.
 
-A farmácia real tem **17 filiais**, espalhadas por mais de uma cidade
+A farmácia real tem **18 filiais**, espalhadas por mais de uma cidade
 (hoje só 2 existem como dado de teste: Matriz e Filial 02) — o sistema já
 suporta múltiplas lojas de ponta a ponta (entregas escopadas por
 `loja_id`, transferência entre filiais, relatórios e Registro de
@@ -406,7 +406,7 @@ de cartão por NSU, encadeamento de hash entre eventos, tela de fechamento
 mensal, tela de cadastro de loja/filial/cidade nova
 pela UI (continua manual via SQL, filial é rara e cidade mais ainda —
 **não confundir com suporte a múltiplas lojas, que já existe** de ponta a
-ponta; a farmácia real tem 17 filiais).
+ponta; a farmácia real tem 18 filiais).
 
 **PIN de mototaxista e GPS saíram desta lista em 2026-08-16**, por decisão
 explícita do usuário: os dois são peça da cadeia de custódia e estão
@@ -675,6 +675,39 @@ migration.**
   é banal: o caixa clica "+ outra forma", não troca o select, e
   "Dinheiro" fica valendo duas vezes. Sem ela o DCR1 sairia com duas
   linhas `p` idênticas em conteúdo dentro de um documento assinado.
+- **A LINHA QUE O CAIXA NÃO DIGITOU ABSORVE O RESTO** (2026-09-03,
+  `resolverValoresDasFormas`). Ele digita R$ 100,00 no Pix e o Dinheiro
+  já mostra R$ 37,43 — antes essa subtração era feita de cabeça, com fila
+  no balcão e no número quebrado, que é quando a divisão acontece. Isso
+  **generaliza a regra de uma forma só**: lá o valor É a compra e o campo
+  nem aparece, porque com uma linha ela está determinada; com N, as N-1
+  preenchidas determinam a última. Vale nas duas telas que dividem
+  pagamento — cadastro e o dialog de divergência.
+
+  **Vazio é o sinal**, e não há estado paralelo: `digitos` já separa
+  "ainda não preenchi" de "é zero", que é o motivo de o `CampoMoeda`
+  mostrar campo vazio em vez de "0,00". É **simétrico** (digitar na
+  segunda faz a primeira derivar), e **não deriva** com duas ou mais
+  vazias (repartir seria inventar uma divisão), com nenhuma vazia (o
+  caixa determinou tudo) nem com resto ≤ 0 (R$ 0,00 é recusado pela
+  validação logo depois, e negativo não cabe num campo de dígitos).
+
+  Três coisas que quebram se alguém mexer sem ler: o payload sai de
+  `valoresCents`, **nunca dos dígitos crus** — a linha derivada não tem
+  dígitos, e relê-los gravaria zero na forma que a tela mostrava
+  preenchida; o campo derivado usa `selecionaAoFocar`, senão digitar por
+  cima empurra o número em vez de trocá-lo; e `removeForma` **limpa os
+  dígitos ao voltar a uma linha só**, senão sobra um valor que o caixa
+  não vê e não consegue corrigir, com o erro aparecendo no submit
+  apontando pra um campo que não é renderizado. Pelo mesmo motivo a linha
+  inicial do dialog **nasce vazia**: preenchê-la faria a derivação
+  existir e nunca disparar.
+
+  **O aviso passou a dizer o número, não só que não bate** —
+  `faltam R$ 107,43` / `R$ 62,57 a mais que a compra` —, o que cobre
+  também o caso em que a derivação não pode agir. Com nada digitado ainda
+  ele é neutro, não vermelho: cobrar a soma ali acusaria o caixa de um
+  erro que ele não cometeu.
 - **O teto do cadastro é 3; o do dialog de divergência é 4, e a diferença
   é deliberada.** Não são o mesmo tipo de afirmação: aqui se **prevê** o
   que vai acontecer, lá se **registra** o que aconteceu. Ser mais
@@ -1147,6 +1180,15 @@ cache pra ele:
   lista localmente não resolveria: o que falta não é o dado, é o número.
   A tela avisa quantos vales estão nessa situação, em vez de deixar o
   caixa achar que o lançamento se perdeu.
+
+  **ISTO DESCREVE O ESTADO DE HOJE, NÃO UMA INVARIANTE.** O **E12**
+  (contrato fechado em 2026-09-03, item 94 do NOTAS, código não
+  começado) resolve exatamente este limite com **reserva antecipada de
+  numeração** — o talonão: com internet, o terminal reserva um bloco de
+  números; offline, o vale nasce com número **definitivo**, e a saída
+  segue com romaneio assinado, canônico e hashes intactos, sem exceção
+  nova na cadeia de custódia. Número reservado **nunca** volta ao pool.
+  Quem for mexer nesta seção leia o item 94 antes.
 - **A lista de vales vem do servidor e não fica salva.** Se a internet
   cair com a tela aberta, o cache do TanStack Query segura (`gcTime` de
   30min). Se a página recarregar offline, não há lista. A tela passou a
@@ -2419,7 +2461,7 @@ com a janela de concorrência maior do offline, mas o histórico observado
 
 Congelado em 2026-08-20. O handler legado **não sai porque a fila está
 vazia numa máquina**: cada navegador tem a própria fila em IndexedDB, e a
-farmácia tem 17 filiais. Vazio aqui não prova vazio lá.
+farmácia tem 18 filiais. Vazio aqui não prova vazio lá.
 
 ```
 release N     nada mais enfileira `fechamento_corrida`
