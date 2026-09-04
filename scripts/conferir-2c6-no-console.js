@@ -70,7 +70,6 @@ async function tentar({ bodyTipo, envelopeTipo, mesmaOperacao = false, strokes =
     documentHash: HASH,
     motoboyStrokes: [],
     ocorridoEmLocal: new Date().toISOString(),
-    geolocalizacao: null,
     envelope,
     ...strokes,
   }

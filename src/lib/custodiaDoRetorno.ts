@@ -51,7 +51,7 @@
 //     offlineEventHash = documentHash
 //                      + responsavelStrokes
 //                      + motoboyStrokes
-//                      + ocorridoEmLocal + geolocalização
+//                      + ocorridoEmLocal
 //
 // O envelope carrega esse hash dentro dele, e a Edge Function o
 // RECALCULA a partir do corpo pra decidir entre selar e recusar

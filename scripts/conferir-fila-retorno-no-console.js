@@ -112,7 +112,6 @@ try {
       responsavelStrokes,
       motoboyStrokes,
       ocorridoEmLocal: new Date().toISOString(),
-      geolocalizacao: null,
       userId: dono.userId,
     },
     { dependeDeChave: corridaId }

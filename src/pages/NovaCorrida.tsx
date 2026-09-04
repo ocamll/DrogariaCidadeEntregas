@@ -24,7 +24,6 @@ import {
   publicIdDoToken,
 } from '@/data/credenciais'
 import { selarSegredos, calcularOfflineEventHash, envelopeDisponivel } from '@/lib/envelope'
-import { capturarGeolocalizacao, aquecerGeolocalizacao } from '@/lib/geolocalizacao'
 import { useOnline } from '@/lib/useOnline'
 import {
   enfileirarOperacao,
@@ -230,11 +229,6 @@ function NovaCorridaFluxo({
   useEffect(() => {
     if (navigator.onLine) {
       void sincronizarCacheDeCredenciais().catch(() => {})
-      // Aquece a posição enquanto há rede. No PC do balcão não há GPS: o
-      // navegador resolve por WiFi, o que EXIGE rede — então é agora ou
-      // nunca. Sem isto, uma saída offline fica sem coordenada nenhuma,
-      // porque na hora de selar já não há a quem perguntar.
-      void aquecerGeolocalizacao().catch(() => {})
     }
   }, [])
 
@@ -513,7 +507,6 @@ function NovaCorridaFluxo({
     const motoboyStrokes = motoboyPad.current.toData()
 
     try {
-      const geolocalizacao = await capturarGeolocalizacao()
       const hashLocal = await documentHashLocal(entrada)
       let documentHash = hashLocal
       let autorizacaoId: string | null = null
@@ -569,7 +562,7 @@ function NovaCorridaFluxo({
         assinaturaInternaStrokes: caixaStrokes,
         assinaturaMotoboyStrokes: motoboyStrokes,
         ocorridoEmLocal,
-        geolocalizacao,
+        geolocalizacao: null,
       })
       const envelope = await selarSegredos({
         pin,
@@ -594,7 +587,6 @@ function NovaCorridaFluxo({
         caixaStrokes,
         motoboyStrokes,
         ocorridoEmLocal,
-        geolocalizacao,
         envelope,
         userId: profile.id,
       }
@@ -613,7 +605,6 @@ function NovaCorridaFluxo({
             caixaStrokes,
             motoboyStrokes,
             ocorridoEmLocal,
-            geolocalizacao,
           })
           setResultado(
             selo.ok

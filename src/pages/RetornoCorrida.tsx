@@ -43,7 +43,6 @@ import {
 } from '@/lib/canonicoRetorno'
 import { filtrarCorridasRetornaveis } from '@/lib/corridasBloqueadas'
 import { selarSegredos, calcularOfflineEventHash, envelopeDisponivel } from '@/lib/envelope'
-import { capturarGeolocalizacao, aquecerGeolocalizacao } from '@/lib/geolocalizacao'
 import { useOnline } from '@/lib/useOnline'
 import { rotuloDoPapelNoMomento } from '@/lib/papeis'
 import { FORMA_PAGAMENTO_LABEL } from '@/data/pagamentos'
@@ -133,7 +132,7 @@ export function RetornoCorrida({
   // Baixa o contexto das corridas abertas ENQUANTO HÁ REDE. O retorno
   // acontece no fim da tarde, no balcão, e a 2C permite registrá-lo sem
   // internet — mas o documento da saída não pode ser inventado na hora.
-  // Mesmo espírito de `aquecerGeolocalizacao` e do cache de credenciais.
+  // Mesmo espírito do cache de credenciais.
   const idsAbertos = (corridas ?? []).map((c) => c.id).join(',')
   useEffect(() => {
     if (!navigator.onLine || !idsAbertos) return
@@ -482,13 +481,10 @@ function FluxoDeRetorno({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expiraEm, segundosRestantes])
 
-  // O cache de credenciais é o que faz bipar funcionar sem rede, e a
-  // posição precisa ser pedida enquanto há rede — no PC do balcão não há
-  // GPS, o navegador resolve por WiFi, e isso EXIGE internet.
+  // O cache de credenciais é o que faz bipar funcionar sem rede.
   useEffect(() => {
     if (navigator.onLine) {
       void sincronizarCacheDeCredenciais().catch(() => {})
-      void aquecerGeolocalizacao().catch(() => {})
     }
   }, [])
 
@@ -788,14 +784,13 @@ function FluxoDeRetorno({
       }
       setOcupado('concluindo')
       try {
-        const geolocalizacao = await capturarGeolocalizacao()
         const offlineEventHash = await calcularOfflineEventHash({
           documentHash: congelado.documentHash,
           romaneioId: congelado.romaneioId,
           assinaturaInternaStrokes: responsavelStrokes,
           assinaturaMotoboyStrokes: motoboyStrokes,
           ocorridoEmLocal,
-          geolocalizacao,
+          geolocalizacao: null,
         })
         const envelope = await selarSegredos({
           pin: segredos.pin,
@@ -824,7 +819,6 @@ function FluxoDeRetorno({
           responsavelStrokes,
           motoboyStrokes,
           ocorridoEmLocal,
-          geolocalizacao,
           envelope,
           userId: profile.id,
         }
@@ -856,7 +850,6 @@ function FluxoDeRetorno({
     setOcupado('concluindo')
     despachar({ tipo: 'CONCLUIR', online: true })
     try {
-      const geolocalizacao = await capturarGeolocalizacao()
       const selo = await selarRomaneioRetorno({
         romaneioId: congelado.romaneioId,
         saidaRomaneioId: contexto.saidaRomaneioId,
@@ -868,7 +861,6 @@ function FluxoDeRetorno({
         responsavelStrokes,
         motoboyStrokes,
         ocorridoEmLocal,
-        geolocalizacao,
       })
 
       if (selo.ok) {

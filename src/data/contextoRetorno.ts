@@ -183,7 +183,7 @@ export async function lerContextoLocal(corridaId: string): Promise<ContextoRetor
  * offline ter o que usar depois.
  *
  * Chamada quando a lista de corridas abertas carrega COM rede — mesmo
- * lugar e mesmo espírito de `aquecerGeolocalizacao()` e do cache de
+ * lugar e mesmo espírito do cache de
  * credenciais da Nova Corrida: preparar enquanto dá, porque na hora não
  * vai dar.
  *

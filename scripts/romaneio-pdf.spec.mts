@@ -49,7 +49,6 @@ const romaneio: RomaneioCompleto = {
   lojaNome: 'Matriz',
   criadoPorNome: 'Camilo',
   ip: '187.10.20.30',
-  geolocalizacao: { lat: -30.336, lon: -54.32, precisao_m: 30, obtida_em: '2026-08-18T14:29:00.000Z', origem: 'cache' },
   corrida: {
     saidaEm: '2026-08-18T14:35:00.000Z',
     saidaEmLocal: '2026-08-18T14:30:00.000Z',
@@ -101,7 +100,6 @@ const romaneio: RomaneioCompleto = {
       assinadoEm: '2026-08-18T14:35:00.000Z',
       assinadoEmLocal: '2026-08-18T14:30:00.000Z',
       ip: '187.10.20.30',
-      geolocalizacao: null,
     },
     {
       tipoSignatario: 'motoboy',
@@ -114,7 +112,6 @@ const romaneio: RomaneioCompleto = {
       assinadoEm: '2026-08-18T14:35:00.000Z',
       assinadoEmLocal: '2026-08-18T14:30:00.000Z',
       ip: '187.10.20.30',
-      geolocalizacao: { lat: -30.336, lon: -54.32, precisao_m: 30, origem: 'fresca', obtida_em: '2026-08-18T14:30:00.000Z' },
     },
   ],
 } as unknown as RomaneioCompleto
@@ -288,12 +285,6 @@ globalThis.fetch = fetchOriginal
 limparCacheDaMarca()
 checa('sem rede, o PDF sai mesmo assim', semLogo.includes('R-000010'))
 checa('e sai sem imagem nenhuma', contarImagens(semLogo) === 0)
-
-console.log('\n--- geolocalização rotulada ---')
-checa(
-  'leitura de cache é marcada como tal no rodapé',
-  daFarmacia.includes('n') && daFarmacia.includes('leitura de')
-)
 
 console.log(`\n${falhas === 0 ? 'romaneio PDF ok' : falhas + ' FALHA(S)'}\n`)
 process.exit(falhas === 0 ? 0 : 1)

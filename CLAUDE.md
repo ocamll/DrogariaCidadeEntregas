@@ -1329,10 +1329,10 @@ endereço que ele nunca recebeu.
 - **As assinaturas são vetor**, redesenhadas dos pontos como na tela. Sem
   imagem embutida: o banco guarda traços, e o PDF pode sair em qualquer
   tamanho.
-- **O rodapé é o que prova**: `final_hash`, `document_hash`, IP,
-  geolocalização (com o rótulo de cache quando for o caso) e a frase de
-  que **este PDF é uma renderização do registro, não a fonte da
-  verdade**.
+- **O rodapé é o que prova**: `final_hash`, `document_hash`, IP e a
+  frase de que **este PDF é uma renderização do registro, não a fonte da
+  verdade**. A geolocalização saía aqui até 2026-09-04 — ver a seção
+  dela abaixo.
 
 `npx tsx scripts/romaneio-pdf.spec.mts` cobre 30 casos, e o primeiro é o
 que importa: um romaneio cujo snapshot diverge de propósito do "dado de
@@ -1340,44 +1340,45 @@ hoje", exigindo que o PDF mostre o snapshot.
 `scripts/romaneio-de-exemplo.mts` gera as duas vias com dado fictício,
 pra conferir desenho sem depender do banco.
 
-### Geolocalização: por que ela nunca bloqueia
+### Geolocalização: REMOVIDA em 2026-09-04
 
-Revisto em 2026-08-18, quando o usuário pediu que ela fosse obrigatória
-pra selagem. **Não pode ser**, e o motivo é de hardware, não de desenho:
+Existiu de 2026-08-18 a 2026-09-04, e saiu por decisão do usuário. O
+argumento que a encerrou é o mais curto possível: **o que a coordenada
+provava?** Que a selagem aconteceu na farmácia — que é onde ela sempre
+acontece, por desenho. Ela nunca rastreou entrega e nunca afirmou nada
+sobre a rua.
 
-O PC do balcão não tem GPS. O navegador resolve posição mandando os WiFi
-vizinhos pro serviço do Google — **isso exige rede**. Offline não existe
-a quem perguntar. Exigir coordenada seria proibir saída sem internet, ou
-seja, desligar o caminho que o projeto passou dias provando.
+Custava permissão de navegador, timeout de 8s, lógica de cache, cinco
+modos de falha e um spec inteiro. Valor operacional próximo de zero.
 
-E mesmo online, geolocalização de desktop por WiFi erra de centenas de
-metros a quilômetros. Como prova de que "o caixa estava na farmácia", a
-sessão autenticada diz mais.
+**O que saiu:** `src/lib/geolocalizacao.ts`, `geolocalizacao.spec.mts`, o
+aquecimento nas duas telas, a captura na selagem, a linha da Custódia e
+as duas linhas do PDF do romaneio.
 
-**O que dá pra fazer, e está feito** (`src/lib/geolocalizacao.ts`):
+**O QUE FICOU, E POR QUE NÃO É DESCUIDO:**
 
-- `aquecerGeolocalizacao()` pede uma leitura quando a Nova Corrida monta
-  com internet — mesmo lugar onde o cache de credenciais é atualizado. É
-  o que deixa algo recente guardado pro caso de a rede cair depois.
-- Ao selar: tenta leitura fresca (8s, prazo maior que os 3s de antes,
-  porque 3s não davam tempo de alguém RESPONDER ao pedido de permissão);
-  não vindo, aceita a do cache do navegador (até 10 min).
-- **A leitura de cache é rotulada como tal.** `obtida_em` guarda o
-  horário real da medição e `origem` diz `fresca` ou `cache`, e a tela
-  escreve "leitura de 11:25, não do momento da selagem". Apresentar uma
-  leitura de duas horas antes como se fosse do instante seria a tela
-  afirmando o que não sabe — o defeito que este projeto já pagou três
-  vezes.
-- **Sem coordenada, grava-se o MOTIVO**: `negada`, `sem_suporte`,
-  `indisponivel`, `expirou`. "Não registrada" e "negada pelo usuário" são
-  fatos diferentes numa cadeia de custódia, e um campo vazio não
-  distingue os dois. O retorno nunca é `null`: sempre há uma afirmação.
-- Permissão negada **não** tenta o cache: insistir só faria o motoboy
-  esperar, e a resposta não mudaria.
+```
+envelope.ts        o campo `geolocalizacao` na assinatura de
+                   calcularOfflineEventHash — e ele entra na FÓRMULA
+sync-romaneio      a cópia GÊMEA da mesma fórmula
+romaneios.ts       p_geolocalizacao: null nas duas RPCs
+```
 
-`npx tsx scripts/geolocalizacao.spec.mts` cobre os cinco caminhos com um
-dublê de `navigator.geolocation` — é a única forma de exercitar "negada"
-e "offline sem cache" sem depender de permissão de navegador nem de rede.
+A fórmula serializa `null` como `-`, e a Edge Function já fazia
+`corpo.geolocalizacao ?? null`. Passando `null` de um lado e omitindo o
+campo do outro, **os dois gêmeos continuam produzindo bytes idênticos** —
+provado por `offline-hash.spec.mts` ("os dois lados concordam") e pelos
+três hashes congelados em `envelope.spec.mts`.
+
+Remover o campo da fórmula mudaria um lado só, e o sintoma seria o pior
+do projeto: a saída offline deixaria de sincronizar, sem erro legível. O
+campo sai junto com o envelope inteiro, na etapa seguinte da limpeza.
+
+**Nada no SQL foi tocado.** `p_geolocalizacao` continua existindo nas
+funções e `romaneios.geolocalizacao` continua sendo coluna — as duas
+recebem `null` daqui em diante. A limpeza do schema vai junto com a
+remoção das assinaturas, que já reabre aquelas funções de qualquer jeito.
+
 
 ### O Romaneio de Retorno — desenho fechado, código não começado
 

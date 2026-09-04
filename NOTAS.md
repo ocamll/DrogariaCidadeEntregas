@@ -8840,6 +8840,116 @@ offline"*, é **continuidade operacional durante indisponibilidade de
 internet, preservando número do vale, assinatura, cadeia de custódia e
 sincronização posterior.**
 
+## 95. Sessão 1 da limpeza — a geolocalização saiu
+
+Primeira das três sessões de remoção decididas em 2026-09-03/04. O
+usuário revisou o escopo do sistema e cortou cinco coisas; esta é a mais
+isolada, e foi feita primeiro **de propósito: para provar o processo de
+remoção sem mover baseline nenhum**.
+
+### O argumento que a encerrou
+
+> O que a coordenada prova? Que a selagem aconteceu na farmácia — que é
+> onde ela sempre acontece, por desenho. Não rastreia entrega, não prova
+> nada sobre a rua.
+
+Custava permissão de navegador, timeout de 8s, lógica de cache, cinco
+modos de falha e um spec inteiro, para valor operacional próximo de zero.
+
+### O ACHADO QUE MUDOU A PREMISSA DA SESSÃO
+
+Eu havia afirmado, no levantamento, que a geolocalização **não entrava em
+hash nenhum**. Estava errado, e o erro tem endereço: verifiquei
+`canonico.ts` e `canonicoRetorno.ts` — onde de fato ela não entra — e
+generalizei para "hash nenhum".
+
+Ela entra em `calcularOfflineEventHash` (`src/lib/envelope.ts`), que é
+**um dos gêmeos**: TypeScript aqui, TypeScript na Edge Function
+`sync-romaneio`. Mexer nela de um lado só é o modo de falha mais caro do
+projeto — a saída offline deixa de sincronizar, sem erro legível.
+
+**A fórmula deu a saída de graça:**
+
+```
+cliente        entrada.geolocalizacao === null ? - : JSON.stringify(...)
+Edge Function  corpo.geolocalizacao ?? null   →  também -
+```
+
+Passando `null` do lado do cliente e omitindo o campo do corpo, **os dois
+lados continuam produzindo os mesmos bytes** — sem tocar na fórmula, sem
+deploy da Edge Function, sem invalidar os três hashes que
+`envelope.spec.mts` congela.
+
+Por isso o campo ficou, com um comentário de doze linhas explicando que é
+**vestigial de propósito**. Ele sai junto com o envelope inteiro, na
+sessão 3, quando os dois lados caem juntos.
+
+### O escopo real, medido antes de começar
+
+O usuário pediu a medição antes da sessão, com um gate explícito: *"se
+precisar mexer em mais de dez arquivos, pare e reveja"*.
+
+```
+geolocalização    10 arquivos
+assinaturas       23
+envelope RSA      22
+                  ──
+únicos            36   → acima do gate, dividido em 3 sessões
+```
+
+E o número assustava mais do que devia, por três razões que só a medição
+mostra: as 10 migrations que citam `p_geolocalizacao` **não se editam**
+(migration aplicada é histórico — a limpeza do schema é migration nova);
+vários specs **morrem inteiros** em vez de serem ajustados; e
+`congelar-retorno.spec.mts` e `canonico-retorno.spec.mts` não são tocados
+— **o DCRR1 não carrega geolocalização nem assinatura**, só uuid.
+
+### O que foi tocado
+
+```
+APAGADOS   src/lib/geolocalizacao.ts        (4 exports)
+           scripts/geolocalizacao.spec.mts  (145 linhas)
+
+TELAS      NovaCorrida, RetornoCorrida — aquecimento e captura
+COMPONENTE Custodia — a linha "Geolocalização"
+PDF        romaneioPdf — rodapé e bloco da assinatura
+DADOS      romaneios.ts — 4 tipos de input, 3 de leitura,
+                          2 selects, 2 mapeamentos
+SCRIPTS    romaneio-de-exemplo + 3 conferidores de console
+SPEC       romaneio-pdf — bloco "geolocalização rotulada" e 3 fixtures
+
+INTOCADOS  envelope.ts (o campo vestigial), sync-romaneio,
+           todas as migrations, romaneios.geolocalizacao no banco
+```
+
+### Medido
+
+```
+typecheck            limpo
+27 specs             todos verdes
+offline-hash         "os dois lados concordam"   ← o gate do gêmeo
+envelope             3 hashes congelados idênticos
+build                ok
+lint                 0 erros
+```
+
+**Nenhum hash mudou, e nenhum documento selado foi afetado** — que era a
+condição para esta ser a sessão de aquecimento.
+
+Uma armadilha de ferramenta que custou duas tentativas: **os arquivos
+estão em CRLF**, então padrões com `
+` não casam. Quem for fazer as
+sessões 2 e 3 com substituição em massa: use `?
+` em regex, ou
+compare pelo texto sem a quebra.
+
+### O que NÃO foi verificado
+
+A tela da Nova Corrida não foi exercitada no navegador depois da remoção
+— a sessão do dev server expirou e o login não é meu para digitar. O que
+sustenta a mudança são os 27 specs, o typecheck e o build; o risco
+residual é de render, não de dado.
+
 ## Commits desta sessão
 
 

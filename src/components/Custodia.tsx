@@ -4,7 +4,6 @@ import {
   type AssinaturaDoRomaneio,
   type CustodiaDoVale,
 } from '@/data/romaneios'
-import { textoGeo } from '@/lib/geolocalizacao'
 import { rotuloDoPapelNoMomento } from '@/lib/papeis'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
@@ -175,7 +174,6 @@ export function BlocoAssinatura({ assinatura }: { assinatura: AssinaturaDoRomane
           }
         />
         <Linha rotulo="IP" valor={assinatura.ip} />
-        <Linha rotulo="Geolocalização" valor={textoGeo(assinatura.geolocalizacao)} />
         <Linha
           rotulo="Hash"
           valor={assinatura.signatureHash ? `${assinatura.signatureHash.slice(0, 32)}…` : null}

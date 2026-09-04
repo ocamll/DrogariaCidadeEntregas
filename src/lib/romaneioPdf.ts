@@ -31,7 +31,6 @@
 
 import type { RomaneioCompleto } from '@/data/romaneios'
 import { formatBRL } from '@/lib/money'
-import { textoGeo } from '@/lib/geolocalizacao'
 import { carregarImagemDaMarca, LOGO_DOCUMENTO_URL, LOGO_PROPORCAO, COR_MARCA } from '@/lib/marca'
 import { duracaoDaCorrida } from '@/lib/datas'
 import { rotuloDoPapelNoMomento } from '@/lib/papeis'
@@ -319,7 +318,6 @@ export async function montarRomaneioPdf(
       assinatura.agenciaNome,
       dataHora(assinatura.assinadoEm),
       assinatura.credencialPublicId ? `credencial ••••${assinatura.credencialPublicId.slice(-4)}` : null,
-      textoGeo(assinatura.geolocalizacao),
     ].filter(Boolean) as string[]
     for (const d of detalhes) {
       doc.text(doc.splitTextToSize(d, larguraBloco), x, yb)
@@ -344,7 +342,6 @@ export async function montarRomaneioPdf(
     romaneio.finalHash ? `Hash final: ${romaneio.finalHash}` : null,
     `Documento: ${romaneio.documentHash}`,
     romaneio.ip ? `IP da selagem: ${romaneio.ip}` : null,
-    textoGeo(romaneio.geolocalizacao) ? `Local da selagem: ${textoGeo(romaneio.geolocalizacao)}` : null,
     `Emitido em ${new Date().toLocaleString('pt-BR')} · este PDF é uma renderização do registro, não a fonte da verdade`,
   ].filter(Boolean) as string[]
   for (const linha of provas) {

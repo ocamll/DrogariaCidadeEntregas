@@ -278,7 +278,7 @@ export function EntregasTable({
               <TableRow>
                 {/* Linha inteira, sem `whitespace-nowrap` e sem competir
                     por largura com as colunas de cima — é o que permite
-                    mostrar assinatura, IP, geolocalização e hash sem
+                    mostrar assinatura, IP e hash sem
                     reabrir a discussão de largura da tabela. */}
                 <TableCell colSpan={colunas} className="whitespace-normal p-2">
                   <CustodiaDoValeDetalhe custodia={custodia} />

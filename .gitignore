@@ -34,6 +34,12 @@ dist-ssr
 cartao-*.pdf
 cartao-*.svg
 
+# romaneios de exemplo — `scripts/romaneio-de-exemplo.mts` os regenera a
+# cada execução, com dado fictício. São para conferir DESENHO sem depender
+# do banco, não artefato de build; commitá-los criaria um diff binário a
+# cada vez que alguém roda o script.
+romaneio-exemplo-*.pdf
+
 # AGENTS.md — convenção que OUTRAS ferramentas de IA usam pra ler
 # instruções de projeto (o Codex, da OpenAI, entre elas). O arquivo que
 # apareceu aqui é uma cópia do CLAUDE.md, gerada fora das sessões de

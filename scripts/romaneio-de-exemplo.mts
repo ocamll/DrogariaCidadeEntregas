@@ -34,13 +34,6 @@ const romaneio = {
   lojaNome: 'Matriz',
   criadoPorNome: 'Camilo',
   ip: '187.10.20.30',
-  geolocalizacao: {
-    lat: -30.336,
-    lon: -54.32,
-    precisao_m: 34,
-    obtida_em: '2026-08-18T14:29:00.000Z',
-    origem: 'cache',
-  },
   corrida: {
     saidaEm: '2026-08-18T14:35:00.000Z',
     saidaEmLocal: '2026-08-18T14:30:00.000Z',
@@ -100,7 +93,6 @@ const romaneio = {
       assinadoEm: '2026-08-18T14:35:00.000Z',
       assinadoEmLocal: '2026-08-18T14:30:00.000Z',
       ip: '187.10.20.30',
-      geolocalizacao: null,
     },
     {
       tipoSignatario: 'motoboy',
@@ -115,13 +107,6 @@ const romaneio = {
       assinadoEm: '2026-08-18T14:35:00.000Z',
       assinadoEmLocal: '2026-08-18T14:30:00.000Z',
       ip: '187.10.20.30',
-      geolocalizacao: {
-        lat: -30.336,
-        lon: -54.32,
-        precisao_m: 34,
-        obtida_em: '2026-08-18T14:30:00.000Z',
-        origem: 'fresca',
-      },
     },
   ],
 } as unknown as RomaneioCompleto

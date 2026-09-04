@@ -8,7 +8,7 @@ import type { EnvelopeSelado } from '@/lib/envelope'
 //
 // A forma canônica (a parte delicada) mora em `@/lib/canonico`, sem
 // dependência nenhuma, pra poder ser testada isolada contra o lado SQL.
-// Aqui ficam só as chamadas de RPC e a captura de geolocalização.
+// Aqui ficam só as chamadas de RPC.
 
 export type { EntradaCanonica, ValeCanonico, PagamentoPrevistoCanonico } from '@/lib/canonico'
 export { montarCanonico } from '@/lib/canonico'
@@ -131,7 +131,6 @@ export async function selarRomaneio(input: {
   caixaStrokes: unknown
   motoboyStrokes: unknown
   ocorridoEmLocal: string
-  geolocalizacao: unknown | null
 }): Promise<ResultadoSelo> {
   const { data, error } = await supabase.rpc('selar_romaneio', {
     p_romaneio_id: input.romaneioId,
@@ -145,7 +144,7 @@ export async function selarRomaneio(input: {
     p_caixa_strokes: input.caixaStrokes,
     p_motoboy_strokes: input.motoboyStrokes,
     p_ocorrido_em_local: input.ocorridoEmLocal,
-    p_geolocalizacao: input.geolocalizacao,
+    p_geolocalizacao: null,
   })
   if (error) {
     if (ehRecusaDoServidor(error)) throw new ErroDoServidor(error.message, error.code)
@@ -238,7 +237,6 @@ export async function selarRomaneioRetorno(input: {
   responsavelStrokes: unknown
   motoboyStrokes: unknown
   ocorridoEmLocal: string
-  geolocalizacao: unknown | null
 }): Promise<ResultadoSelo> {
   const { data, error } = await supabase.rpc('selar_romaneio_retorno', {
     p_romaneio_id: input.romaneioId,
@@ -251,7 +249,7 @@ export async function selarRomaneioRetorno(input: {
     p_responsavel_strokes: input.responsavelStrokes,
     p_motoboy_strokes: input.motoboyStrokes,
     p_ocorrido_em_local: input.ocorridoEmLocal,
-    p_geolocalizacao: input.geolocalizacao,
+    p_geolocalizacao: null,
   })
   if (error) {
     if (ehRecusaDoServidor(error)) throw new ErroDoServidor(error.message, error.code)
@@ -305,7 +303,6 @@ export type SaidaOfflineInput = {
   caixaStrokes: unknown
   motoboyStrokes: unknown
   ocorridoEmLocal: string
-  geolocalizacao: unknown | null
   // Guarda PIN e token do cartão. O navegador sela e não reabre — quem
   // abre é a Edge Function, com a chave privada. Ver src/lib/envelope.ts.
   envelope: EnvelopeSelado
@@ -391,7 +388,6 @@ export type RetornoOfflineInput = {
   motoboyStrokes: unknown
 
   ocorridoEmLocal: string
-  geolocalizacao: unknown | null
 
   /**
    * PIN e token do cartão, selados com a pública do servidor — o mesmo
@@ -479,7 +475,6 @@ export async function sincronizarSaidaOffline(input: SaidaOfflineInput): Promise
       caixaStrokes: input.caixaStrokes,
       motoboyStrokes: input.motoboyStrokes,
       ocorridoEmLocal: input.ocorridoEmLocal,
-      geolocalizacao: input.geolocalizacao,
       envelope: input.envelope,
     },
   })
@@ -537,7 +532,6 @@ export async function sincronizarRetornoOffline(input: RetornoOfflineInput): Pro
       responsavelStrokes: input.responsavelStrokes,
       motoboyStrokes: input.motoboyStrokes,
       ocorridoEmLocal: input.ocorridoEmLocal,
-      geolocalizacao: input.geolocalizacao,
       envelope: input.envelope,
     },
   })
@@ -720,7 +714,6 @@ export type AssinaturaDoRomaneio = {
   assinadoEm: string
   assinadoEmLocal: string | null
   ip: string | null
-  geolocalizacao: unknown
   signatureHash: string | null
   /**
    * O cargo de quem assinou NO INSTANTE da assinatura — nulo nas
@@ -755,7 +748,6 @@ type LinhaAssinatura = {
   assinado_em_local: string | null
   capturado_em: string
   ip: string | null
-  geolocalizacao: unknown
   profiles: { nome: string } | null
   mototaxistas: { nome: string; agencias: { nome: string } | null } | null
   motoboy_credenciais: { public_id: string } | null
@@ -769,7 +761,7 @@ type LinhaAssinatura = {
 // precisar de hint.
 const SELECT_ASSINATURAS =
   'romaneio_id, tipo_signatario, strokes, auth_method, signature_hash, ' +
-  'assinado_em_local, capturado_em, ip, geolocalizacao, papel_no_momento, ' +
+  'assinado_em_local, capturado_em, ip, papel_no_momento, ' +
   'profiles(nome), mototaxistas(nome, agencias(nome)), motoboy_credenciais(public_id)'
 
 function mapAssinatura(linha: LinhaAssinatura): AssinaturaDoRomaneio {
@@ -786,7 +778,6 @@ function mapAssinatura(linha: LinhaAssinatura): AssinaturaDoRomaneio {
     assinadoEm: linha.capturado_em,
     assinadoEmLocal: linha.assinado_em_local,
     ip: linha.ip,
-    geolocalizacao: linha.geolocalizacao,
     signatureHash: linha.signature_hash,
     papelNoMomento: linha.papel_no_momento,
   }
@@ -903,7 +894,6 @@ export type RomaneioCompleto = CustodiaDoVale & {
   conflito: unknown
   criadoPorNome: string | null
   ip: string | null
-  geolocalizacao: unknown
   /** Os quatro relógios da corrida. Servidor manda; dispositivo acompanha. */
   corrida: {
     saidaEm: string | null
@@ -924,7 +914,7 @@ const SELECT_ROMANEIO =
   // que estava desenhando um retorno com o layout da saída, e o
   // resultado era `R$ NaN` em vez de uma recusa.
   'id, numero, tipo, status, modo, selado_em, ocorrido_em_local, recebido_em_servidor, ' +
-  'final_hash, document_hash, canonico, payload, conflito, ip, geolocalizacao, ' +
+  'final_hash, document_hash, canonico, payload, conflito, ip, ' +
   // Os quatro relógios da corrida. Existem desde 2026-08-10 e nunca
   // tiveram tela: são eles que dão retirada, retorno e, mais pra frente,
   // tempo médio de entrega. O do SERVIDOR é o que vale como fato
@@ -953,7 +943,6 @@ function mapRomaneio(r: any, assinaturas: AssinaturaDoRomaneio[]): RomaneioCompl
     lojaNome: r.lojas?.nome ?? null,
     criadoPorNome: r.profiles?.nome ?? null,
     ip: r.ip,
-    geolocalizacao: r.geolocalizacao,
     corrida: r.corridas
       ? {
           saidaEm: r.corridas.saida_em,

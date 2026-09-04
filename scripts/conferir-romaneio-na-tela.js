@@ -79,7 +79,6 @@
       assinadoEm: '2026-08-20T00:30:14.000Z',
       assinadoEmLocal: '2026-08-19T21:30:12.000Z',
       ip: '177.10.20.30',
-      geolocalizacao: null,
       signatureHash: 'a'.repeat(64),
       papelNoMomento: papel,
     },
@@ -93,7 +92,6 @@
       assinadoEm: '2026-08-20T00:30:16.000Z',
       assinadoEmLocal: '2026-08-19T21:30:15.000Z',
       ip: '177.10.20.30',
-      geolocalizacao: null,
       signatureHash: 'b'.repeat(64),
       papelNoMomento: null,
     },
@@ -131,7 +129,6 @@
     lojaNome: 'Matriz',
     criadoPorNome: 'Camilo Ferreira',
     ip: '177.10.20.30',
-    geolocalizacao: null,
     corrida: {
       saidaEm: '2026-08-20T00:30:14.000Z',
       saidaEmLocal: '2026-08-19T21:30:12.000Z',

@@ -190,8 +190,8 @@ export async function selarSegredosCom(
   }
 }
 
-// Hash que amarra a operação offline inteira — snapshot, assinaturas,
-// relógio e geolocalização. Vai DENTRO do envelope, então o cliente não
+// Hash que amarra a operação offline inteira — snapshot, assinaturas e
+// relógio. Vai DENTRO do envelope, então o cliente não
 // consegue alterá-lo depois; a Edge Function recalcula a partir do
 // payload público e compara. É assim que alteração acidental (ou não) do
 // payload entre assinar e sincronizar aparece.
@@ -219,6 +219,18 @@ async function calcularOfflineEventHash(entrada: {
   assinaturaInternaStrokes: unknown
   assinaturaMotoboyStrokes: unknown
   ocorridoEmLocal: string
+  // VESTIGIAL DE PROPÓSITO, e não é descuido. A geolocalização saiu do
+  // sistema, e todo chamador passa `null` daqui em diante — mas o campo
+  // fica, porque ele entra na FÓRMULA logo abaixo.
+  //
+  // A Edge Function tem a cópia gêmea deste hash e faz
+  // `corpo.geolocalizacao ?? null`, ou seja, ela já resolve a ausência
+  // como `null` e serializa o mesmo `-`. Removendo o campo daqui, a
+  // fórmula mudaria de UM LADO SÓ, e o sintoma seria o pior do projeto:
+  // a saída offline deixaria de sincronizar, sem erro legível.
+  //
+  // Ele some junto com o envelope inteiro, que é a etapa seguinte da
+  // limpeza — aí os dois lados caem na mesma sessão.
   geolocalizacao: unknown | null
 }): Promise<string> {
   const partes = [
