@@ -8943,12 +8943,45 @@ sessões 2 e 3 com substituição em massa: use `?
 ` em regex, ou
 compare pelo texto sem a quebra.
 
-### O que NÃO foi verificado
+### VERIFICADO NO NAVEGADOR, com o banco por trás
 
-A tela da Nova Corrida não foi exercitada no navegador depois da remoção
-— a sessão do dev server expirou e o login não é meu para digitar. O que
-sustenta a mudança são os 27 specs, o typecheck e o build; o risco
-residual é de render, não de dado.
+Feito depois do commit, quando o usuário logou. As quatro superfícies,
+contra dado real:
+
+```
+Nova Corrida        abre, lista os vales, console limpo
+Retorno de Corrida  abre, lista as corridas abertas, console limpo
+Custódia (V-000036) rótulos: Hash final · Autenticação · IP · Hash
+                    · Credencial       — SEM Geolocalização
+PDF do R-000005     Hash final ✓  IP da selagem ✓  "renderização" ✓
+                    Local da selagem ✗   coordenadas ✗   17 kB
+```
+
+**O `R-000005` é o caso que prova, e foi escolhido por isso:** ele tem
+`{lat: -30.335…, lon: -54.312…, precisao_m: 198}` GRAVADO na coluna
+`romaneios.geolocalizacao`. O dado continua no banco e não vaza mais
+para tela nenhuma — que é exatamente o resultado desejado, já que o SQL
+não foi tocado.
+
+**E o aquecimento foi MEDIDO, não inspecionado.** `getCurrentPosition` e
+`permissions.query` foram instrumentados no navegador, e as duas telas
+montadas em seguida:
+
+```
+getCurrentPosition   0 chamadas
+permissions.query    0 chamadas
+```
+
+Antes da remoção, o `useEffect` de cada uma chamava
+`aquecerGeolocalizacao()` ao montar. Zero é a medição de que ele sumiu —
+não a leitura de que o import saiu.
+
+Uma armadilha de ferramenta, para quem repetir isto: extrair texto de PDF
+do jsPDF no navegador exige **cortar o EOL de padding antes do
+`endstream`**. Sem isso o `DecompressionStream` recusa todos os streams
+e o resultado é um falso "não achei nada" — que, numa asserção de
+AUSÊNCIA, passaria por sucesso. O equivalente no spec é o `inflateSync`
+de `romaneio-pdf.spec.mts`.
 
 ## Commits desta sessão
 
