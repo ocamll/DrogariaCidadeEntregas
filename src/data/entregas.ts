@@ -424,7 +424,7 @@ function mapEntregaRecente(row: EntregaRecenteRow): EntregaRecente {
 
 // Paginada pelo mesmo motivo do histórico: a ordenação é descendente, e
 // pro caixa isso nunca chega perto de teto nenhum (um dia, uma loja) —
-// mas admin enxerga as 17 filiais juntas, e num dia movimentado o corte
+// mas admin enxerga as 18 filiais juntas, e num dia movimentado o corte
 // silencioso do max-rows derrubaria justamente os vales da manhã.
 //
 // 25 por página nas duas listas, por pedido do usuário (2026-08-12).

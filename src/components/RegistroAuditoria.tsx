@@ -116,7 +116,7 @@ export function RegistroAuditoria({ profile }: { profile: AuthProfile }) {
             Este mês
           </Button>
           {/* Só admin: pro gerente a RLS já devolve apenas os eventos da
-              filial dele, então o select listaria as 17 lojas pra filtrar
+              filial dele, então o select listaria as 18 lojas pra filtrar
               um conjunto que só tem uma. */}
           {soAdmin && (
             <div className="flex flex-col gap-1">

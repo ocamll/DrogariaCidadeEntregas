@@ -53,7 +53,7 @@ type UsuarioRow = {
 }
 
 // Time real da farmácia é de 3 a 5 pessoas hoje e não passa de dezenas
-// nem com 17 filiais — teto nosso, só pra nenhuma query depender do
+// nem com 18 filiais — teto nosso, só pra nenhuma query depender do
 // `max-rows` do servidor.
 const LIMITE_USUARIOS = 500
 

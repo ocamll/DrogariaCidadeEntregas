@@ -231,6 +231,11 @@ select tipo, modo, status, count(*)
 --     depois. O "17 filiais" do CLAUDE.md não estava errado: é o total
 --     da rede, não o desta cidade.
 --
+--     ATUALIZADO EM 2026-09-03: o total da rede é DEZOITO. A filial a
+--     mais é de cidade já mapeada, então `cidades` não muda. Confirme
+--     se ela é de São Gabriel antes de rodar este bloco — se for, ela
+--     falta na lista abaixo.
+--
 --     **Os números são da REDE, não da cidade**, e é por isso que a
 --     sequência daqui é esburacada — 02, 04, 09, 10, 12, 15, 18. Os que
 --     faltam estão nas outras cidades. Ninguém deve "consertar" os

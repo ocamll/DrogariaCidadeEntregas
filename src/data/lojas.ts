@@ -13,7 +13,7 @@ export type Loja = {
   cidadeId: string | null
 }
 
-// A farmácia real tem 17 filiais — o teto é folga, não expectativa. Mas
+// A farmácia real tem 18 filiais — o teto é folga, não expectativa. Mas
 // query sem limite depende do `max-rows` do servidor, que ninguém
 // escolheu; aqui o número é nosso e está à vista.
 const LIMITE_LOJAS = 200

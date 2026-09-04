@@ -9,7 +9,7 @@ import { supabase } from '@/lib/supabase'
 // `lojas`/`tenants`/`profiles`.
 
 // Teto explícito (nosso, não o `max-rows` do servidor) pras listas de
-// cadastro. São limitadas pela realidade — a farmácia tem 17 filiais e
+// cadastro. São limitadas pela realidade — a farmácia tem 18 filiais e
 // dezenas de motoboys, não milhares —, mas query sem limite nenhum passa
 // a depender de um número que ninguém escolheu e que muda no dashboard.
 const LIMITE_CADASTRO = 500
