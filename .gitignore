@@ -56,3 +56,27 @@ scripts/.e3b-proposta.sql
 # A migration final é versionada; esta proposta existe só para provar o
 # diff e as invariantes antes de o arquivo definitivo nascer.
 scripts/.e10-proposta.sql
+
+# graphify — o grafo de conhecimento do projeto (2026-09-08).
+#
+# O GRAFO É VERSIONADO, e isso é decisão: `graph.json`, `graph.html`,
+# `GRAPH_REPORT.md` e `manifest.json` ficam no repositório, para quem
+# clonar receber o índice pronto em vez de precisar reconstruí-lo — o que
+# custaria a extração semântica de novo.
+#
+# O `manifest.json` é o que torna `graphify --update` incremental: ele
+# guarda o hash de cada arquivo já processado. Sem ele versionado, o
+# primeiro `--update` de outra máquina re-extrairia o corpus inteiro.
+#
+# Só sai daqui o que é local ou puramente regenerável:
+graphify-out/cost.json
+graphify-out/cache/
+
+# `.graphifyignore` NÃO entra nesta lista — ele é versionado de
+# propósito. É ele que mantém o NOTAS.md (490 KB, ~76 mil palavras) fora
+# do índice, e essa exclusão precisa valer para todo mundo que clonar,
+# não só para a máquina onde ela foi decidida.
+# Caminhos absolutos DESTA máquina — o interpretador Python e a raiz do
+# scan. São reescritos a cada execução e quebrariam em outro clone.
+graphify-out/.graphify_python
+graphify-out/.graphify_root

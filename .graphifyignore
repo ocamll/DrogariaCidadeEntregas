@@ -1,0 +1,23 @@
+# Exclusões do índice do graphify (semântica de .gitignore).
+#
+# Este arquivo só EXCLUI. Ele não reinclui nada que o .gitignore já tenha
+# excluído — o graphify lê os dois, e o .graphifyignore por último.
+
+# NOTAS.md — 490 KB, ~76 mil palavras, fora do grafo por decisão de custo
+# (2026-09-08).
+#
+# Ele é o diário cronológico do projeto: ~95 itens numerados com a medição
+# atrás de cada decisão. Isso é justamente o que um grafo derivado de
+# estrutura NÃO consegue representar — e processá-lo semanticamente custou
+# 223 mil tokens de subagente numa primeira tentativa, para produzir nós
+# que duplicam o que o CLAUDE.md já expressa de forma condensada.
+#
+# O CLAUDE.md CONTINUA no índice, de propósito: ele carrega as mesmas
+# decisões em forma normativa, que é o que serve para consulta.
+#
+# Se um dia o NOTAS precisar entrar, prefira fatiá-lo por item em vez de
+# mandar o arquivo inteiro a um subagente.
+NOTAS.md
+
+# Artefatos do próprio graphify — nunca se indexa a si mesmo.
+graphify-out/
