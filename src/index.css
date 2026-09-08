@@ -65,8 +65,29 @@
     --accent-foreground: oklch(0.205 0 0);
     --destructive: oklch(0.577 0.245 27.325);
     --border: oklch(0.922 0 0);
-    --input: oklch(0.922 0 0);
-    --ring: oklch(0.708 0 0);
+    --input: oklch(0.922 0 0);    /* INDICADOR DE FOCO — 3:1 é requisito, não preferência.
+     *
+     * Era oklch(0.708), que dava 2,58:1 sobre branco e reprovava a WCAG
+     * sozinho. Pior: os componentes o pintavam com `ring-ring/50`, e o
+     * anel REAL chegava ao olho em 1,54:1 — praticamente invisível.
+     *
+     * Aqui isso não é acessibilidade genérica: o requisito do projeto é
+     * ZERO MOUSE (ver "O teste que decide o projeto"). Numa tela
+     * percorrida por Tab e Enter, o anel de foco é a ÚNICA coisa que diz
+     * onde o caixa está.
+     *
+     * 0.60 foi medido, não escolhido por gosto: passa nos dois temas
+     * (3,95:1 no claro, 5,01:1 no escuro, 4,54:1 sobre o card escuro),
+     * e é o mesmo valor nos dois — um token a menos para divergir.
+     *
+     * A meia opacidade saiu junto, e ela era o problema maior: com /50
+     * NENHUM tom chega a 3:1, porque compor 50% com o fundo puxa
+     * qualquer cor para o meio. O máximo medido foi 2,92 com um cinza
+     * quase preto, que deixaria a borda do campo focado em 13,6:1.
+     *
+     * Conferir com: npx tsx scripts/contraste.mts "#808080" "#FFFFFF" */
+
+    --ring: oklch(0.6 0 0);
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);
@@ -101,7 +122,7 @@
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
     --input: oklch(1 0 0 / 15%);
-    --ring: oklch(0.556 0 0);
+    --ring: oklch(0.6 0 0); /* mesmo do claro — ver a nota acima */
     --chart-1: oklch(0.87 0 0);
     --chart-2: oklch(0.556 0 0);
     --chart-3: oklch(0.439 0 0);

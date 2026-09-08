@@ -3519,6 +3519,24 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
   por elemento. Aqui isso vale a pena: não há o que ganhar traduzindo uma
   tela operacional em português pra quem fala português, e há o que
   perder — vale, valor, endereço e status reescritos em silêncio.
+- **O anel de foco tem contraste MEDIDO, e ele é requisito funcional aqui**
+  (2026-09-08). `--ring: oklch(0.6)` dá 3,95:1 sobre o fundo claro,
+  5,01:1 sobre o escuro e 4,54:1 sobre o card escuro — o mesmo valor nos
+  dois temas, de propósito. **Não clareie esse token**, e não devolva a
+  meia opacidade que ele tinha: `focus-visible:ring-ring/50` chegava ao
+  olho em **1,54:1**, contra os 3:1 que a WCAG pede.
+
+  Isto não é acessibilidade genérica. O requisito do projeto é **zero
+  mouse**, e numa tela percorrida por Tab e Enter o anel é a única coisa
+  que diz onde o caixa está. A medição está em
+  `anti-slop/audit-001-2026-09-08.md`; para conferir qualquer par de
+  cores, `npx tsx scripts/contraste.mts "#RRGGBB" "#RRGGBB"`.
+
+  **Compor opacidade com o fundo é o que mata contraste**, e isso vale
+  para qualquer indicador futuro: com `/50` NENHUM tom de cinza alcança
+  3:1, porque a mistura puxa tudo para o meio. Medido: o máximo é 2,92
+  com um cinza quase preto.
+
 - **`navigator.onLine` no JSX é sempre bug; use `useOnline()`.** Ler
   direto no render devolve o valor certo, mas nada faz o React renderizar
   de novo quando a rede cai — não há listener de `online`/`offline` em

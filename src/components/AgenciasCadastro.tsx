@@ -212,7 +212,7 @@ function AgenciaFormDialog({
                 <select
                   id="agencia-cidade"
                   disabled={!habilitado}
-                  className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/50 disabled:opacity-50 md:text-sm dark:bg-input/30"
+                  className="h-8 w-full min-w-0 rounded-lg border border-input bg-transparent px-2.5 py-1 text-base outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring disabled:opacity-50 md:text-sm dark:bg-input/30"
                   value={cidadeId}
                   onChange={(e) => setCidadeId(e.target.value)}
                 >
