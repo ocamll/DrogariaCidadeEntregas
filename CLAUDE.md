@@ -1,5 +1,25 @@
 # Sistema de Tele-entrega — Farmácia
 
+> **LEIA ANTES DE CONSTRUIR: `docs/escopo-pre-v1-revisado.md`.** Em
+> 2026-09-08 o usuário fechou um escopo pré-V1 revisado que muda decisões
+> estruturais deste arquivo — um vale só, convênio genérico, fim da forma
+> "Outro", fechamento com aprovação, painel da agência e filial operacional
+> do admin.
+>
+> **Nada dele está construído.** Cada seção afetada aqui traz uma nota
+> datada de 2026-09-08 dizendo o que foi decidido e o que o código ainda
+> faz. Onde as duas coisas divergirem, **o código é o que está no ar e o
+> escopo é para onde ele vai** — não confunda um com o outro, e não trate
+> a nota como descrição do comportamento atual.
+>
+> A sequência dos 7 passos está em "Ordem de construção", no fim.
+>
+> O documento companheiro é `docs/analise-limpeza-pre-v1.md` — a auditoria
+> de limpeza do commit `bc7062a`, com achados técnicos referenciados linha
+> a linha. **Ela é anterior**: onde as duas divergirem (convênio integral,
+> cadastro de convênios, adiamento do E10.2+), **manda o escopo revisado**,
+> e ela própria diz isso na abertura.
+
 ## O que é
 
 Sistema complementar ao ERP **Trier** para registro de tele-entregas de farmácia.
@@ -263,7 +283,10 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       agências diferentes), cada seta abre/fecha independente das outras,
       números batem em cada nível.
 - [x] **Cadastro de agências, mototaxistas, convênios** — aba "Cadastros"
-      (admin/gerente), sub-abas pra cada entidade. Tabelas já existiam desde
+      (admin/gerente), sub-abas pra cada entidade. **O cadastro de
+      CONVÊNIOS sai** (decidido em 2026-09-08, passo 1 do escopo revisado —
+      ver "Convênio genérico" abaixo); agências e mototaxistas ficam.
+      Tabelas já existiam desde
       o schema inicial (com RLS pronta, escrita restrita a `is_gerente()`) —
       sessão foi só UI + `src/data/cadastros.ts` em cima do que já existia,
       sem migration. Não entra na fila offline (tela de admin, uso
@@ -314,7 +337,10 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       encadeando o cadastro de convênio com a custódia de papel. Cadastro
       de entrega ganhou dois campos fora do fluxo rápido de Enter: select
       de convênio (só aparece se forma de pagamento = "Convênio", grava
-      `convenio_id` + `status_documental='pendente'`) e checkbox "Precisa
+      `convenio_id` + `status_documental='pendente'`) — **o select sai em
+      2026-09-08 e `convenio_id` passa a nascer nulo; a pendência de papel
+      continua, derivada da FORMA `convenio`/`crediario`, que é como o
+      código já a deriva** — e checkbox "Precisa
       de receita" (`tem_receita boolean` — **só existência/custódia do
       papel, nenhum dado de medicamento ou princípio ativo, confirmado com
       o usuário por causa da regra 9**). Enter na forma de pagamento
@@ -399,14 +425,29 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
 
 ### Fora — não construir, não sugerir, não "já que estou aqui"
 
-Onboarding de tenant, tela de cadastro de farmácia, cobrança, subdomínio, portal da
-agência, integração com Trier, leitura de QR de NF-e, app nativo,
+Onboarding de tenant, tela de cadastro de farmácia, cobrança **do SaaS**,
+subdomínio, integração com Trier, leitura de QR de NF-e, app nativo,
 notificação WhatsApp, tarifário por bairro, dashboard com gráfico, conciliação
 de cartão por NSU, encadeamento de hash entre eventos, tela de fechamento
 mensal, tela de cadastro de loja/filial/cidade nova
 pela UI (continua manual via SQL, filial é rara e cidade mais ainda —
 **não confundir com suporte a múltiplas lojas, que já existe** de ponta a
 ponta; a farmácia real tem 18 filiais).
+
+**"Cobrança" aqui é a do SaaS** — cobrar a farmácia pelo uso do sistema.
+**Não** é a cobrança que a AGÊNCIA apresenta à farmácia, que é o passo 6
+do escopo revisado e está dentro. As duas se chamavam igual, e a
+desambiguação entrou em 2026-09-08 para a lista não ser lida como
+proibição do que foi decidido construir.
+
+**O PORTAL DA AGÊNCIA SAIU DESTA LISTA EM 2026-09-08**, por decisão
+explícita do usuário (`docs/escopo-pre-v1-revisado.md`, seção 5). Ele
+deixou de ser recusa e virou o passo 6: a agência apresenta uma cobrança
+discriminada e a farmácia a confere contra as próprias operações. **Nada
+disso está construído**, e é a maior frente nova do escopo — amplia
+usuários, permissões, dados e fluxo de aprovação, não é limpeza de código.
+O que a lista continua proibindo é o resto: subdomínio, onboarding,
+cobrança do SaaS.
 
 **PIN de mototaxista e GPS saíram desta lista em 2026-08-16**, por decisão
 explícita do usuário: os dois são peça da cadeia de custódia e estão
@@ -453,6 +494,15 @@ e confundi-las foi o bug original:
 | gerente | só a própria filial | **não** |
 | admin | todas as filiais | sim |
 
+> **NA TELA CHAMA-SE "CARGO" — decidido em 2026-09-08, ainda não
+> aplicado** (seção 6 do escopo revisado). O rótulo de produto passa a ser
+> **Cargo**, inclusive na listagem de usuários. **A coluna interna continua
+> `papel`**, e renomear literais em RLS, autenticação, `profiles.papel`,
+> `tipo_signatario` ou `papel_no_momento` **não faz parte disso** — são
+> literais que entram em policy e em hash, e trocá-los quebraria
+> verificação de documento já assinado (ver a armadilha do `|caixa|` na
+> seção do Romaneio de Retorno).
+
 - **`is_admin()` governa escopo de filial. `is_gerente()` governa
   capacidade de gestão.** Até 2026-08-12 quem liberava ver outra loja era
   `is_gerente()` — que apesar do nome quer dizer "gerente OU admin" —, e
@@ -493,7 +543,91 @@ e confundi-las foi o bug original:
 
 ---
 
+## E10 — admin operando por filial
+
+Pedido em 2026-09-01. O admin precisa **enxergar e filtrar** cada filial
+(suporte, e isso já existe em cinco telas) e **operar em nome de qualquer
+uma** — que é o que falta. Contrato completo nos **itens 91 e 92 do
+`NOTAS.md`**; aqui fica só o que muda a forma de trabalhar.
+
+**Virou OBRIGATÓRIO antes da V1 em 2026-09-08.** A seção 6 do escopo
+revisado esconde a filial do cadastro do administrador, e as três telas de
+escrita recusam quem não tem `profile.lojaId` — sem o E10, esconder o campo
+deixaria o admin sem conseguir operar nada. Até então ele era adiável.
+
+```
+E10.1  servidor   ✓ APLICADO   migration 20260902120000
+E10.2  cliente      snapshot da loja operacional + fila
+E10.3  seletor no cabeçalho (sessionStorage por auth.uid)
+E10.4  as três telas de escrita
+```
+
+**O E10.1 está aplicado e medido** — a guarda de competência vive dentro de
+`selar_romaneio_interno`, com o gate `antes == depois` do verificador e
+cinco cenários. **O cliente não começou.**
+
+**A regra que quase quebrou tudo, e que vale para qualquer coisa nova
+dentro daquelas funções:**
+
+```
+o ator é o PARÂMETRO, não a sessão
+
+  p_caixa_id          NUNCA auth.uid()
+  v_papel <> 'admin'  NUNCA is_admin()
+  v_loja_do_ator      NUNCA current_loja_id()
+```
+
+A porta sincronizada é chamada pela Edge Function como `service_role`, onde
+**`auth.uid()` é NULL**. Uma guarda escrita com `is_admin()` recusaria
+**toda saída offline**, meses depois, sem ninguém ligar o sintoma à guarda.
+
+**Do lado do cliente, três decisões que não se rediscutem:**
+
+- **`sessionStorage`, nunca `localStorage`.** Um admin que abre o sistema
+  dois dias depois e herda em silêncio "Operando em: Filial 02" da semana
+  passada lança na filial errada — e isso não se reescreve (regra 4).
+- **"Por operação" significa SNAPSHOT.** Trocar a filial no cabeçalho com
+  um formulário aberto **não** retargeta aquela operação, nem o que já está
+  na fila. Mesma disciplina da tarifa, que é capturada no cadastro e vai no
+  payload em vez de ser lida na hora do sync.
+- **`donoDaFila` não é sobrecarregado.** Dono do item local
+  (`userId`/`tenantId`/`lojaId`) e loja operacional são eixos distintos;
+  misturá-los faria a sincronização reler a seleção atual do admin, que é
+  exatamente o que o snapshot existe pra impedir.
+
+**Caixa e gerente não mudam:** `lojaOperacional = profile.lojaId`, sem
+seletor, sem override, e o servidor recusa outra loja. E **o frontend
+escolhe contexto, nunca concede competência** — quem recusa é o servidor.
+
+---
+
 ## Fechamento de caixa e o eixo financeiro
+
+> **ESTE FLUXO SERÁ SUBSTITUÍDO — decidido em 2026-09-08, código não
+> começado** (passo 5, seção 4 do escopo revisado). O sistema passa a
+> **preparar** o fechamento: resumo calculado, exceções destacadas como o
+> trabalho do gestor, observações, e **aprovação auditável** de uma versão
+> determinada — com responsável, horário, escopo e os dados usados na
+> comparação. Hoje existe só "Marcar dia como conferido", e **não existe
+> entidade de fechamento aprovado**.
+>
+> Três regras novas que valem desde já: **fechamento calculado não é
+> fechamento aprovado**; ausência de cobrança da agência **não** significa
+> diferença zero, e uma comparação incompleta tem que dizer isso em vez de
+> aparecer como conciliada; e um retorno offline que chegue depois da
+> aprovação **não muda o aprovado em silêncio** — apresenta a alteração e
+> abre revisão.
+>
+> Duas coisas medidas no código atual que o passo 5 tem que resolver:
+> `data/fechamento.ts` filtra `.eq('tipo','cliente')` e usa
+> `buscarComTeto(LIMITE_FECHAMENTO)` — **não se aprova soma truncada**, e
+> um fechamento financeiro completo inclui os serviços efetivamente
+> cobrados, transferências incluídas quando aplicável.
+>
+> **O que continua valendo integralmente é o argumento do "não inventar o
+> número"**, mais abaixo. Ele fica ainda mais importante quando houver
+> cobrança da agência para comparar: é ela que fecha a conta, não uma
+> estimativa nossa.
 
 `status_financeiro` existiu morto desde o schema inicial — nada no app
 escrevia nele. Ganhou uso em 2026-08-10, e os três valores significam:
@@ -587,61 +721,73 @@ descrevia um caminho impossível. Implementado em 2026-08-10.
 
 ## Tarifa de entrega e vales — a regra do dinheiro da tele
 
-Descoberto em 2026-08-10, depois de o MVP inteiro estar pronto. O sistema
-tratava `valor_entrega_cents` como número livre digitado pelo caixa. A regra
-real é outra:
+> **UM VALE, SEM ADICIONAL — decidido em 2026-09-08, CÓDIGO NÃO COMEÇADO.**
+> É o passo 1 do escopo pré-V1 revisado
+> (`docs/escopo-pre-v1-revisado.md`, seção 1). O código de hoje ainda
+> oferece o seletor de 1/2 vales e multiplica a tarifa; esta seção
+> descreve a regra **decidida**, e o que sai vem logo abaixo. Não leia o
+> texto novo como descrição do que está construído.
 
 - **A tarifa é fixa por filial** (R$ 9,00 hoje), em `lojas.tarifa_entrega_cents`.
-  O caixa nunca digita valor de entrega — escolhe **quantos vales**.
-- **Endereço distante cobra 2 vales.** É a única variação.
-- **O vale base a farmácia sempre deve à agência.** Ela recupera do cliente
+  O caixa nunca digita valor de entrega **e não escolhe quantidade**: cada
+  vale custa a tarifa acordada da filial.
+- **O vale a farmácia sempre deve à agência.** Ela recupera do cliente
   quando a compra é abaixo de R$ 100 (a taxa entra no valor da compra, que
   **já vem somada do Trier** — o sistema não soma nada, e não deve passar a
   somar: viraria cobrança dobrada) e absorve quando é acima. Nos dois casos
   ela deve os R$ 9 à agência, então isso não muda o acerto e não virou coluna.
-- **O vale extra o cliente paga em mãos ao motoboy** — nunca passa pela
-  farmácia. Exceção: convênio com `farmacia_paga_entrega_integral` (caso do
-  Minerva), onde ela banca os dois.
-
-| caso | total | farmácia deve | cliente em mãos |
-|---|---|---|---|
-| 1 vale | 900 | 900 | 0 |
-| 2 vales | 1800 | 900 | 900 |
-| 2 vales + convênio integral | 1800 | 1800 | 0 |
+- **Uma fonte só para a tarifa acordada**, hoje 900 centavos, mais o valor
+  registrado na operação. Não espalhar o literal `900` entre telas, e
+  **não usar o preço enviado pela agência como referência de "taxa
+  correta"** — é justamente ele que a conferência do passo 6 existe pra
+  comparar.
 
 **O que a farmácia deve = `valor_entrega_cents - entrega_paga_cliente_cents`.**
 Na tela isso se chama **"A pagar à agência"** (ou só "A pagar" nas colunas
 do relatório) — "Farmácia deve" foi trocado a pedido do usuário em
 2026-08-12. O campo em código continua `valorFarmaciaDeveCents`.
-Antes disso o relatório somava o total como se ela devesse tudo — o acerto com
-a agência vinha inflado em toda entrega distante.
 
-Duas colunas guardadas em vez de derivadas, de propósito:
-`quantidade_vales` (dividir valor pela tarifa daria contagem errada se a
-tarifa mudar) e `entrega_paga_cliente_cents` (a regra do convênio quebra a
-derivação, e desmarcar o convênio depois reescreveria o passado).
+**A fórmula NÃO se simplifica para `valor_entrega_cents`**, mesmo com a
+parcela nova sempre zerada: os vales históricos têm
+`entrega_paga_cliente_cents` maior que zero, e trocar a conta reescreveria
+o acerto do passado. Ela nasceu de um bug real — o relatório somava o
+total como se a farmácia devesse tudo, e o acerto vinha inflado em toda
+entrega distante.
 
-Nunca comparar nome de convênio com `'Minerva'` no código — a regra é a flag.
+### O que sai, e o que NÃO sai junto
 
-**Convênio pode compor o pagamento com outra forma, e a regra do integral
-continua valendo mesmo assim** (decidido em 2026-08-27, no E4). Metade
-convênio, metade dinheiro: se o convênio escolhido tem
-`farmacia_paga_entrega_integral`, a farmácia banca a entrega inteira. Quem
-banca a entrega é o convênio, e isso não depende de quanto da **compra**
-ele cobriu. Em código: `formas.some(f => f.forma === 'convenio')`, nunca
-uma comparação com a forma única.
+Sai da **tela e da regra**: o seletor de um/dois vales, os estados e
+mensagens de endereço distante, a multiplicação da tarifa, a distinção de
+quem paga o extra, os totais específicos desse adicional, e a flag
+`farmacia_paga_entrega_integral` (com ela, a exceção do convênio que
+bancava os dois vales).
 
-**Mas só UMA linha pode ser convênio** — `entregas.convenio_id` é uma
-coluna só, e duas seriam dois acordos disputando o mesmo campo, sem o
-sistema ter como dizer qual vale.
+**Não sai do banco nem do contrato.** `quantidade_vales`,
+`entrega_paga_cliente_cents` e `convenio_id` **fazem parte da linha `v` do
+DCR1** (`canonico.ts`, e o gêmeo `romaneio_canonico`). A transição é:
 
-**Transferência entre filiais paga a mesma tarifa, sempre 1 vale.**
+```
+registros NOVOS   quantidade_vales = 1
+                  entrega_paga_cliente_cents = 0
+                  convenio_id = null
+serialização      PRESERVADA — os campos continuam na linha canônica
+```
+
+**Nunca encurtar a linha canônica só no frontend.** Eliminar campo do
+contrato, se um dia for desejado, é alteração coordenada TS↔SQL feita **no
+corte**, com os dois gêmeos mudando juntos.
+
+E a razão original de as duas colunas serem guardadas em vez de derivadas
+continua de pé para o histórico: dividir valor pela tarifa daria contagem
+errada se a tarifa mudar, e a regra do convênio quebrava a derivação.
+
+**Transferência entre filiais paga a mesma tarifa, sempre 1 vale** — e
+esta parte **não muda nada**, porque já era assim.
 Confirmado na farmácia em 2026-08-11: quem leva o produto de uma filial
 pra outra é o motoboy da agência, e ela cobra por essa corrida como por
 qualquer outra. Então o vale de transferência nasce com
 `valor_entrega_cents` = tarifa da filial que **pediu** (é ela que paga) e
-`quantidade_vales = 1` — a variação de 2 vales é endereço distante do
-*cliente*, que não existe aqui. `entrega_paga_cliente_cents` fica 0: não
+`quantidade_vales = 1`. `entrega_paga_cliente_cents` fica 0: não
 há cliente pra pagar em mãos, a farmácia deve o valor inteiro. O que
 continua zero é a **venda** (`valor_compra_cents`, nenhum `pagamentos`) —
 transferência não é compra. Antes disso a transferência entrava no
@@ -950,6 +1096,43 @@ O desenho é deliberadamente mínimo, e cada peça tem motivo:
 ---
 
 ## Papel que não volta — convênio e receita
+
+### Convênio genérico — decidido em 2026-09-08, código não começado
+
+Passo 1 do escopo revisado (`docs/escopo-pre-v1-revisado.md`, seção 2).
+**A forma de pagamento "Convênio" FICA**, e o documento que precisa
+retornar também. O que sai é a **identificação da empresa**: Minerva,
+Unimed ou qualquer outra. Regra comercial e detalhamento ficam no Trier.
+
+```
+SAI    aba e componente ConveniosCadastro
+       CRUD, queries e DTOs de convênios em data/cadastros.ts
+       o seletor e a exigência de convenioId no cadastro de entrega
+       as flags exige_assinatura e farmacia_paga_entrega_integral
+       sementes e textos que descrevem tratamento por convênio
+
+FICA   a forma de pagamento, o valor, o documento esperado,
+       o recebimento, a pendência e a auditoria
+```
+
+**Isso quase não custa código, e a razão é boa:** a derivação do papel já
+sai da **forma** (`convenio`/`crediario`, via `GERAM_DOCUMENTO_FISICO`), e
+nunca de `exige_assinatura`. A custódia de papel não depende de saber qual
+empresa é.
+
+**Convênio e receita continuam documentos DISTINTOS.** Uma entrega pode
+exigir os dois, e **receber a receita não pode quitar a pendência do
+convênio**, nem o contrário. Esta decisão também **não** elimina
+`crediario` nem `convcard`.
+
+**Apagar a tela não apaga a tabela.** `entregas.convenio_id` é FK, e
+`convenios` aparece na saída do romaneio
+(`20260816140000_romaneio_de_saida.sql`). A retirada física da tabela, se
+for desejada, é migration própria com as dependências ajustadas — e o
+`convenio_id` continua na linha `v` do DCR1 de qualquer forma, nascendo
+nulo. Ver "Tarifa de entrega e vales" para a regra da serialização.
+
+---
 
 Confirmado com o usuário em 2026-08-13. Até então a aba "Documentos" só
 tinha o caminho feliz ("Marcar recebido"/"Marcar devolvida"): quem
@@ -2688,6 +2871,23 @@ outro`. Ele vive em **quatro** cópias deliberadas — os golden vectors, o
 `src/lib/canonicoRetorno.ts` e o gêmeo SQL — e **as quatro mudam
 juntas**.
 
+> **`outro` SAI do domínio de pagamento — decidido em 2026-09-08, código
+> não começado** (passo 1, seção 3 do escopo revisado). Deixa de ser opção
+> no cadastro, na divergência e no retorno, e o servidor para de aceitá-lo
+> em registros novos. As quatro cópias mudam juntas, mais o CHECK e o
+> validador SQL vigente (`20260820150000_dcrr1_bloco_documentos.sql`).
+>
+> **NUNCA fazer substituição global do literal `outro`.** O mesmo literal
+> é **motivo de insucesso** — com detalhamento obrigatório —, e esse não
+> foi eliminado. `outro_tenant` e mensagens genéricas também não têm
+> relação com forma de pagamento. Uma troca cega aqui atinge três coisas
+> diferentes com o mesmo nome.
+>
+> E enquanto existir histórico com pagamento `outro`, **a leitura dele
+> continua fiel**: nada de converter automaticamente para outra
+> modalidade. No corte, confirmar ausência de linhas e de itens de fila
+> com essa forma antes de encerrar a compatibilidade.
+
 Corrigido em 2026-08-20, e vale como aviso: o DCRR1 foi congelado em
 19/08 com a lista do **schema inicial**, que a migration
 `20260807123331` já tinha substituído doze dias antes. `vale` saiu do
@@ -3132,8 +3332,12 @@ agora só roda nos specs, como padrão-ouro contra o qual
   (`src/lib/romaneioPdf.ts`) — ver a seção própria abaixo.
 - ~~**Envio do romaneio ao Drive.**~~ **Construído em 2026-08-19** — botão
   na página do romaneio, duas vias. Ver "Google Drive".
-- **Portal da agência.** `profiles.papel` já aceita `'agencia'` desde o
-  schema inicial; falta a policy.
+- ~~**Portal da agência.**~~ **Entrou no escopo em 2026-09-08** como passo
+  6 do escopo revisado — desenho na seção 5 de
+  `docs/escopo-pre-v1-revisado.md`, **código não começado**.
+  `profiles.papel` já aceita `'agencia'` desde o schema inicial; falta a
+  policy, e ela é o começo: o acesso é vinculado à agência e ao tenant, e
+  **nunca pelo cargo de administrador da farmácia**.
 - **Romaneio de retorno.** **Desenho fechado em 2026-08-19, código não
   começado** — ver a seção própria abaixo. Ele deixou de ser "nada
   impede" e virou uma frente de seis etapas, com decisões já tomadas que
@@ -3237,6 +3441,14 @@ hipótese.
 Repare que o tempo no sistema **não muda** entre os dois casos, enquanto no
 papel quase dobra: é onde a diferença mais aparece.
 
+**A linha "distante" é MEDIÇÃO HISTÓRICA, não caso vivo.** Ela vale como o
+que foi cronometrado em 2026-08-10, quando o endereço distante cobrava dois
+vales. Com a decisão de 2026-09-08 (um vale, sem adicional) esse caso deixa
+de existir no cadastro — e o passo 1 **só pode melhorar** o número, porque
+tira um campo da tela sem acrescentar nenhum. Não é preciso recronometrar
+para aprová-lo; é preciso recronometrar se algum passo **acrescentar**
+campo.
+
 **"Os dois papéis" são vale do tele + planilha de controle da farmácia**, não
 duas vias do mesmo vale. Entrega distante multiplica os dois.
 
@@ -3305,11 +3517,46 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
     romaneio e **sangria no fim do dia** (aba Fechamento), em
     `Romaneios › Filial › mês › dia › via`. Testado contra o Google de
     verdade. Ver "Google Drive" acima.
-11. **Romaneio de Retorno** — **desenho fechado em 2026-08-19, código não
-    começado.** Outra frente de seis etapas; as decisões estão na seção
-    "O Romaneio de Retorno" acima e precisam ser lidas antes da primeira
-    linha. A etapa perigosa é a 2, o canônico — dois gêmeos
-    TypeScript/SQL de novo, com mais campos que o da saída.
+11. ~~**Romaneio de Retorno**~~ — **feito**, em seis etapas, entre 19 e
+    25/08. O caminho feliz rodou nos dois modos (`R-000023` e `R-000025`
+    online, `R-000026` `offline_sincronizada`) e o placar de integridade
+    do retorno saiu de `0 · 0 · 0` para `3 · 3 · 0`. As decisões estão na
+    seção "O Romaneio de Retorno" acima. Falta a etapa 9 daquela frente: o
+    fluxo excepcional (online) e o PDF do retorno + Drive.
+
+### A sequência pré-V1 revisada — decidida em 2026-09-08
+
+Substitui a ordem anterior (`E10 E11 E12 E6 E9 E7 E8 → STAGING → corte`).
+Vem de `docs/escopo-pre-v1-revisado.md`; **nada dela está construído.**
+
+```
+0.  alinhar a fonte de verdade ao escopo revisado   ← este texto
+1.  um vale sem adicional · convênio genérico · sem "Outro"
+2.  "Cargo" · filial obrigatória · E10 completo (2, 3 e 4)
+3.  snapshot histórico da filial nos documentos
+4.  concluir o contrato de assinaturas/envelope
+5.  fechamento diário calculado, com exceções e aprovação auditável
+6.  painel da agência: cobrança discriminada e conferência
+7.  corte/reset coordenado e aceite completo
+────────────────────────────────────────────────────────────
+    STAGING → produção → piloto em 1 filial
+```
+
+**Os passos 5 e 6 são duas frentes de produto ligadas.** O fechamento pode
+organizar as exceções operacionais antes de o painel existir, mas **não
+pode se anunciar como conciliado com a agência antes de receber e comparar
+a cobrança dela**.
+
+**O passo 3 é um defeito medido, não uma melhoria.** O nome da filial nos
+documentos vem de join vivo (`data/romaneios.ts:943`), não do snapshot:
+renomear uma filial hoje muda o cabeçalho de PDFs históricos e manda um
+reenvio para outra pasta do Drive. O `document_hash` **não** é afetado — o
+canônico carrega só o `loja_id`.
+
+**O staging continua vindo DEPOIS de todas as funções**, e a razão é do
+usuário: o objetivo dele não é ver se builda fora do localhost, é provar o
+produto como multiusuário e multiperfil — o que exige o papel `'agencia'`
+do passo 6 existindo.
 
 ---
 

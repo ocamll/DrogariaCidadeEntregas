@@ -112,9 +112,29 @@ E5   login por username                 ✓  item 89 — aceite medido
 E10  admin operando por filial   SERVIDOR FECHADO (91–92) — falta cliente
 E11  visibilidade do offline     backlog, sem contrato
 E12  continuidade operacional offline  CONTRATO FECHADO (94), sem código
-ordem ate producao: E10 E11 E12 E6 E9 E7 E8 → STAGING → corte → producao → piloto
 E6..E9  router, divergência, agência, endereço
 ```
+
+**A ORDEM ATÉ PRODUÇÃO MUDOU EM 2026-09-08** — item 95. A linha antiga era
+`E10 E11 E12 E6 E9 E7 E8 → STAGING → corte`, e foi substituída pelo escopo
+pré-V1 revisado (`docs/escopo-pre-v1-revisado.md`):
+
+```
+0  alinhar CLAUDE.md/NOTAS ao escopo revisado   ← feito em 08/09
+1  um vale sem adicional · convênio genérico · sem "Outro"
+2  "Cargo" · filial obrigatória · E10 completo (2, 3 e 4)
+3  snapshot histórico da filial nos documentos
+4  concluir o contrato de assinaturas/envelope
+5  fechamento diário com exceções e aprovação auditável
+6  painel da agência: cobrança discriminada e conferência
+7  corte/reset coordenado e aceite completo
+   → STAGING → produção → piloto em 1 filial
+```
+
+**O E10 deixou de ser adiável**: a decisão de esconder a filial do cadastro
+do admin torna as três telas de escrita inoperantes para ele sem o E10.2+.
+E o **painel da agência saiu da lista "Fora"** do `CLAUDE.md` — é a maior
+frente nova, não um item de limpeza.
 
 **E4 e E5 fecharam depois deste texto original.** O E4 passou no E2E real
 com duas formas previstas e retorno fiel; o E5 criou `camiloadmin` pelo
@@ -168,11 +188,12 @@ conta na Cloudflare, nem projeto do Pages, nem site no ar. Isso não é
 configuração pendente, é infra inteira, e os passos 5 e 6 do roteiro do
 corte dependem dela.
 
-**Se você está retomando, comece por "PRÓXIMA SESSÃO", perto do fim deste
-arquivo.** É lá que está o trabalho combinado — hoje o **E10.1**, com as
-decisões já fechadas (React Router entra na stack; username usa
-identificador técnico interno) e os achados da auditoria que mudaram a
-ordem das etapas.
+**Se você está retomando, leia primeiro `docs/escopo-pre-v1-revisado.md` e
+depois "PRÓXIMA SESSÃO", perto do fim deste arquivo.** O escopo revisado de
+08/09 é o que manda hoje; a seção "PRÓXIMA SESSÃO" diz onde o trabalho
+parou. O `CLAUDE.md` já foi alinhado ao escopo novo (item 95) e traz notas
+datadas separando o que foi **decidido** do que está **construído** — não
+leia uma coisa pela outra.
 
 **ONDE O TRABALHO VIVE MUDOU NO E3.** Até o E2 era tudo na `main`; o E3
 foi para uma branch porque passou a mexer em banco:
@@ -9300,6 +9321,111 @@ reintroduz bug corrigido, em silêncio.
 
 Nada fora de migration nesta sessão. Nenhuma migration pendente.
 
+## 96. O escopo pré-V1 revisado, e a auditoria que o antecedeu
+
+Em 2026-09-08 o usuário fechou um escopo revisado
+(`docs/escopo-pre-v1-revisado.md`) e mandou **verificar antes se o E10 ainda
+era necessário**. As duas coisas se cruzaram, e o cruzamento é o registro.
+
+### A auditoria, e o que ela mediu
+
+A pergunta veio com uma hipótese embutida — se os dados da loja em
+documentos históricos vêm de snapshot ou de consulta viva. **Esse não é o
+eixo do E10**: "snapshot da loja operacional" no item 91 quer dizer
+congelar *qual filial a operação atinge*, não copiar nome e endereço para
+dentro do documento. Auditei os dois.
+
+**O que o hash carrega:** o canônico traz `loja<TAB><uuid>` e mais nada da
+loja (`canonico.ts:77`). `romaneio_payload` também guarda só `loja_id`
+(`20260816140000:340-345`). **Nome, endereço e tarifa não entram em hash
+nenhum.**
+
+**O achado que ninguém tinha visto:** `lojaNome` sai de **join vivo**
+(`data/romaneios.ts:943`, `r.lojas?.nome`) e alimenta o cabeçalho do PDF
+(`romaneioPdf.ts:155`), o campo "Filial" da página (`Romaneio.tsx:305`) e
+**o caminho da pasta no Drive** (`Romaneio.tsx:174`,
+`SangriaRomaneios.tsx:107`). Renomear uma filial amanhã **muda a
+apresentação de documento histórico** e manda um reenvio para outra pasta.
+Integridade criptográfica intacta; apresentação não. Virou o passo 3.
+
+**A exceção que já estava certa:** na transferência os nomes das filiais
+são snapshot desde a criação (`entregas.ts:243-244`, em `cliente_nome` e
+`cliente_endereco`) e entram no canônico — congelados pela trigger da
+regra 7. Ali o problema não existe, e não por acaso.
+
+**A reafirmação que baixa o risco do passo 1:** mexer na fórmula do DCR1
+**não** quebra os documentos já selados. `verificar_romaneio` faz
+`digest(r.canonico)` sobre os bytes **gravados**, e o comentário diz que é
+de propósito — recalcular do `entregas` acusaria divergência legítima
+quando um vale tivesse sido corrigido (`20260819130000:136-142`).
+
+### A conclusão da auditoria, e por que ela foi revertida no mesmo dia
+
+Classifiquei o E10 como **recomendado, adiável para pós-V1**: nada fica
+incorreto sem ele, o piloto é em uma filial, e quem lança no balcão é o
+caixa, que tem filial no cadastro.
+
+**A seção 6 do escopo revisado derruba isso**, com um fato que a auditoria
+não tinha: a filial **sai do cadastro do administrador**. Com ela
+escondida, as três guardas `if (!profile.lojaId)` deixam de ser
+inconveniência e impedem o admin de operar. **E10.2+ virou obrigatório.**
+
+Fica registrado porque é um bom exemplo de uma conclusão certa sobre o
+código e errada sobre o produto: eu media o repositório, e o que decidia
+era uma decisão de interface que ainda não estava nele.
+
+### O passo 0, e por que ele veio antes de qualquer código
+
+O `CLAUDE.md` contradizia o escopo em quatro pontos, e um deles **bloqueava
+trabalho**: *portal da agência* estava na lista "Fora — não construir", que
+manda parar e perguntar. Uma sessão futura recusaria o passo 6 citando a
+própria fonte de verdade.
+
+Alinhado em 08/09, com uma regra de edição: **toda nota nova separa
+DECIDIDO de CONSTRUÍDO**, no vocabulário que o arquivo já usava
+("desenho fechado, código não começado"). Sem isso, "um vale só" seria lido
+como descrição do código — que ainda multiplica tarifa por
+`quantidade_vales`.
+
+Corrigido de passagem um erro que já estava lá: o item 11 da "Ordem de
+construção" dizia que o Romaneio de Retorno não tinha começado, enquanto a
+seção acima dele descreve a 2D feita e três documentos selados.
+
+**Custo a lembrar:** o `CLAUDE.md` está indexado pelo Graphify. Um
+`graphify --update` reprocessa ~169 mil tokens — rodar **uma vez**, depois
+que o passo 1 assentar, nunca a cada edição.
+
+### A auditoria de limpeza entrou junto, e ela corrige duas premissas
+
+`docs/analise-limpeza-pre-v1.md` é a auditoria do commit `bc7062a` que
+antecedeu o escopo revisado (o escopo a chama de "auditoria anterior", e
+ela própria abre dizendo que as decisões posteriores a substituem onde
+divergirem). Estava fora do repositório; entrou em 08/09.
+
+Ela não é só inventário. **Duas correções que valem antes dos próximos
+passos:**
+
+**1. "Os 19 documentos" não são 19 hashes selados.** O baseline versionado
+discrimina **13 saídas seladas + 3 saídas em conflito + 3 retornos
+selados**. Romaneio em conflito **não tem `final_hash`** — é justamente o
+caso que o verificador declara fora do placar. Então a sessão 2 de
+assinaturas/hashes lida com **16 documentos com hash**, não 19. E o número
+é registro histórico, não censo atual do Supabase.
+
+**2. A v7 do Dexie não limpa duas vezes.** `db.version(7).upgrade(...)`
+roda **quando o banco local atravessa aquela atualização**. Um terminal que
+já está em v7 **não é limpo de novo** por reabrir o app depois do reset do
+Supabase — e aí ele volta com fila e caches apontando para ids que não
+existem mais, que é exatamente o cenário que a v7 existe pra impedir. O
+corte precisa **fechar as abas e conferir/limpar o estado local de cada
+origem e perfil** que participou dos testes. Não presumir que a versão
+sozinha migrou os navegadores.
+
+O resto dela — R1–R8, S1–S11, o que não se toca — é material do lote
+mecânico, e vale ler antes de qualquer sessão de remoção. Duas coisas dela
+já foram absorvidas: o snapshot da filial virou o passo 3, e o adiamento do
+E10.2+ que ela recomendava foi revertido pela seção 6 do escopo.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
@@ -9315,11 +9441,22 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: E10.2 — o snapshot da loja operacional no cliente
+### PRÓXIMA SESSÃO: o passo 1 do escopo revisado
 
 > **Esta é a seção atual.** As de baixo são históricas: descrevem como
-> "próximo" coisas que já foram feitas. Atualizada em 2026-09-02, com o
-> E10.1 fechado no servidor.
+> "próximo" coisas que já foram feitas.
+>
+> **Atualizada em 2026-09-08.** O passo 0 (alinhar `CLAUDE.md` e este
+> arquivo ao escopo revisado) está **feito** — item 96. O próximo é o
+> **passo 1**: um vale sem adicional, convênio genérico e fim da forma
+> "Outro", com a transição coordenada dos contratos persistidos.
+>
+> **O E10.2 não foi cancelado — virou o passo 2**, e passou de adiável a
+> obrigatório. O detalhe técnico dele continua válido e está logo abaixo;
+> só mudou a posição na fila. Dois arquivos dele chegaram a ser escritos
+> em 08/09 (`src/lib/lojaOperacional.ts`, `src/data/lojaOperacional.tsx`),
+> **não referenciados por nada** — conferir se ainda fazem sentido antes
+> de reaproveitar.
 
 #### Estado exato — LIDO DO `git log`, não de memória
 
