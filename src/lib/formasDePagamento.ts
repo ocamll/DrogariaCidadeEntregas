@@ -52,9 +52,39 @@ export const FORMA_PAGAMENTO_LABEL: Record<FormaPagamento, string> = {
   outro: 'Outro',
 }
 
-export const FORMA_PAGAMENTO_OPTIONS = Object.entries(FORMA_PAGAMENTO_LABEL) as Array<
-  [FormaPagamento, string]
->
+/**
+ * AS FORMAS ACEITAS EM OPERAÇÃO NOVA — e elas não são o domínio inteiro.
+ *
+ * `outro` saiu em 2026-09-10 (decisão de 2026-09-08). Ele CONTINUA em
+ * `FormaPagamento` e em `FORMA_PAGAMENTO_LABEL`, de propósito: os dois
+ * são o vocabulário de LEITURA, e um pagamento antigo gravado como
+ * `outro` tem que continuar aparecendo como "Outro". Duas telas indexam
+ * o rótulo sem fallback (`EntregasTable`, `Fechamento`), e tirar a chave
+ * faria o histórico renderizar `undefined`.
+ *
+ * Escolher e ler são perguntas diferentes: o que se OFERECE sai daqui, o
+ * que se EXIBE sai do rótulo.
+ *
+ * `outro` como MOTIVO DE INSUCESSO é outro campo com o mesmo nome, e não
+ * foi tocado — ver `MOTIVOS_INSUCESSO` em `canonicoRetorno.ts`.
+ */
+export const FORMAS_ACEITAS: readonly FormaPagamento[] = [
+  'dinheiro',
+  'credito',
+  'debito',
+  'pix',
+  'convenio',
+  'convcard',
+  'crediario',
+]
+
+export function formaAceita(forma: string): boolean {
+  return (FORMAS_ACEITAS as readonly string[]).includes(forma)
+}
+
+export const FORMA_PAGAMENTO_OPTIONS = FORMAS_ACEITAS.map(
+  (forma) => [forma, FORMA_PAGAMENTO_LABEL[forma]] as [FormaPagamento, string]
+)
 
 /**
  * O VALOR DE CADA LINHA, com a que o caixa não digitou absorvendo o
@@ -239,6 +269,14 @@ export function validarFormasPrevistas(
   }
   if (formas.some((f) => f.valor_cents <= 0)) {
     return 'Toda forma precisa de um valor maior que zero.'
+  }
+
+  // A SEGUNDA TRAVA DO CLIENTE. A tela já não oferece `outro`; isto pega
+  // um valor que chegue por outro caminho. Quem recusa de verdade é o
+  // CHECK de `pagamentos.forma`.
+  const foraDeUso = formas.find((f) => !formaAceita(f.forma))
+  if (foraDeUso) {
+    return `${FORMA_PAGAMENTO_LABEL[foraDeUso.forma] ?? foraDeUso.forma} não é mais forma de pagamento — escolha a forma usada.`
   }
 
   const vistas = new Set<FormaPagamento>()

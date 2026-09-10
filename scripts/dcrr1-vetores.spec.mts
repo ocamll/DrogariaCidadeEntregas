@@ -43,7 +43,7 @@ const FORMAS = [
   'convenio',
   'convcard',
   'crediario',
-  'outro',
+  // `outro` saiu em 2026-09-10. Como MOTIVO ele continua, em MOTIVOS acima.
 ]
 
 for (const vetor of VETORES) {
@@ -302,10 +302,13 @@ checa(
   'nenhum motivo repetido — um vetor por classe de erro',
   new Set(motivosSemExcecao).size === motivosSemExcecao.length
 )
+// 3 desde 2026-09-10: o I018 (`outro` saiu das formas) é o segundo caso
+// de "existiu e saiu", e ganha vetor próprio pelo mesmo motivo do I013 —
+// sem ele, "tirei do domínio" e "esqueci de tirar" seriam indistinguíveis.
 checa(
   'duplicata deliberada de forma_invalida',
-  VETORES_INVALIDOS.filter((v) => v.motivo === 'forma_invalida').length === 2,
-  'I010 (nunca existiu) e I013 (existiu e saiu)'
+  VETORES_INVALIDOS.filter((v) => v.motivo === 'forma_invalida').length === 3,
+  'I010 (nunca existiu), I013 (`vale`, saiu) e I018 (`outro`, saiu)'
 )
 checa(
   'duplicata deliberada de tipo_documento_invalido',

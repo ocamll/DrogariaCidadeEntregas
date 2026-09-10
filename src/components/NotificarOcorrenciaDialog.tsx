@@ -4,6 +4,7 @@ import type { AuthProfile } from '@/data/auth'
 import {
   FORMA_PAGAMENTO_LABEL,
   FORMA_PAGAMENTO_OPTIONS,
+  formaAceita,
   textoDoPagamentoAlterado,
   divergiuDoPrevisto,
   resolverValoresDasFormas,
@@ -222,6 +223,16 @@ function DivergenciaPagamentoForm({
     // justamente na forma que a tela mostrava preenchida.
     if (valoresCents.some((cents) => cents <= 0)) {
       setErro('Toda linha precisa de um valor maior que zero.')
+      return
+    }
+    // A SEGUNDA TRAVA DO CLIENTE. O select já não oferece `outro` (saiu das
+    // formas em 2026-09-10); isto pega um valor que chegue por outro
+    // caminho. Quem recusa de verdade é o CHECK de `pagamentos.forma`.
+    const foraDeUso = linhas.find((linha) => !formaAceita(linha.forma))
+    if (foraDeUso) {
+      setErro(
+        `${FORMA_PAGAMENTO_LABEL[foraDeUso.forma] ?? foraDeUso.forma} não é mais forma de pagamento — escolha a forma usada.`
+      )
       return
     }
     if (!totalBate) {

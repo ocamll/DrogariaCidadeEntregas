@@ -12,6 +12,10 @@ import { inserirEventoIdempotente } from '@/data/eventos'
 export {
   FORMA_PAGAMENTO_LABEL,
   FORMA_PAGAMENTO_OPTIONS,
+  // `outro` saiu das formas aceitas em 2026-09-10 — ver a nota em
+  // `lib/formasDePagamento.ts`. O rótulo acima continua com ele.
+  FORMAS_ACEITAS,
+  formaAceita,
   formasDoEvento,
   textoDoPagamentoAlterado,
   // E4 — as duas regras do previsto 1:N. Moram em `lib/` pelo mesmo

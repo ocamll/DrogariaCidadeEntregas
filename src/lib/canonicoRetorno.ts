@@ -110,9 +110,9 @@ function ordemBinaria(a: string, b: string): number {
  * seria recusado como `forma_invalida` DEPOIS das duas assinaturas, e
  * `vale` passaria por aqui pra morrer no INSERT em `pagamentos`.
  *
- * **Mudar isto exige mudar os três lugares JUNTOS**, e a partir do
- * primeiro retorno real selado o custo deixa de ser esse — vira
- * histórico assinado.
+ * **Mudar isto exige mudar JUNTOS as quatro cópias** (este arquivo, os
+ * vetores, o `FORMAS` do spec deles e o gêmeo SQL) **e o CHECK de
+ * `pagamentos.forma`**. Foi o que a saída do `outro` fez, em 2026-09-10.
  */
 export const FORMAS_PAGAMENTO = [
   'dinheiro',
@@ -127,7 +127,11 @@ export const FORMAS_PAGAMENTO = [
   // é outro fato, e de propósito não tem representação nesta linha —
   // ver a nota do bloco `d` no CLAUDE.md.
   'crediario',
-  'outro',
+  // `outro` SAIU em 2026-09-10. Não reescreve histórico: nenhum documento
+  // assinado carrega `outro` numa linha `pr` (censo de 2026-09-10: zero),
+  // e o verificador confere os bytes GRAVADOS, sem passar por esta
+  // lista. Muda só o que se aceita ASSINAR daqui em diante. Como motivo
+  // de insucesso ele continua, logo abaixo.
 ] as const
 export type FormaPagamento = (typeof FORMAS_PAGAMENTO)[number]
 

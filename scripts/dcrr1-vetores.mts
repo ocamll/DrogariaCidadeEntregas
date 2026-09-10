@@ -84,7 +84,6 @@ export type PagamentoRealizadoCanonico = {
     | 'convenio'
     | 'convcard'
     | 'crediario'
-    | 'outro'
   valorCents: number
   trocoCents: number
 }
@@ -1218,6 +1217,28 @@ export const VETORES_INVALIDOS: VetorInvalido[] = [
             { tipo: 'crediario', situacao: 'recebido' },
             { tipo: 'crediario', situacao: 'faltante' },
           ],
+        },
+      ],
+    },
+  },
+  {
+    nome: 'I018 — `outro` não é mais forma de pagamento',
+    porque:
+      'Mesmo motivo do I013: sem ele, "tirei do domínio" e "esqueci de ' +
+      'tirar" ficam indistinguíveis. `outro` saiu das formas em ' +
+      '2026-09-10 (decisão de 2026-09-08). Ele CONTINUA sendo motivo de ' +
+      'insucesso, que é outro campo com o mesmo nome — o V003 prova esse ' +
+      'lado seguir aceito.',
+    motivo: 'forma_invalida',
+    entrada: {
+      ...BASE,
+      vales: [
+        {
+          ...VALE_OK,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'outro', valorCents: 100, trocoCents: 0 },
+          ],
+          documentos: [],
         },
       ],
     },

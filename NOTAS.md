@@ -9506,11 +9506,23 @@ explicitamente no payload com 1, 0 e null. Encurtar a linha só no cliente
 - **Com a janela estreita (590px) o cabeçalho se sobrepõe** e o conteúdo
   corta à esquerda. É anterior ao passo 1 e o público é PC de balcão, mas
   ficou visto.
-- **Os cliques da ferramenta de navegador falharam duas vezes** no botão
-  certo, com a coordenada certa, logo depois de a janela mudar de
-  largura. O terceiro chegou como evento confiável e abriu a tela. Foi
-  temporização da ferramenta, não defeito do app — anotado para ninguém
-  perder tempo procurando bug nisso.
+- ~~**Os cliques da ferramenta falharam por temporização**~~ —
+  **DIAGNÓSTICO ERRADO, corrigido em 2026-09-10.** Medido depois, com um
+  listener de clique e um observador de DOM:
+  - **não era remount**: o formulário nunca chegou a aparecer, então o
+    `Painel` não estava desmontando nada;
+  - **a página transborda na horizontal a 590px** — a tabela de vales
+    fica mais larga que a janela, e a posição do botão muda com a
+    rolagem (inclusive a que eu mesmo provoquei com `scrollIntoView`). A
+    ferramenta clicava num layout que tinha andado;
+  - **e o quadro de coordenadas era outro**: com a janela emulada, a
+    ferramenta espera coordenadas no quadro da CAPTURA (800×450), não no
+    da janela (1366×768). Convertida a coordenada, o menu do Radix abriu
+    na primeira tentativa.
+
+  O transbordo a 590px é real e contraria a convenção "a lista de vales
+  não rola pra o lado" do `CLAUDE.md`. É anterior aos passos 1 e "Outro",
+  e o público é PC de balcão — fica visto, sem entrar em passo nenhum.
 
 ## 98. A falha do `consulta-render` era o executor, e as contas de prova do E10
 
@@ -9615,6 +9627,107 @@ Nada foi criado nem alterado: preparar o cenário é decisão do usuário.
   **enfileirada na filial A**, seguida da seleção da **filial B** — a
   operação já registrada **continua pertencendo à A**.
 
+## 99. "Outro" sai das formas de pagamento — código feito, migration a aplicar
+
+Construído em 2026-09-10, como passo PRÓPRIO (o usuário o separou do
+passo 1). O contrato, nas palavras dele: sai das opções de cadastro,
+divergência e retorno; cliente e servidor recusam em operação NOVA;
+leitura e verificação do histórico preservadas até o corte; nenhuma
+mudança no formato canônico e nenhuma conversão; `outro` continua sendo
+motivo de insucesso.
+
+### O levantamento que decidiu o desenho
+
+- **Censo no banco: zero `outro` como forma**, em 0 pagamentos (previsto
+  e realizado), 0 dos 23 romaneios, 0 eventos `pagamento_alterado`.
+  "Preservar o histórico" protege uma possibilidade, não um dado — e o
+  contrato foi cumprido mesmo assim.
+- **O verificador do retorno não revalida forma**: confere
+  `digest(canonico)` sobre os bytes gravados.
+- **Nenhum caminho de LEITURA chama `romaneio_retorno_validar`** — só o
+  selo do retorno e a ferramenta pura `conferir_canonico_retorno`.
+  Apertar o validador não toca leitura nem verificação.
+- **A Edge Function não valida forma.** O servidor são duas peças: o
+  CHECK de `pagamentos.forma` (cadastro e divergência) e o validador
+  (retorno).
+- **Escolher e exibir usavam o mesmo vocabulário.** Duas telas indexam
+  `FORMA_PAGAMENTO_LABEL` sem fallback (`EntregasTable.tsx`,
+  `Fechamento.tsx`): tirar `outro` do rótulo faria um pagamento antigo
+  renderizar `undefined`.
+
+### O que mudou
+
+```
+formasDePagamento.ts   FORMAS_ACEITAS + formaAceita; as opções saem dela;
+                       trava em validarFormasPrevistas. FormaPagamento e
+                       o rótulo MANTÊM `outro` (vocabulário de leitura)
+NotificarOcorrencia…   trava em handleConfirmar
+data/pagamentos.ts     reexporta os dois
+canonicoRetorno.ts     `outro` fora de FORMAS_PAGAMENTO (o gêmeo TS; o
+                       select do retorno itera esta lista)
+dcrr1-vetores.mts      `outro` fora da união de forma; I018 novo
+dcrr1-vetores.spec     `outro` fora da cópia FORMAS; duplicata deliberada
+                       de forma_invalida vai de 2 para 3
+patch-validar-…mts     gera a migration por patch da definição vigente
+20260910120000_…sql    pré-voo que PARA se houver `outro`; CHECK validado
+                       sem `outro`; validador sem `outro`
+```
+
+**Duas decisões assumidas, e ditas:** CHECK **validado** e não
+`NOT VALID` (com o censo zerado, mesmo efeito hoje e uma invariante
+conferível); e o **I018** espelhando o I013, pra "tirei" e "esqueci de
+tirar" não se confundirem.
+
+### A prova
+
+- **O script de patch passou as 13 invariantes antes de escrever a
+  migration**: fora da lista de formas nenhum byte mudou; `outro`
+  continua nos motivos; a regra do motivo sem detalhe continua; os
+  mesmos 16 motivos de recusa; assinatura, atributos e grants idênticos;
+  o canônico não aparece.
+- build ok; lint 0 erros, os mesmos 10 avisos.
+- **26 specs passando, com o comando declarado de cada uma**, e a
+  geradora `dcrr1-sql` com **66 ramos** — exatamente o que a migration
+  espera (65 + o I018).
+- **Nos módulos:** as opções do cadastro/divergência e as do retorno
+  saem sem `outro`; `FORMA_PAGAMENTO_LABEL.outro` segue "Outro";
+  `formaAceita('outro')` é falso; a trava devolve *"Outro não é mais
+  forma de pagamento — escolha a forma usada."*
+- **Na tela, as três renderizações:**
+
+  ```
+  cadastro     select de forma       7 opções, sem Outro
+  divergência  select Radix          7 opções, sem Outro   (V-000062)
+  retorno      select de forma       7 opções, sem Outro   (R-000010, V-000042)
+  retorno      select de motivo      ausente · endereco_errado · recusou · OUTRO
+  ```
+
+  **Nada foi gravado nos testes de tela**: o retorno parou na
+  conferência, antes de identificação e assinaturas, e foi descartado
+  recarregando; o diálogo de divergência nunca foi confirmado — conferido
+  no banco depois, o `V-000062` segue com só o previsto, `na_ordem` e um
+  único evento `entrega_criada`.
+
+### O que NÃO está provado, e por quê
+
+**A recusa do SERVIDOR.** A migration está escrita e **não aplicada** —
+migrations deste projeto são aplicadas pelo usuário no SQL Editor, e
+daqui só há a sessão autenticada. Até lá, o banco ainda aceita `outro`,
+e só o cliente recusa. As conferências a rodar estão no rodapé da
+migration: o CHECK sem `outro` e validado, as três respostas do
+validador, os 66 de 66, e o verificador antes e depois.
+
+### O que a sessão aprendeu sobre a ferramenta
+
+A página transborda na horizontal a 590px, e a ferramenta espera
+coordenadas no quadro da **captura** quando a janela está emulada. Numa
+largura de desktop, com a coordenada convertida, os componentes do Radix
+responderam normalmente — a correção está no item 97.
+
+**E o heredoc do bash recusou duas vezes** um texto longo com crases e
+aspas (o script de patch e esta gravação), sem executar nada. A saída foi
+escrever o conteúdo como arquivo e rodar o arquivo.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
@@ -9651,8 +9764,16 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 >   pagamento antigo;
 > - `outro` **continua** sendo motivo de insucesso.
 >
-> Antes dele, o item 98 registrou o diagnóstico do `consulta-render` e as
-> contas de prova do E10.
+> **ESTADO em 2026-09-10 (item 99): o código do "Outro" está FEITO e
+> commitado; a migration `20260910120000` está ESCRITA e NÃO APLICADA.**
+> Antes do passo 2, o usuário aplica a migration no SQL Editor e roda as
+> conferências do rodapé dela — inclusive os **66 de 66** dos vetores.
+> Até isso acontecer, **só o cliente recusa `outro`; o banco ainda
+> aceita.**
+>
+> Depois, o passo 2. O ponto aberto do item 98 (nenhuma conta de caixa
+> ou gerente no domínio do E5) precisa de decisão antes de montar o
+> cenário de restrição.
 >
 > **O E10.2 não foi cancelado — virou o passo 2**, e passou de adiável a
 > obrigatório. O detalhe técnico dele continua válido e está logo abaixo;

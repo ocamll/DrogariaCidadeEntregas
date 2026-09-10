@@ -6,7 +6,7 @@
 > "Outro", fechamento com aprovação, painel da agência e filial operacional
 > do admin.
 >
-> **O passo 1 está CONSTRUÍDO (2026-09-10); o resto não.** Cada seção afetada aqui traz uma nota
+> **Passo 1 CONSTRUÍDO; o "Outro" com código feito e migration AINDA NÃO APLICADA (2026-09-10); o resto não.** Cada seção afetada aqui traz uma nota
 > datada de 2026-09-08 dizendo o que foi decidido e o que o código ainda
 > faz. Onde as duas coisas divergirem, **o código é o que está no ar e o
 > escopo é para onde ele vai** — não confunda um com o outro, e não trate
@@ -2878,14 +2878,25 @@ outro`. Ele vive em **quatro** cópias deliberadas — os golden vectors, o
 `src/lib/canonicoRetorno.ts` e o gêmeo SQL — e **as quatro mudam
 juntas**.
 
-> **`outro` SAI do domínio de pagamento — decidido em 2026-09-08, código
-> não começado** (seção 3 do escopo revisado). **Ganhou passo PRÓPRIO**,
-> separado do passo 1 por decisão do usuário: mexer no domínio de `forma`
-> toca as quatro cópias mais o CHECK e o validador SQL, e isso não se
-> mistura com a simplificação da tarifa. Deixa de ser opção
-> no cadastro, na divergência e no retorno, e o servidor para de aceitá-lo
-> em registros novos. As quatro cópias mudam juntas, mais o CHECK e o
-> validador SQL vigente (`20260820150000_dcrr1_bloco_documentos.sql`).
+> **`outro` SAI do domínio de pagamento — decidido em 2026-09-08, CÓDIGO
+> FEITO em 2026-09-10, MIGRATION ESCRITA E AINDA NÃO APLICADA** (seção 3
+> do escopo revisado). **Ganhou passo PRÓPRIO**, separado do passo 1 por
+> decisão do usuário: mexer no domínio de `forma` toca as quatro cópias
+> mais o CHECK e o validador SQL, e isso não se mistura com a
+> simplificação da tarifa.
+>
+> Saiu das opções do cadastro, da divergência e do retorno, e o cliente
+> recusa em operação nova. **O servidor só passa a recusar quando
+> `20260910120000_outro_sai_das_formas_de_pagamento.sql` for aplicada**
+> — ela troca o CHECK e o `romaneio_retorno_validar` juntos, e foi gerada
+> por `scripts/patch-validar-retorno-outro.mts`, que prova que nada fora
+> da lista de formas mudou. **Não edite o bloco do validador à mão.**
+>
+> **Escolher ≠ exibir.** `FORMAS_ACEITAS` (em `lib/formasDePagamento.ts`)
+> governa o que se OFERECE. `FormaPagamento` e `FORMA_PAGAMENTO_LABEL`
+> **continuam com `outro`**, porque são o vocabulário de LEITURA: duas
+> telas indexam o rótulo sem fallback, e tirar a chave faria um pagamento
+> antigo renderizar `undefined`.
 >
 > **NUNCA fazer substituição global do literal `outro`.** O mesmo literal
 > é **motivo de insucesso** — com detalhamento obrigatório —, e esse não
@@ -3542,7 +3553,7 @@ Vem de `docs/escopo-pre-v1-revisado.md`; **construídos até aqui: os passos 0 e
 ```
 0.  alinhar a fonte de verdade ao escopo revisado   ✓ 2026-09-08
 1.  um vale sem adicional · convênio genérico       ✓ 2026-09-10
-1b. sem "Outro" — passo próprio, separado do 1 pelo usuário
+1b. sem "Outro" — passo próprio   código ✓ 2026-09-10 · migration a aplicar
 2.  "Cargo" · filial obrigatória · E10 completo (2, 3 e 4)
 3.  snapshot histórico da filial nos documentos
 4.  concluir o contrato de assinaturas/envelope
