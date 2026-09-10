@@ -215,9 +215,11 @@ export const MAX_FORMAS_PREVISTAS = 3
  *
  * **FORMA REPETIDA É RECUSADA**, e não é preciosismo:
  *
- *   - `entregas.convenio_id` é UMA coluna. Duas linhas de convênio
- *     seriam dois acordos diferentes disputando o mesmo campo, e o
- *     sistema não teria como dizer qual deles vale;
+ *   - (histórico) `entregas.convenio_id` é UMA coluna, e duas linhas de
+ *     convênio seriam dois acordos disputando o mesmo campo. Esta razão
+ *     caducou no passo 1 — o convênio deixou de ser identificado e a
+ *     coluna nasce nula —, mas a REGRA continua, sustentada pelas duas
+ *     abaixo, que nunca dependeram dela;
  *   - "dinheiro + dinheiro" não é pagamento em duas formas, é um
  *     pagamento só — e viraria duas linhas `p` no DCR1 dizendo a mesma
  *     coisa com ids diferentes, dentro de um documento assinado;

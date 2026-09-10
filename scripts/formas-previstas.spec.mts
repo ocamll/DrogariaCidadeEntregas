@@ -399,7 +399,17 @@ console.log('\n--- (9) fiacao: as regras nao tem segunda copia ---')
     !/validarFormasPrevistas\(/.test(semComentarios(entregas))
   )
   // O gatilho fora da cadeia de Enter é o que protege os 25 segundos.
-  checa('o convenio olha todas as linhas', /formas\.some\(\(linha\) => linha\.forma === 'convenio'\)/.test(cadastro))
+  // A ASSERÇÃO DO `temConvenio` SAIU NO PASSO 1 (2026-09-08), com o
+  // `convenioId`. Ela verificava que a TELA olhava todas as linhas para
+  // decidir se pedia o convênio — e a tela não pede mais nada: o convênio
+  // deixou de ser identificado.
+  //
+  // A invariante que importava não se perdeu, e é a de cima: quem decide
+  // a pendência de papel é `status_documental: formas.some(...)` em
+  // `criarEntrega`, varrendo TODAS as formas. É essa que precisa
+  // continuar concordando com `romaneio_documentos_esperados` no
+  // servidor, sob pena de o retorno recusar `documentos_nao_conferem`
+  // depois de colhidas as duas assinaturas.
 
   // A DERIVAÇÃO É UMA SÓ, e as duas telas a chamam. Uma cópia local em
   // qualquer uma delas poderia calcular o resto de um jeito e gravar de

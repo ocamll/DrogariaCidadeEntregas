@@ -49,9 +49,12 @@ export type Fechamento = {
   valorCompraCents: number
   valorEntregaCents: number
   valorFarmaciaDeveCents: number
-  // soma do que o cliente pagou direto ao motoboy — dinheiro que a
-  // farmácia nunca viu, e a causa mais fácil de confundir com falta
-  pagoEmMaosCents: number
+  // `pagoEmMaosCents` saiu no passo 1 (2026-09-08). Era a soma do vale
+  // extra que o cliente pagava direto ao motoboy; perdeu a superfície na
+  // tela em 2026-08-12 e o fato que ela media deixou de existir agora —
+  // sem endereço distante, ninguém paga em mãos. O DADO permanece em
+  // `entregas.entrega_paga_cliente_cents` para os vales antigos, e é ele
+  // que a subtração do `valorFarmaciaDeveCents` continua usando.
   // os vales que o gestor tem em mãos pra conferir agora. Antes a tela só
   // mostrava a CONTAGEM de pendentes e um botão de marcar o dia inteiro —
   // dava pra "conferir" sem ter olhado vale nenhum, que é o oposto do que
@@ -149,7 +152,6 @@ async function buscarFechamento(filtro: FiltroFechamento): Promise<Fechamento> {
   let valorCompraCents = 0
   let valorEntregaCents = 0
   let valorFarmaciaDeveCents = 0
-  let pagoEmMaosCents = 0
   let conferidos = 0
   let divergentes = 0
   let pendentes = 0
@@ -163,8 +165,11 @@ async function buscarFechamento(filtro: FiltroFechamento): Promise<Fechamento> {
     if (!cancelado) {
       valorCompraCents += vale.valorCompraCents
       valorEntregaCents += vale.valorEntregaCents
+      // A SUBTRAÇÃO FICA, mesmo com a parcela nova sempre zerada: vale
+      // histórico tem `entrega_paga_cliente_cents` maior que zero, e
+      // simplificar a conta para `valorEntregaCents` reescreveria o
+      // acerto do passado.
       valorFarmaciaDeveCents += vale.valorEntregaCents - vale.entregaPagaClienteCents
-      pagoEmMaosCents += vale.entregaPagaClienteCents
 
       if (vale.statusFinanceiro === 'conferido') conferidos += 1
       else if (vale.statusFinanceiro === 'divergente') divergentes += 1
@@ -180,7 +185,6 @@ async function buscarFechamento(filtro: FiltroFechamento): Promise<Fechamento> {
     valorCompraCents,
     valorEntregaCents,
     valorFarmaciaDeveCents,
-    pagoEmMaosCents,
     // mesma regra do marcarDiaConferido abaixo, pra a lista mostrar
     // exatamente o que o botão vai alcançar: nem cancelado (não virou
     // venda) nem divergente (a marca fica de propósito).

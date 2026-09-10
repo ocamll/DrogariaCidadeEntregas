@@ -231,109 +231,21 @@ export function useAlternarAtivoMototaxista() {
   })
 }
 
-// =====================================================================
-// Convênios
-// =====================================================================
-
-export type ConvenioCadastro = {
-  id: string
-  nome: string
-  cnpj: string | null
-  exigeAssinatura: boolean
-  // convênio em que a farmácia banca a entrega inteira, inclusive o vale
-  // extra de endereço distante (caso do Minerva) — ver migration
-  // 20260810180000. Sem essa flag o cliente paga o extra em mãos.
-  farmaciaPagaEntregaIntegral: boolean
-  ativo: boolean
-}
-
-type ConvenioCadastroRow = {
-  id: string
-  nome: string
-  cnpj: string | null
-  exige_assinatura: boolean
-  farmacia_paga_entrega_integral: boolean
-  ativo: boolean
-}
-
-async function buscarConveniosCadastro(): Promise<ConvenioCadastro[]> {
-  const { data, error } = await supabase
-    .from('convenios')
-    .select('id, nome, cnpj, exige_assinatura, farmacia_paga_entrega_integral, ativo')
-    .order('ativo', { ascending: false })
-    .order('nome')
-    .limit(LIMITE_CADASTRO)
-
-  if (error) throw error
-  return (data as unknown as ConvenioCadastroRow[]).map((row) => ({
-    id: row.id,
-    nome: row.nome,
-    cnpj: row.cnpj,
-    exigeAssinatura: row.exige_assinatura,
-    farmaciaPagaEntregaIntegral: row.farmacia_paga_entrega_integral,
-    ativo: row.ativo,
-  }))
-}
-
-export function useConveniosCadastro() {
-  return useQuery({ queryKey: ['convenios-cadastro'], queryFn: buscarConveniosCadastro })
-}
-
-export type SalvarConvenioInput = {
-  id?: string
-  tenantId: string
-  nome: string
-  cnpj: string | null
-  exigeAssinatura: boolean
-  farmaciaPagaEntregaIntegral: boolean
-}
-
-async function salvarConvenio(input: SalvarConvenioInput) {
-  if (input.id) {
-    const { error } = await supabase
-      .from('convenios')
-      .update({
-        nome: input.nome,
-        cnpj: input.cnpj,
-        exige_assinatura: input.exigeAssinatura,
-        farmacia_paga_entrega_integral: input.farmaciaPagaEntregaIntegral,
-      })
-      .eq('id', input.id)
-    if (error) throw error
-    return
-  }
-
-  const { error } = await supabase.from('convenios').insert({
-    tenant_id: input.tenantId,
-    nome: input.nome,
-    cnpj: input.cnpj,
-    exige_assinatura: input.exigeAssinatura,
-    farmacia_paga_entrega_integral: input.farmaciaPagaEntregaIntegral,
-  })
-  if (error) throw error
-}
-
-export function useSalvarConvenio() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: salvarConvenio,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['convenios-cadastro'] })
-    },
-  })
-}
-
-async function alternarAtivoConvenio(input: { id: string; ativo: boolean }) {
-  const { error } = await supabase.from('convenios').update({ ativo: input.ativo }).eq('id', input.id)
-  if (error) throw error
-}
-
-export function useAlternarAtivoConvenio() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: alternarAtivoConvenio,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['convenios-cadastro'] })
-    },
-  })
-}
+// CONVÊNIOS SAÍRAM DAQUI NO PASSO 1 — 2026-09-08.
+//
+// A forma de pagamento "Convênio" continua existindo, e continua gerando
+// pendência de papel: quem decide isso é a FORMA
+// (`GERAM_DOCUMENTO_FISICO` em data/entregas.ts) e, no servidor,
+// `romaneio_documentos_esperados` varrendo as linhas `p` do canônico.
+// Nada disso passava por este bloco.
+//
+// O que saiu foi a identificação da EMPRESA — nome, CNPJ e as duas flags
+// (`exige_assinatura`, que já não governava comportamento nenhum, e
+// `farmacia_paga_entrega_integral`, que existia para o vale extra de
+// endereço distante, extinto no mesmo passo). Regra comercial e
+// detalhamento ficam no Trier.
+//
+// A TABELA `convenios` CONTINUA NO BANCO, e `entregas.convenio_id`
+// continua sendo FK e integrando a linha `v` do DCR1 — nascendo nula
+// daqui em diante. Retirada física é migration própria, no corte, com as
+// dependências da saída do romaneio ajustadas.

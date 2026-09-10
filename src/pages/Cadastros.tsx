@@ -1,7 +1,6 @@
 import type { AuthProfile } from '@/data/auth'
 import { AgenciasCadastro } from '@/components/AgenciasCadastro'
 import { MototaxistasCadastro } from '@/components/MototaxistasCadastro'
-import { ConveniosCadastro } from '@/components/ConveniosCadastro'
 import { UsuariosCadastro } from '@/components/UsuariosCadastro'
 import { CredenciaisCadastro } from '@/components/CredenciaisCadastro'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
@@ -19,7 +18,9 @@ export function Cadastros({ profile }: { profile: AuthProfile }) {
       <TabsList>
         <TabsTrigger value="agencias">Agências</TabsTrigger>
         <TabsTrigger value="mototaxistas">Mototaxistas</TabsTrigger>
-        <TabsTrigger value="convenios">Convênios</TabsTrigger>
+        {/* Convênios saiu no passo 1 (2026-09-08): a forma de pagamento
+            "Convênio" continua, mas sem identificar a empresa — regra
+            comercial e detalhamento vivem no Trier. */}
         {isAdmin && <TabsTrigger value="credenciais">Credenciais</TabsTrigger>}
         {isAdmin && <TabsTrigger value="usuarios">Usuários</TabsTrigger>}
       </TabsList>
@@ -28,9 +29,6 @@ export function Cadastros({ profile }: { profile: AuthProfile }) {
       </TabsContent>
       <TabsContent value="mototaxistas" className="pt-3">
         <MototaxistasCadastro profile={profile} />
-      </TabsContent>
-      <TabsContent value="convenios" className="pt-3">
-        <ConveniosCadastro profile={profile} />
       </TabsContent>
       {isAdmin && (
         <TabsContent value="credenciais" className="pt-3">

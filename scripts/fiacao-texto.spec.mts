@@ -107,7 +107,8 @@ console.log('\n--- (1) toda tela de entrada passa pela biblioteca ---')
     ['src/pages/CadastroEntrega.tsx', 'cliente e endereço'],
     ['src/components/AgenciasCadastro.tsx', 'nome da agência'],
     ['src/components/MototaxistasCadastro.tsx', 'nome do motoboy'],
-    ['src/components/ConveniosCadastro.tsx', 'nome do convênio'],
+    // ConveniosCadastro saiu no passo 1 (2026-09-08): o convênio deixou
+    // de ser identificado, então não há mais nome de empresa a normalizar.
     ['src/components/UsuariosCadastro.tsx', 'nome do usuário'],
     ['src/components/CancelarValeDialog.tsx', 'motivo do cancelamento'],
     ['src/components/NotificarOcorrenciaDialog.tsx', 'justificativa'],

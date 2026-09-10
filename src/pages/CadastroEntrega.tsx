@@ -12,7 +12,6 @@ import {
   digitosDoValor,
   type FormaPagamento,
 } from '@/data/pagamentos'
-import { useConveniosCadastro } from '@/data/cadastros'
 import { uuidv7 } from '@/lib/uuid'
 import { useTarifaDaLoja } from '@/data/lojas'
 import { centsFromDigits, formatBRL } from '@/lib/money'
@@ -22,6 +21,7 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { StatusDeGravacao, type Gravacao } from '@/components/StatusDeGravacao'
+import { EmAndamento } from '@/components/EmAndamento'
 import { normalizarNome, normalizarEndereco } from '@/lib/texto'
 
 const SELECT_CLASSNAME =
@@ -79,20 +79,14 @@ function CadastroEntregaForm({
   const [endereco, setEndereco] = useState('')
   // dígitos crus da máscara de centavos ('' = vazio, '12345' = R$ 123,45)
   const [valorCompra, setValorCompra] = useState('')
-  // 1 normal, 2 em endereço distante. O caixa não digita valor de
-  // entrega: a tarifa é fixa por filial e o valor sai daqui.
-  const [quantidadeVales, setQuantidadeVales] = useState(1)
   // Cada linha carrega o PRÓPRIO id, cunhado aqui e reciclado no reset —
   // nunca dentro de `criarEntrega`, senão o reenvio da fila criaria um
   // previsto novo a cada oscilação de rede (E3.C).
   const [formas, setFormas] = useState<LinhaForma[]>(() => [linhaNova()])
-  const [convenioId, setConvenioId] = useState('')
   const [temReceita, setTemReceita] = useState(false)
   const [erroValidacao, setErroValidacao] = useState<string | null>(null)
   const [gravacao, setGravacao] = useState<Gravacao | null>(null)
 
-  const { data: convenios } = useConveniosCadastro()
-  const conveniosAtivos = (convenios ?? []).filter((c) => c.ativo)
   const tarifaCents = useTarifaDaLoja(lojaId)
 
   const umaFormaSo = formas.length === 1
@@ -156,30 +150,23 @@ function CadastroEntregaForm({
         erro: faltaCents !== 0,
       }
 
-  // BASTA UMA linha ser convênio — E4, e foi decisão do usuário em
-  // 2026-08-27. O convênio pode compor o pagamento com outra forma, e a
-  // regra do `farmacia_paga_entrega_integral` (caso do Minerva) continua
-  // valendo mesmo quando ele cobre só parte da compra: quem banca a
-  // entrega é o convênio, e isso não depende de quanto da COMPRA ele
-  // pagou.
-  //
-  // `entregas.convenio_id` é uma coluna só, e é por isso que
-  // `validarFormasPrevistas` recusa duas linhas de convênio: seriam dois
-  // acordos disputando o mesmo campo.
-  const temConvenio = formas.some((linha) => linha.forma === 'convenio')
-  const convenioIntegral =
-    temConvenio && !!conveniosAtivos.find((c) => c.id === convenioId)?.farmaciaPagaEntregaIntegral
-
-  const valorEntregaCents = (tarifaCents ?? 0) * quantidadeVales
-  const entregaPagaClienteCents =
-    quantidadeVales > 1 && !convenioIntegral ? (tarifaCents ?? 0) * (quantidadeVales - 1) : 0
+  /**
+   * UM VALE, A TARIFA DA FILIAL — passo 1, 2026-09-08.
+   *
+   * Não há mais multiplicação nem escolha de quantidade: o valor da
+   * entrega É a tarifa acordada. `quantidadeVales` e
+   * `entregaPagaClienteCents` continuam no payload e na linha `v` do
+   * DCR1, com 1 e 0 — o contrato não encurta, só param de variar.
+   *
+   * O que saiu junto: a escolha de 1/2 vales, o aviso do que o cliente
+   * pagava em mãos, e a exceção do convênio que bancava os dois.
+   */
+  const valorEntregaCents = tarifaCents ?? 0
 
   const nomeRef = useRef<HTMLInputElement>(null)
   const enderecoRef = useRef<HTMLInputElement>(null)
   const valorCompraRef = useRef<HTMLInputElement>(null)
-  const valesRef = useRef<HTMLSelectElement>(null)
   const formaRef = useRef<HTMLSelectElement>(null)
-  const convenioRef = useRef<HTMLSelectElement>(null)
 
   const hoje = new Date().toLocaleDateString('pt-BR')
 
@@ -237,11 +224,9 @@ function CadastroEntregaForm({
     setNome('')
     setEndereco('')
     setValorCompra('')
-    setQuantidadeVales(1)
     // Linha nova, id novo. Reaproveitar o id faria o segundo vale do dia
     // colidir na PK com o primeiro.
     setFormas([linhaNova()])
-    setConvenioId('')
     setTemReceita(false)
     nomeRef.current?.focus()
   }
@@ -252,10 +237,6 @@ function CadastroEntregaForm({
 
     if (!nomeTrim || !enderecoTrim || valorCompraCents <= 0) {
       setErroValidacao('Preenche nome, endereço e valor da compra antes de salvar.')
-      return
-    }
-    if (temConvenio && !convenioId) {
-      setErroValidacao('Escolhe o convênio.')
       return
     }
     // A VALIDAÇÃO DAS FORMAS ACONTECE AQUI, ANTES DE ENFILEIRAR — nunca
@@ -291,10 +272,19 @@ function CadastroEntregaForm({
       clienteEndereco: enderecoTrim,
       valorCompraCents,
       valorEntregaCents,
-      quantidadeVales,
-      entregaPagaClienteCents,
+      // CONSTANTES DESDE O PASSO 1, e mandadas explicitamente de
+      // propósito: os três campos continuam no contrato persistido e na
+      // linha `v` do DCR1. Omiti-los aqui seria encurtar o canônico pelo
+      // lado do cliente, que é exatamente o que a transição proíbe —
+      // eliminar campo é alteração coordenada TS↔SQL, feita no corte.
+      quantidadeVales: 1,
+      entregaPagaClienteCents: 0,
       ocorridoEmLocal: new Date().toISOString(),
-      convenioId: temConvenio ? convenioId : null,
+      // O convênio deixou de ser identificado: a forma de pagamento
+      // "Convênio" fica, e é ela que gera a pendência de papel (ver
+      // `GERAM_DOCUMENTO_FISICO` em data/entregas.ts). Qual empresa é
+      // vive no Trier.
+      convenioId: null,
       temReceita,
     }
 
@@ -315,24 +305,14 @@ function CadastroEntregaForm({
     resetForm()
   }
 
-  // Forma "convênio" precisa dizer qual — Enter aqui vai pro select de
-  // convênio em vez de salvar direto. Qualquer outra forma salva na hora,
-  // igual sempre foi (o checkbox de receita fica fora dessa cadeia de
-  // propósito, ver campo abaixo).
+  // Enter na forma SALVA, sempre — o desvio para o select de convênio
+  // saiu com a identificação da empresa (passo 1). A cadeia ficou um
+  // passo mais curta que a medida em 2026-08-10, não mais longa.
+  //
   // Aceita os dois elementos porque, com pagamento dividido, ele também
   // fica no campo de VALOR de cada linha — Enter ali salva, em vez de não
   // fazer nada, que é o que o caixa espera de um formulário deste app.
   function handleFormaKeyDown(e: KeyboardEvent<HTMLSelectElement | HTMLInputElement>) {
-    if (e.key !== 'Enter') return
-    e.preventDefault()
-    if (temConvenio) {
-      convenioRef.current?.focus()
-      return
-    }
-    handleSalvar()
-  }
-
-  function handleConvenioKeyDown(e: KeyboardEvent<HTMLSelectElement>) {
     if (e.key !== 'Enter') return
     e.preventDefault()
     handleSalvar()
@@ -378,37 +358,21 @@ function CadastroEntregaForm({
                 ref={valorCompraRef}
                 digitos={valorCompra}
                 onDigitos={setValorCompra}
-                onKeyDown={advanceOnEnter(valesRef)}
+                onKeyDown={advanceOnEnter(formaRef)}
               />
             </div>
-            <div className="flex flex-col gap-2">
-              <Label htmlFor="quantidade-vales">Entrega</Label>
-              {/* A tarifa é fixa, então o caixa escolhe QUANTOS vales em vez
-                  de digitar valor — no caso normal ele só passa com Enter,
-                  sem digitar nada. Endereço distante cobra 2. */}
-              <select
-                id="quantidade-vales"
-                ref={valesRef}
-                className={SELECT_CLASSNAME}
-                value={quantidadeVales}
-                onChange={(e) => setQuantidadeVales(Number(e.target.value))}
-                onKeyDown={advanceOnEnter(formaRef)}
-              >
-                <option value={1}>
-                  1 vale{tarifaCents !== null ? ` — ${formatBRL(tarifaCents)}` : ''}
-                </option>
-                <option value={2}>
-                  2 vales (endereço distante)
-                  {tarifaCents !== null ? ` — ${formatBRL(tarifaCents * 2)}` : ''}
-                </option>
-              </select>
-              {quantidadeVales > 1 && (
-                <p className="text-xs text-muted-foreground">
-                  {entregaPagaClienteCents > 0
-                    ? `Cliente paga ${formatBRL(entregaPagaClienteCents)} em mãos ao motoboy.`
-                    : 'Convênio banca a entrega inteira — nada a receber do cliente.'}
-                </p>
-              )}
+            {/* A ENTREGA É EXIBIDA, NÃO ESCOLHIDA — passo 1.
+
+                O seletor de 1/2 vales saiu, e com ele um Enter da cadeia.
+                A linha continua na tela por um motivo operacional, não
+                decorativo: sem ela o vale sai com R$ 9,00 anexado sem que
+                o caixa veja, e a falha de carregamento da tarifa só
+                apareceria como erro no submit. Custa zero tecla. */}
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-foreground/70">Entrega</span>
+              <span>
+                {tarifaCents !== null ? formatBRL(tarifaCents) : <EmAndamento>Carregando</EmAndamento>}
+              </span>
             </div>
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
@@ -498,29 +462,6 @@ function CadastroEntregaForm({
                 </p>
               )}
             </div>
-
-            {temConvenio && (
-              <div className="flex flex-col gap-2">
-                <Label htmlFor="convenio">Convênio</Label>
-                <select
-                  id="convenio"
-                  ref={convenioRef}
-                  className={SELECT_CLASSNAME}
-                  value={convenioId}
-                  onChange={(e) => setConvenioId(e.target.value)}
-                  onKeyDown={handleConvenioKeyDown}
-                >
-                  <option value="" disabled>
-                    Selecione…
-                  </option>
-                  {conveniosAtivos.map((c) => (
-                    <option key={c.id} value={c.id}>
-                      {c.nome}
-                    </option>
-                  ))}
-                </select>
-              </div>
-            )}
 
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
               <input

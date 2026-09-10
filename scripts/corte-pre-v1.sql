@@ -29,7 +29,7 @@
 --
 --   1. censo        ver o que vai ser destruído, ANTES
 --   2. wipe         o banco (este arquivo, bloco 2)
---   3. sementes     tenant, cidades, lojas, agência, convênios, admin
+--   3. sementes     tenant, cidades, lojas, agência, admin
 --   4. Edge Function  publicar a `sync-romaneio` nova
 --   5. cliente      publicar o front
 --   6. terminais    abrir e deixar a Dexie v7 limpar
@@ -218,11 +218,9 @@ select tipo, modo, status, count(*)
 -- ---------------------------------------------------------------------
 -- O QUE FALTA, E EU NÃO INVENTEI
 --
---   * **CONVÊNIOS.** Não sei quais são. O bloco deixa o modelo pronto e
---     comentado. Atenção ao `farmacia_paga_entrega_integral`: é ele que
---     faz a farmácia bancar os DOIS vales do endereço distante (o caso
---     que o CLAUDE.md chama de Minerva). Nunca compare o nome do
---     convênio no código — a regra é a flag.
+--   * ~~**CONVÊNIOS.**~~ **Deixou de faltar em 2026-09-10**: o convênio
+--     não é mais identificado, então não há empresa a cadastrar. Ver o
+--     bloco (5).
 --   * **MOTOTAXISTAS.** Ficam para o painel (Cadastros → Mototaxistas),
 --     que é o caminho normal e já existe. Só a agência precisa nascer
 --     aqui, porque motoboy sem agência não aparece no dropdown.
@@ -325,18 +323,19 @@ select c.tenant_id, 'Gabrielense', c.id
 --    and l.nome  = 'Matriz'
 --    and not exists (select 1 from public.profiles p where p.id = u.id);
 
--- (5) Os convênios. MODELO — preencha com os reais.
+-- (5) Convênios: NÃO SE SEMEIAM MAIS — passo 1, 2026-09-10.
 --
---     `exige_assinatura` governa a custódia do papel; quando true, o
---     vale nasce com `status_documental = 'pendente'` e só sai da aba
---     Documentos quando alguém marcar o papel como recebido.
--- insert into public.convenios (tenant_id, nome, exige_assinatura, farmacia_paga_entrega_integral)
--- select t.id, 'NOME DO CONVENIO', true, false
---   from public.tenants t
---  where not exists (
---    select 1 from public.convenios c
---     where c.tenant_id = t.id and c.nome = 'NOME DO CONVENIO'
---  );
+--     O convênio deixou de ser identificado. A forma de pagamento
+--     "Convênio" continua, e é ELA que gera a pendência de papel
+--     (`GERAM_DOCUMENTO_FISICO` no cliente, `romaneio_documentos_esperados`
+--     no servidor); `entregas.convenio_id` nasce nulo. A tabela
+--     `public.convenios` continua existindo e continua no wipe acima, mas
+--     nenhuma linha dela é necessária pra operar.
+--
+--     O modelo que ficava aqui ensinava a preencher `exige_assinatura` —
+--     que nunca governou a custódia, ao contrário do que o comentário
+--     dele afirmava — e `farmacia_paga_entrega_integral`, que existia pro
+--     vale extra do endereço distante, extinto no mesmo passo.
 
 -- (6) Conferência das sementes, antes de seguir pro passo 4 do roteiro:
 --

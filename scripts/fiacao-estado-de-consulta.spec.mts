@@ -14,7 +14,8 @@
 // A LISTA É EXPLÍCITA, E É FECHADA
 // ---------------------------------------------------------------------
 //
-// O inventário abaixo tem os 18 arquivos que hoje consultam o servidor.
+// O inventário abaixo tem os 17 arquivos que hoje consultam o servidor.
+// Eram 18 até o passo 1 (2026-09-08), quando ConveniosCadastro saiu.
 // A checagem (4) varre `src/` e exige que TODO arquivo que use
 // `isLoading` esteja aqui. Uma tela nova não passa despercebida: ou ela
 // já nasce no vocabulário do E2, ou ela tem que ser inscrita aqui por
@@ -129,7 +130,8 @@ const FAMILIA_B: Alvo[] = [
 
   // ---- escapam por acidente de sintaxe -----------------------------
   { arquivo: 'src/components/AgenciasCadastro.tsx', situacao: 'migrado', afirma: 'era: correta por ACIDENTE de sintaxe; e o dialog virou campo dependente' },
-  { arquivo: 'src/components/ConveniosCadastro.tsx', situacao: 'migrado', afirma: 'idem — correta por acidente, agora por decisão' },
+  // ConveniosCadastro saiu no passo 1 (2026-09-08) — ver a nota em
+  // scripts/fiacao-texto.spec.mts.
 ]
 
 // ---------------------------------------------------------------------
@@ -381,7 +383,14 @@ console.log('\n--- (5) o placar da migração ---')
      família A — ações              ${FAMILIA_A.length} operações
        migradas    ${FAMILIA_A.filter((o) => o.situacao === 'migrado').length}
   `)
-  checa('o inventário cobre os 18 arquivos medidos', FAMILIA_B.length === 18)
+  // 17, e não 18: `ConveniosCadastro` saiu no passo 1 (2026-09-08).
+  //
+  // O NÚMERO CONTINUA CRAVADO DE PROPÓSITO. Ele não mede quantos
+  // arquivos existem — mede que ninguém acrescentou consulta ao servidor
+  // sem migrar o estado dela, nem tirou uma do inventário sem que a tela
+  // tivesse de fato saído. Trocá-lo por `FAMILIA_B.length` desligaria a
+  // asserção inteira.
+  checa('o inventário cobre os 17 arquivos medidos', FAMILIA_B.length === 17)
   checa('e as 4 operações da Nova Corrida', FAMILIA_A.length === 4)
 }
 

@@ -6,7 +6,7 @@
 > "Outro", fechamento com aprovação, painel da agência e filial operacional
 > do admin.
 >
-> **Nada dele está construído.** Cada seção afetada aqui traz uma nota
+> **O passo 1 está CONSTRUÍDO (2026-09-10); o resto não.** Cada seção afetada aqui traz uma nota
 > datada de 2026-09-08 dizendo o que foi decidido e o que o código ainda
 > faz. Onde as duas coisas divergirem, **o código é o que está no ar e o
 > escopo é para onde ele vai** — não confunda um com o outro, e não trate
@@ -284,7 +284,7 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       números batem em cada nível.
 - [x] **Cadastro de agências, mototaxistas, convênios** — aba "Cadastros"
       (admin/gerente), sub-abas pra cada entidade. **O cadastro de
-      CONVÊNIOS sai** (decidido em 2026-09-08, passo 1 do escopo revisado —
+      CONVÊNIOS saiu** (decidido em 2026-09-08, construído em 2026-09-10 —
       ver "Convênio genérico" abaixo); agências e mototaxistas ficam.
       Tabelas já existiam desde
       o schema inicial (com RLS pronta, escrita restrita a `is_gerente()`) —
@@ -337,8 +337,8 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
       encadeando o cadastro de convênio com a custódia de papel. Cadastro
       de entrega ganhou dois campos fora do fluxo rápido de Enter: select
       de convênio (só aparece se forma de pagamento = "Convênio", grava
-      `convenio_id` + `status_documental='pendente'`) — **o select sai em
-      2026-09-08 e `convenio_id` passa a nascer nulo; a pendência de papel
+      `convenio_id` + `status_documental='pendente'`) — **o select saiu em
+      2026-09-10 e `convenio_id` passou a nascer nulo; a pendência de papel
       continua, derivada da FORMA `convenio`/`crediario`, que é como o
       código já a deriva** — e checkbox "Precisa
       de receita" (`tem_receita boolean` — **só existência/custódia do
@@ -721,12 +721,15 @@ descrevia um caminho impossível. Implementado em 2026-08-10.
 
 ## Tarifa de entrega e vales — a regra do dinheiro da tele
 
-> **UM VALE, SEM ADICIONAL — decidido em 2026-09-08, CÓDIGO NÃO COMEÇADO.**
-> É o passo 1 do escopo pré-V1 revisado
-> (`docs/escopo-pre-v1-revisado.md`, seção 1). O código de hoje ainda
-> oferece o seletor de 1/2 vales e multiplica a tarifa; esta seção
-> descreve a regra **decidida**, e o que sai vem logo abaixo. Não leia o
-> texto novo como descrição do que está construído.
+> **UM VALE, SEM ADICIONAL — decidido em 2026-09-08, CONSTRUÍDO em
+> 2026-09-10.** É o passo 1 do escopo pré-V1 revisado
+> (`docs/escopo-pre-v1-revisado.md`, seção 1). O seletor de 1/2 vales
+> saiu do cadastro e a tarifa não é mais multiplicada. Provado de ponta a
+> ponta com o vale de teste `V-000062`, lido de volta do banco:
+> `quantidade_vales = 1`, `entrega_paga_cliente_cents = 0`,
+> `convenio_id = null` e entrega de 900.
+> **Os vales anteriores continuam com os valores de quando nasceram** —
+> é por isso que a fórmula do "a pagar" abaixo não se simplifica.
 
 - **A tarifa é fixa por filial** (R$ 9,00 hoje), em `lojas.tarifa_entrega_cents`.
   O caixa nunca digita valor de entrega **e não escolhe quantidade**: cada
@@ -1097,7 +1100,7 @@ O desenho é deliberadamente mínimo, e cada peça tem motivo:
 
 ## Papel que não volta — convênio e receita
 
-### Convênio genérico — decidido em 2026-09-08, código não começado
+### Convênio genérico — decidido em 2026-09-08, construído em 2026-09-10
 
 Passo 1 do escopo revisado (`docs/escopo-pre-v1-revisado.md`, seção 2).
 **A forma de pagamento "Convênio" FICA**, e o documento que precisa
@@ -1105,14 +1108,18 @@ retornar também. O que sai é a **identificação da empresa**: Minerva,
 Unimed ou qualquer outra. Regra comercial e detalhamento ficam no Trier.
 
 ```
-SAI    aba e componente ConveniosCadastro
+SAIU   aba e componente ConveniosCadastro
        CRUD, queries e DTOs de convênios em data/cadastros.ts
        o seletor e a exigência de convenioId no cadastro de entrega
-       as flags exige_assinatura e farmacia_paga_entrega_integral
-       sementes e textos que descrevem tratamento por convênio
+       as flags exige_assinatura e farmacia_paga_entrega_integral, da UI
+       o modelo de semente de convênio em scripts/corte-pre-v1.sql
 
 FICA   a forma de pagamento, o valor, o documento esperado,
        o recebimento, a pendência e a auditoria
+
+AINDA  a tabela `convenios` e as duas colunas de flag, no banco —
+NO     retirada física é migration própria, feita no corte, com as
+BANCO  dependências da saída do romaneio ajustadas
 ```
 
 **Isso quase não custa código, e a razão é boa:** a derivação do papel já
@@ -2872,7 +2879,10 @@ outro`. Ele vive em **quatro** cópias deliberadas — os golden vectors, o
 juntas**.
 
 > **`outro` SAI do domínio de pagamento — decidido em 2026-09-08, código
-> não começado** (passo 1, seção 3 do escopo revisado). Deixa de ser opção
+> não começado** (seção 3 do escopo revisado). **Ganhou passo PRÓPRIO**,
+> separado do passo 1 por decisão do usuário: mexer no domínio de `forma`
+> toca as quatro cópias mais o CHECK e o validador SQL, e isso não se
+> mistura com a simplificação da tarifa. Deixa de ser opção
 > no cadastro, na divergência e no retorno, e o servidor para de aceitá-lo
 > em registros novos. As quatro cópias mudam juntas, mais o CHECK e o
 > validador SQL vigente (`20260820150000_dcrr1_bloco_documentos.sql`).
@@ -3527,11 +3537,12 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
 ### A sequência pré-V1 revisada — decidida em 2026-09-08
 
 Substitui a ordem anterior (`E10 E11 E12 E6 E9 E7 E8 → STAGING → corte`).
-Vem de `docs/escopo-pre-v1-revisado.md`; **nada dela está construído.**
+Vem de `docs/escopo-pre-v1-revisado.md`; **construídos até aqui: os passos 0 e 1.**
 
 ```
-0.  alinhar a fonte de verdade ao escopo revisado   ← este texto
-1.  um vale sem adicional · convênio genérico · sem "Outro"
+0.  alinhar a fonte de verdade ao escopo revisado   ✓ 2026-09-08
+1.  um vale sem adicional · convênio genérico       ✓ 2026-09-10
+1b. sem "Outro" — passo próprio, separado do 1 pelo usuário
 2.  "Cargo" · filial obrigatória · E10 completo (2, 3 e 4)
 3.  snapshot histórico da filial nos documentos
 4.  concluir o contrato de assinaturas/envelope

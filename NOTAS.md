@@ -8960,7 +8960,8 @@ condição para esta ser a sessão de aquecimento.
 Uma armadilha de ferramenta que custou duas tentativas: **os arquivos
 estão em CRLF**, então padrões com `
 ` não casam. Quem for fazer as
-sessões 2 e 3 com substituição em massa: use `?
+sessões 2 e 3 com substituição em massa: use `
+?
 ` em regex, ou
 compare pelo texto sem a quebra.
 
@@ -9426,6 +9427,87 @@ mecânico, e vale ler antes de qualquer sessão de remoção. Duas coisas dela
 já foram absorvidas: o snapshot da filial virou o passo 3, e o adiamento do
 E10.2+ que ela recomendava foi revertido pela seção 6 do escopo.
 
+## 97. Passo 1 — um vale sem adicional, e o convênio sem empresa
+
+Construído em 2026-09-10, na branch `feat/e10-admin-filial`. É o passo 1
+do escopo revisado **sem a forma "Outro"**, que o usuário separou em passo
+próprio: mexer no domínio de `forma` toca as quatro cópias, o CHECK e o
+validador SQL, e isso não se mistura com a simplificação da tarifa.
+
+### O que mudou
+
+```
+CadastroEntrega.tsx     sai o seletor de 1/2 vales e o select de convênio;
+                        valorEntregaCents = tarifa; payload manda 1 / 0 / null
+Cadastros.tsx           sai a aba Convênios
+ConveniosCadastro.tsx   apagado
+data/cadastros.ts       sai o bloco de convênios (~105 linhas)
+data/fechamento.ts      sai `pagoEmMaosCents` — total do adicional, e já
+                        sem consumidor desde 2026-08-12
+formasDePagamento.ts    a razão do `convenio_id` caducou; a regra de forma
+                        repetida continua, sustentada pelas outras duas
+corte-pre-v1.sql        sai o modelo de semente de convênio e a nota do
+                        Minerva
+```
+
+A cadeia de Enter ficou `nome → endereço → valor → forma`: **um passo mais
+curta** que a cronometrada em 2026-08-10. A linha "Entrega R$ 9,00"
+continua na tela, estática — sem ela o vale sairia com a tarifa anexada
+sem o caixa ver, e a falha de carregar a tarifa só apareceria no submit.
+
+### O que deliberadamente NÃO mudou
+
+**A subtração `valor_entrega_cents - entrega_paga_cliente_cents`**, nos
+três acumuladores de `relatorios.ts` e no `fechamento.ts`. Com a parcela
+nova sempre zerada ela parece simplificável, e não é: vale histórico tem
+`entrega_paga_cliente_cents` maior que zero, e trocar a conta reescreveria
+o acerto do passado.
+
+**O contrato.** `quantidade_vales`, `entrega_paga_cliente_cents` e
+`convenio_id` continuam na linha `v` do DCR1 e são mandados
+explicitamente no payload com 1, 0 e null. Encurtar a linha só no cliente
+é o que a transição proíbe.
+
+### A verificação
+
+- build ok; lint 0 erros e 10 avisos pré-existentes, nenhum novo.
+- **26 de 27 specs.** A falha, `consulta-render.spec.mts`, foi **provada
+  pré-existente**: com `git stash` no HEAD ela falha idêntica
+  (`React is not defined` sob o loader do tsx). Não é do passo 1, e
+  continua aberta.
+- **Três specs precisaram de ajuste, e duas acharam ponta solta real.**
+  `fiacao-texto` e `fiacao-estado-de-consulta` listavam
+  `ConveniosCadastro.tsx` nominalmente — sem elas a remoção passaria como
+  se nada dependesse do arquivo. Na segunda, o inventário cravado foi de
+  **18 para 17**, e ficou cravado de propósito: trocá-lo por `.length`
+  desligaria a asserção. Na `formas-previstas` saiu a asserção do
+  `temConvenio`, porque o que ela protegia deixou de existir — a
+  invariante que importa (`status_documental: formas.some(...)`
+  concordando com `romaneio_documentos_esperados`) continua asseverada
+  duas linhas acima.
+- **E2E, com autorização do usuário para gravar**: vale de teste
+  **`V-000062`**, lançado com forma Convênio e lido de volta do banco —
+  `quantidade_vales = 1`, `entrega_paga_cliente_cents = 0`,
+  `convenio_id = null`, `valor_entrega_cents = 900`,
+  `status_documental = pendente` (vindo da forma, não do convênio), e o
+  previsto `convenio` de R$ 50,00. A fila local zerou, o formulário limpou
+  e o foco voltou ao nome. **O vale fica no banco até o corte** (regra 4).
+
+### Três observações de passagem
+
+- **A conta de admin desta máquina tem filial**: aparece como
+  `Camilo · Administrador · Matriz`, ao contrário do `camiloadmin` com
+  `loja_id` nulo que o item 91 usa como caso de prova. Conferir qual conta
+  é o caso de prova antes do passo 2.
+- **Com a janela estreita (590px) o cabeçalho se sobrepõe** e o conteúdo
+  corta à esquerda. É anterior ao passo 1 e o público é PC de balcão, mas
+  ficou visto.
+- **Os cliques da ferramenta de navegador falharam duas vezes** no botão
+  certo, com a coordenada certa, logo depois de a janela mudar de
+  largura. O terceiro chegou como evento confiável e abriu a tela. Foi
+  temporização da ferramenta, não defeito do app — anotado para ninguém
+  perder tempo procurando bug nisso.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
@@ -9441,15 +9523,21 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: o passo 1 do escopo revisado
+### PRÓXIMA SESSÃO: depois do passo 1
 
 > **Esta é a seção atual.** As de baixo são históricas: descrevem como
 > "próximo" coisas que já foram feitas.
 >
-> **Atualizada em 2026-09-08.** O passo 0 (alinhar `CLAUDE.md` e este
-> arquivo ao escopo revisado) está **feito** — item 96. O próximo é o
-> **passo 1**: um vale sem adicional, convênio genérico e fim da forma
-> "Outro", com a transição coordenada dos contratos persistidos.
+> **Atualizada em 2026-09-10.** Passo 0 **feito** (item 96) e passo 1
+> **feito** (item 97): um vale sem adicional e convênio genérico,
+> provados de ponta a ponta com o vale de teste `V-000062`.
+>
+> **O próximo não está escolhido, e isso é deliberado.** O usuário tirou
+> a forma "Outro" do passo 1 e lhe deu passo próprio, então há dois
+> candidatos: **"Outro"** (as quatro cópias do domínio de `forma`, o
+> CHECK e o validador SQL, sem substituição global do literal) ou o
+> **passo 2** ("Cargo", filial obrigatória e o E10 completo). Pergunte
+> antes de começar qualquer um.
 >
 > **O E10.2 não foi cancelado — virou o passo 2**, e passou de adiável a
 > obrigatório. O detalhe técnico dele continua válido e está logo abaixo;
