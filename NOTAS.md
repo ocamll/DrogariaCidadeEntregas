@@ -9393,8 +9393,8 @@ construção" dizia que o Romaneio de Retorno não tinha começado, enquanto a
 seção acima dele descreve a 2D feita e três documentos selados.
 
 **Custo a lembrar:** o `CLAUDE.md` está indexado pelo Graphify. Um
-`graphify --update` reprocessa ~169 mil tokens — rodar **uma vez**, depois
-que o passo 1 assentar, nunca a cada edição.
+`graphify --update` reprocessa ~169 mil tokens — ~~rodar uma vez, depois
+que o passo 1 assentar~~ **regra revista em 2026-09-10, ver item 98.**
 
 ### A auditoria de limpeza entrou junto, e ela corrige duas premissas
 
@@ -9471,10 +9471,14 @@ explicitamente no payload com 1, 0 e null. Encurtar a linha só no cliente
 ### A verificação
 
 - build ok; lint 0 erros e 10 avisos pré-existentes, nenhum novo.
-- **26 de 27 specs.** A falha, `consulta-render.spec.mts`, foi **provada
-  pré-existente**: com `git stash` no HEAD ela falha idêntica
-  (`React is not defined` sob o loader do tsx). Não é do passo 1, e
-  continua aberta.
+- ~~**26 de 27 specs.** A falha, `consulta-render.spec.mts`, foi provada
+  pré-existente~~ — **CONCLUSÃO ERRADA, corrigida no item 98.** O
+  `git stash` provou só que o MEU comando falhava igual no HEAD; a spec
+  declara `--tsconfig tsconfig.app.json` na linha 1, e eu a rodei sem.
+  Com o comando declarado ela passa. O placar certo do passo 1 é **26
+  specs passando e 1 geradora de SQL** (`dcrr1-sql`), zero falhas. A
+  mensagem do commit `81edc24` repete o engano e fica como está —
+  histórico não se reescreve; a correção mora aqui.
 - **Três specs precisaram de ajuste, e duas acharam ponta solta real.**
   `fiacao-texto` e `fiacao-estado-de-consulta` listavam
   `ConveniosCadastro.tsx` nominalmente — sem elas a remoção passaria como
@@ -9508,6 +9512,109 @@ explicitamente no payload com 1, 0 e null. Encurtar a linha só no cliente
   temporização da ferramenta, não defeito do app — anotado para ninguém
   perder tempo procurando bug nisso.
 
+## 98. A falha do `consulta-render` era o executor, e as contas de prova do E10
+
+Registrado em 2026-09-10, antes do passo "Outro" e **sem commit de
+código**: nada aqui precisou de correção fora da documentação.
+
+### O diagnóstico
+
+O item 97 afirmou que `consulta-render.spec.mts` falhava "pré-existente,
+sem relação". **A conclusão estava errada.** O usuário apontou a
+discrepância que a desmontou: na auditoria dele, sobre o `bc7062a`, a
+spec **passava**. E o `7950843`, onde eu medi a falha, só mexia em
+documentação por cima do `bc7062a` — o código era o mesmo.
+
+A linha 1 da spec declara o comando, e o cabeçalho diz que a flag não é
+opcional:
+
+```
+npx tsx --tsconfig tsconfig.app.json scripts/consulta-render.spec.mts
+```
+
+Sem `--tsconfig`, o esbuild do `tsx` pega o `tsconfig.json` da raiz — que
+só tem `references` e nenhum `jsx` — e compila JSX no runtime clássico. O
+componente quebra com `React is not defined`. **Eu rodei sem a flag.**
+
+Provado dos dois lados, no código já com o passo 1:
+
+```
+com a flag declarada    TUDO OK                saída 0
+sem a flag              React is not defined   saída 1
+```
+
+Os arquivos envolvidos (`consulta-render.spec.mts`, `Consulta.tsx`,
+`estadoDeConsulta.ts`, os três `tsconfig`, `package.json`) são idênticos
+entre `bc7062a` e `HEAD`. Descartados, com prova: mudança anterior e
+ambiente. **Era o executor.** Nenhuma asserção foi tocada.
+
+**Por que o `git stash` enganou:** ele provou que o MEU comando falhava
+igual no HEAD. Isso é uma afirmação sobre o comando, não sobre a spec —
+e eu a li como a segunda.
+
+**O placar certo do passo 1:** das 27 specs, só esta declara comando
+especial, e uma (`dcrr1-sql`) é **geradora de SQL**, não teste — ela
+"passou" no meu laço só porque saiu com código 0. Com os comandos
+declarados: **26 specs passando, 1 geradora, zero falhas.**
+
+**O que deixaria isto acontecer de novo:** rodar as specs num laço que
+ignora o comando declarado em cada uma. `package.json` não tem script de
+teste, e a auditoria do `bc7062a` já recomendava formalizar um executor.
+**Não entrou aqui**, por ser mudança própria — fica proposto.
+
+### O Graphify: regra revista pelo usuário
+
+**Não atualizar agora.** Uma atualização só, depois de o "Outro" **e** o
+E10 estabilizarem, com os dois arquivos do E10.2
+(`src/lib/lojaOperacional.ts`, `src/data/lojaOperacional.tsx`)
+incorporados ou descartados e a documentação consolidada. Gastar a
+extração agora seria invalidá-la na mudança seguinte.
+
+**Até lá o grafo é referência do `bc7062a`.** Ele ainda contém, por
+exemplo, `ConveniosCadastro.tsx` e o seletor de vales. Consumidores se
+conferem direto no código.
+
+### As contas de prova do E10, medidas no banco
+
+Só leitura, em 2026-09-10, pelo cliente Supabase da própria página. **O
+nome não identifica a conta**: há três "Camilo", e uma conta chamada
+"Caixa Editado Pelo Painel" é gerente.
+
+| papel da conta no teste | e-mail | papel | filial | ativo |
+|---|---|---|---|---|
+| **principal** | `camiloadmin@drogariacidade.invalid` | admin | **nula** | sim |
+| **controle** | `camiloadmin0@drogariacidade.invalid` | admin | Matriz | sim |
+| — | "Admin Teste", e-mail nulo | admin | Matriz | sim |
+| restrição? | `gerentepainel@drogcidade.sg` | gerente | Matriz | sim |
+| restrição? | `caixanovo@drogcidade.sg` | gerente | Filial 02 | sim |
+| restrição? | "Camilo", e-mail nulo | caixa | Filial 02 | sim |
+| — | `debug@drogcidade.sg` | caixa | Matriz | **não** |
+
+- **O principal existe exatamente como o item 91 supõe.** Nada a preparar.
+- **O controle é a conta desta máquina** — a que aparece como
+  `Camilo · Administrador · Matriz`. **Não mudar a filial dela** para
+  montar teste.
+
+**PONTO ABERTO, a decidir antes do passo 2: o caso de restrição não é
+testável pela tela atual.** Nenhuma conta de caixa ou gerente está no
+domínio do E5. `emailTecnico` **sempre** compõe
+`<usuário>@drogariacidade.invalid`, e as contas antigas **não foram
+convertidas**, por decisão (item 89, "As contas antigas NÃO foram
+convertidas"), com `profiles.email` consistente com o Auth. Digitar o
+endereço antigo inteiro compõe `…@drogcidade.sg@drogariacidade.invalid`.
+Nada foi criado nem alterado: preparar o cenário é decisão do usuário.
+
+### O aceite do E10, nas palavras do usuário
+
+- **principal** (sem filial): escolhe uma filial e opera nela;
+- **controle** (admin com Matriz): escolhe **outra** filial sem perder a
+  visão administrativa;
+- **restrição** (caixa ou gerente com filial): continua limitado à
+  própria loja;
+- **o teste essencial da seleção operacional:** uma operação
+  **enfileirada na filial A**, seguida da seleção da **filial B** — a
+  operação já registrada **continua pertencendo à A**.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
@@ -9532,12 +9639,20 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > **feito** (item 97): um vale sem adicional e convênio genérico,
 > provados de ponta a ponta com o vale de teste `V-000062`.
 >
-> **O próximo não está escolhido, e isso é deliberado.** O usuário tirou
-> a forma "Outro" do passo 1 e lhe deu passo próprio, então há dois
-> candidatos: **"Outro"** (as quatro cópias do domínio de `forma`, o
-> CHECK e o validador SQL, sem substituição global do literal) ou o
-> **passo 2** ("Cargo", filial obrigatória e o E10 completo). Pergunte
-> antes de começar qualquer um.
+> **ESCOLHIDO em 2026-09-10: "Outro" agora, depois o passo 2**, cada um
+> com escopo e commit próprios. O contrato do "Outro", nas palavras do
+> usuário:
+>
+> - sai das opções de **cadastro, divergência e retorno**;
+> - validação do **cliente e do servidor** recusa em operações NOVAS;
+> - leitura e verificação dos **documentos históricos** preservadas até
+>   o corte;
+> - **nenhuma** mudança no formato canônico, **nenhuma** conversão de
+>   pagamento antigo;
+> - `outro` **continua** sendo motivo de insucesso.
+>
+> Antes dele, o item 98 registrou o diagnóstico do `consulta-render` e as
+> contas de prova do E10.
 >
 > **O E10.2 não foi cancelado — virou o passo 2**, e passou de adiável a
 > obrigatório. O detalhe técnico dele continua válido e está logo abaixo;
