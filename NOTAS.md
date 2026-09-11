@@ -9937,10 +9937,15 @@ sessão estava sem login, então nada da tabela abaixo foi visto daqui:
 - **A recusa da Edge Function não foi exercitada isoladamente.** A tela
   barra antes de chamá-la, então o caminho testado foi o do cliente; o do
   servidor está provado pela conferência (b), no banco, e pela leitura do
-  código da função.
-- **A troca de cargo** (campo some ao virar admin, volta em branco ao
-  retornar para caixa) **não foi relatada**. Ela é da mesma tela e do
-  mesmo estado que a recusa, mas não entrou no relato.
+  código da função. **A mensagem vista prova de onde veio a recusa:** a
+  da tela é "Caixa precisa de uma filial — sem ela não consegue lançar
+  entrega"; a da função seria "Caixa e gerente precisam de uma filial."
+  Isso NÃO indica que a função republicada falhou — ela só não foi
+  alcançada. Criar a `camilocaixa` passou por ela, mas esse caminho é
+  igual nas duas versões e não distingue qual está no ar.
+- **A troca de cargo:** confirmado pelo usuário que o campo de filial
+  **some ao selecionar Administrador**. A volta em branco ao retornar
+  para caixa não foi relatada à parte.
 
 **Saiu do aceite:** enfileirar na filial A e trocar para B — a
 funcionalidade não existe. A cobertura da fila continua a das specs.
@@ -9987,7 +9992,9 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 >
 > **Aceito em 2026-09-11:** a `criar-usuario` já estava republicada, o
 > formulário recusa caixa sem filial, e a restrição foi testada numa conta
-> nova, `camilocaixa`. Só a troca de cargo não foi relatada (item 100).
+> nova, `camilocaixa`. O campo de filial some ao selecionar admin. A
+> recusa da própria Edge Function não foi exercitada isoladamente, porque
+> a tela barra antes (item 100).
 >
 > **O próximo é o passo 3**: o nome da filial nos documentos, que hoje
 > vem de join vivo e não do snapshot.
