@@ -1,238 +1,331 @@
 # Levantamento 4A — ciclo do vale, tentativa e evidências
 
-Levantamento de 11/09/2026 sobre a branch `feat/e10-admin-filial` (commit `ed5715a`), feito lendo código e migrations. **O banco não foi consultado nem alterado, e nenhum código foi mudado.** Serve para decidir o contrato antes do 4B e do 4C.
+**Versão 2, 11/09/2026.** Incorpora a [revisão do levantamento](revisao-levantamento-4a-2026-09-11.md). A versão 1 está no commit `1014b5d`.
 
-Os links usam âncoras de linha deste commit; elas envelhecem com o código.
+Feito lendo código e migrations sobre a branch `feat/e10-admin-filial` (commit `ed5715a`). **O banco não foi consultado nem alterado, e nenhum código foi mudado.** Serve para fechar o contrato antes do 4B e do 4C. Os links usam âncoras de linha deste commit, que envelhecem com o código.
+
+**O que mudou da versão 1:**
+- **PIN:** deixou de ser tratado como prova isolada de presença; a evidência é o conjunto.
+- **Leitura do serviço:** a regra que misturava serviço realizado e comprovação virou uma leitura em seis situações.
+- **Nova tentativa:** precisa funcionar com o E12 offline e ganhou regras de integridade.
+- **Offline:** o 4C inclui abrir o aplicativo sem internet.
+- **Cargo offline:** tem uma limitação que a versão 1 não dizia.
+- **Verificador:** não mede completude de numeração.
+- **Perguntas:** as que já tinham resposta saíram, e as técnicas viraram propostas.
 
 ## Resumo
 
-- **O que já é forte:** saída e retorno selados, online e offline, com cartão, PIN, sessão, traços, hash do documento e verificador. Nada disso depende de geolocalização, que já está nula.
-- **O que não existe:** a nova tentativa da mesma compra. Um vale com insucesso não volta a sair, e o servidor recusaria.
-- **O que está calculado errado para o objetivo novo:** relatório e fechamento somam **tarifa e compra de todo vale não cancelado**, pela data do **lançamento**. Isso inclui vale que nunca saiu e compra de tentativa que não entregou.
-- **O que o envelope faz, e que nada substitui hoje:** protege PIN e cartão em repouso durante a queda e prende a autenticação àquele documento. Offline é obrigatório, então ele fica.
-- **A decisão que mais muda o desenho:** qual evento dá direito à tarifa e em que quinzena ele entra (D1 e D2).
+- **O que já é forte:** saída e retorno selados, online e offline, com credencial do motoboy validada, sessão da farmácia, conteúdo com hash e verificador. O verificador prova que as camadas recalculam; **não observa a entrega nem decide se uma cobrança é devida.**
+- **O que não existe:**
+  - a nova tentativa da mesma compra;
+  - abrir o aplicativo sem internet: não há Service Worker, Cache API nem persistência das consultas.
+- **O que está calculado errado para o objetivo novo:** relatório e fechamento somam **tarifa e compra de todo vale não cancelado**, pela data do **lançamento**.
+- **O envelope fica:** protege PIN e cartão em repouso durante a queda e os prende à operação, e **não existe substituto implementado e validado neste projeto.**
+- **Recomendação para os traços:** confirmação explícita do conteúdo pelas duas partes. A escolha continua sendo sua.
 
 ---
 
-## 1. Estado atual — quem confirma cada fato, o que é guardado e onde é verificado
+## 1. Decisões já tomadas — preservar
+
+- **Tentativa realizada gera vale de R$ 9, mesmo sem entrega.** Cada nova tentativa ganha outro vale, da mesma compra.
+- **Pendência de documento ou de acerto retém só o vale afetado.** Os demais seguem para conciliação e pagamento.
+- **A agência recebe por quinzena e paga os motoboys.** O repasse interno dela não entra no primeiro painel.
+- **A antecipação informal de dinheiro fica fora do sistema.** Nenhum campo, nenhum fluxo.
+- **Admin não opera o balcão.** Caixa e gerente operam na própria filial; o gerente cobre o balcão ocasionalmente.
+- **Saída e retorno durante a queda de internet são obrigatórios.**
+
+**A regra do insucesso é o fato, não o rótulo:** houve tentativa realizada? `recusou` e `outro` não concedem nem negam a tarifa por si. Um motivo insuficiente pede esclarecimento. **Transferência e busca posterior de documento** ainda precisam de regra própria confirmada.
+
+---
+
+## 2. Estado atual — quem confirma cada fato, o que é guardado e onde é verificado
 
 | Fato | Quem confirma hoje | O que fica guardado | Onde é verificado |
 |---|---|---|---|
 | **Lançamento do vale** | caixa ou gerente, pela sessão | `entregas`: número da sequência do banco, tarifa capturada no cadastro, formas previstas 1:N, `tem_receita`, pendência de papel derivada da forma | RLS de `entregas` e autoria conferida no servidor ([autoria](../supabase/migrations/20260816120000_autoria_no_servidor.sql#L120)). **Não há documento assinado** |
-| **Retirada (saída)** | **motoboy:** cartão (identifica) + PIN (autentica) + traços (manifesta). **Farmácia:** sessão (JWT) + traços, com `papel_no_momento` | `romaneios` (snapshot com nome da filial, canônico DCR1, `document_hash`, `final_hash`, modo, dois relógios, IP); duas `assinaturas` (traços, `signature_hash`, `auth_method`, credencial, autorização); corrida aberta; vales `em_rota`; evento `romaneio_selado` | `selar_romaneio_interno`: trava os vales, recusa vale indisponível ou de outra filial virando **conflito com prova**, recalcula o hash **do banco**, consome a autorização de uso único ([saída](../supabase/migrations/20260902120000_admin_operando_por_filial_saida.sql#L149)). Depois, o verificador recalcula documento, cada assinatura e o hash final |
-| **Entrega ao cliente** | **ninguém, no ato.** O sistema não registra nada na porta | nada no momento | não há confirmação do destinatário, e o plano decide não exigir |
-| **Retorno à farmácia** | **motoboy:** cartão + PIN de novo + traços. **Farmácia:** responsável pela sessão + traços + `papel_no_momento` | romaneio `retorno` (DCRR1: desfecho, motivo e detalhe por vale; pagamentos realizados; documentos recebido/faltante); desfecho em `entregas`; pagamentos `realizado`; eventos; corrida fechada | `selar_romaneio_retorno_interno`: a saída confere, mesmo motoboy, **conjunto de vales igual**, documentos esperados iguais aos declarados, hash, autorização, e **cada pagamento assinado gravado** ([retorno](../supabase/migrations/20260826120000_pagamento_alterado_todos_previstos.sql#L386)). Depois do selo, trigger congela desfecho, motivo e observação ([trigger](../supabase/migrations/20260820180000_fechamento_legado_obsoleto.sql#L110)) |
-| **Pagamento na porta** | relato das duas partes no retorno | linhas `pr` do DCRR1 e `pagamentos` realizados | a divergência é **derivada**: previsto × realizado por conjunto de forma e valor, marca `divergente` e grava `pagamento_alterado` sem justificativa digitada ([divergência](../supabase/migrations/20260826120000_pagamento_alterado_todos_previstos.sql#L448)). Depois do retorno, "Notificar ocorrência" registra à mão, por qualquer cargo |
+| **Retirada (saída)** | **motoboy:** cartão identifica a credencial, PIN valida o segredo dela, traços manifestam. **Farmácia:** sessão + traços; o cargo é lido do perfil **no instante em que o servidor sela** ([perfil](../supabase/migrations/20260902120000_admin_operando_por_filial_saida.sql#L104)) | `romaneios` (snapshot com nome da filial, canônico DCR1, `document_hash`, `final_hash`, modo, dois relógios, IP); duas `assinaturas` (traços, `signature_hash`, `auth_method`, credencial, autorização); corrida aberta; vales `em_rota`; evento `romaneio_selado` | `selar_romaneio_interno`: trava os vales, transforma vale indisponível ou de outra filial em **conflito com prova**, recalcula o hash **do banco** e consome a autorização de uso único ([saída](../supabase/migrations/20260902120000_admin_operando_por_filial_saida.sql#L149)) |
+| **Entrega ao cliente** | **ninguém, no ato** | nada no momento | não há confirmação do destinatário, e o plano decide não exigir |
+| **Retorno à farmácia** | **motoboy:** cartão + PIN de novo + traços. **Farmácia:** responsável pela sessão + traços; cargo lido no instante do selo ([perfil](../supabase/migrations/20260826120000_pagamento_alterado_todos_previstos.sql#L161)) | romaneio `retorno` (DCRR1: desfecho, motivo e detalhe por vale; pagamentos realizados; documentos recebido/faltante); desfecho em `entregas`; pagamentos `realizado`; eventos; corrida fechada | `selar_romaneio_retorno_interno`: saída confere, mesmo motoboy, **conjunto de vales igual**, documentos esperados iguais aos declarados, hash, autorização, e **cada pagamento assinado gravado** ([retorno](../supabase/migrations/20260826120000_pagamento_alterado_todos_previstos.sql#L386)). Depois do selo, trigger congela desfecho, motivo e observação ([trigger](../supabase/migrations/20260820180000_fechamento_legado_obsoleto.sql#L110)) |
+| **Pagamento na porta** | relato das duas partes no retorno | linhas `pr` do DCRR1 e `pagamentos` realizados | a divergência é **derivada** (previsto × realizado por conjunto de forma e valor), marca `divergente` e grava `pagamento_alterado` ([divergência](../supabase/migrations/20260826120000_pagamento_alterado_todos_previstos.sql#L448)). Depois do retorno, "Notificar ocorrência" registra à mão |
 | **Papel de convênio e crediário** | no retorno, as duas partes declaram recebido/faltante (presença física). Depois, quem dá baixa na aba Documentos | status documental; evento `documento_faltante`; na baixa, `documento_recebido_por` e relógio | autoria da baixa conferida no servidor ([autoria](../supabase/migrations/20260816120000_autoria_no_servidor.sql#L137)); a troca de status gera `status_alterado`. Baixa **sem fila offline** ([documentos](../src/data/documentos.ts#L66)) |
-| **Receita** | só quem dá baixa na aba Documentos | `receita_recebida_por` e relógio | **fora do documento assinado**, por decisão. A baixa **não gera evento**: receita não é eixo de status ([baixa](../src/data/documentos.ts#L134)). "Não voltou" grava `falta_receita` |
-| **Serviço cobrável** | **ninguém.** É calculado na leitura | nada próprio | relatório soma todo vale não cancelado ([regra](../src/data/relatorios.ts#L113)), cortado pela data do **lançamento** ([período](../src/data/relatorios.ts#L210)). Fechamento idem, só cliente e com teto ([fechamento](../src/data/fechamento.ts#L140)). Não existe cobrança da agência |
-| **Cancelamento** | qualquer cargo, só vale pendente ([menu](../src/components/EntregaAcoesMenu.tsx#L46)) | motivo, autor conferido, relógio, evento `entrega_cancelada` | CHECK de motivo e autoria no servidor. Não soma dinheiro |
+| **Receita** | só quem dá baixa na aba Documentos | `receita_recebida_por` e relógio | **fora do documento assinado**, por decisão. A baixa grava autor e relógios, mas **não gera evento**: o log de `entregas` só acompanha os três eixos de status ([log](../supabase/migrations/20260806232804_schema_inicial.sql#L361), [baixa](../src/data/documentos.ts#L134)) |
+| **Serviço cobrável** | **ninguém** — é calculado na leitura | nada próprio | relatório soma todo vale não cancelado ([regra](../src/data/relatorios.ts#L113)), cortado pela data do **lançamento** ([período](../src/data/relatorios.ts#L210)). Fechamento idem, só cliente e com teto ([fechamento](../src/data/fechamento.ts#L140)). Não existe cobrança da agência |
+| **Cancelamento** | qualquer cargo, só vale pendente ([menu](../src/components/EntregaAcoesMenu.tsx#L46)) | motivo, autor conferido, relógio, evento `entrega_cancelada` | CHECK de motivo e autoria no servidor |
 | **Conflito** | o servidor, quando a saída ou o retorno não pode selar | romaneio `conflito` com os traços e os motivos | a prova da retirada não se perde; sai do placar do verificador |
+| **Abrir o aplicativo sem internet** | **nada o garante** | o Dexie guarda fila, cache de credenciais e contextos de retorno ([banco local](../src/lib/db.ts#L248)) | **não há Service Worker, Cache API, manifest nem persistência do QueryClient** ([QueryClient](../src/lib/queryClient.ts#L3), [Vite](../vite.config.ts)). Uma aba já aberta continua; uma aba reaberta sem rede não carrega |
 
 ---
 
-## 2. A função de cada peça da evidência
+## 3. A função de cada peça da evidência
 
-Antes de propor manter ou tirar qualquer coisa, o que cada peça faz e o que se perde sem ela.
+**A evidência operacional é o CONJUNTO**: identidade da farmácia, credencial do motoboy validada, conteúdo confirmado, horários, desfecho e preservação do registro. Nenhuma peça sozinha prova o ato.
 
-| Peça | Função | Sem ela |
+| Peça | Função | O que ela NÃO prova, ou o que se perde sem ela |
 |---|---|---|
-| **Cartão** (id público + token com HMAC) | **identifica** a credencial | o PIN não sabe de quem é |
-| **PIN** (bcrypt, bloqueio progressivo de 30 s a 15 min) | **autentica** a pessoa: é o único ato que prova que o motoboy estava lá ([bloqueio](../supabase/migrations/20260816150000_selo_sincronizado.sql#L75)) | qualquer um que saiba o nome "assina" pelo motoboy |
-| **Autorização de uso único** (online, 2 min, presa ao `document_hash`) | impede usar um PIN conferido em outro documento ([autorização](../supabase/migrations/20260816140000_romaneio_de_saida.sql#L453)) | um PIN conferido serviria para qualquer saída naqueles minutos |
-| **Envelope RSA** (offline) | guarda PIN e token **em repouso** por horas, e prende operação, documento, tipo e hash do evento ([segredos](../src/lib/envelope.ts#L49)) | ou o PIN fica em claro na fila (proibido), ou não há autenticação offline |
-| **Traços manuscritos** | **manifestam** concordância com aquele conteúdo; entram no `signature_hash` e no hash do evento offline | a concordância passa a depender de outro ato (ver D6). Traço não é verificável como biometria |
-| **`document_hash`** (DCR1 / DCRR1) | **integridade** do conteúdo; o retorno referencia a saída por ele | ninguém consegue afirmar que o documento de hoje é o assinado |
-| **`signature_hash` e `final_hash`** | amarram quem + como autenticou + conteúdo + relógio do servidor + traços | o verificador não teria o que recalcular |
-| **Sessão e `papel_no_momento`** | identidade interna vinda do servidor, nunca do cliente | o documento afirmaria o cargo de hoje, não o do ato |
-| **IP** | metadado. **Offline é o IP da sincronização**, lido pela Edge Function ([sync](../supabase/functions/sync-romaneio/index.ts#L406)) | pouco: não serve como prova de local |
-| **Geolocalização** | nenhuma desde 04/09 | nada; resta só como `-` na fórmula offline e em parâmetros e colunas |
-| **Dois relógios** | balcão e servidor lado a lado | um PC 40 minutos errado vira verdade |
-| **Conflito registrado** | preserva a prova de uma retirada que não pôde selar | a retirada física some do sistema |
-| **Verificador** | prova que as camadas ainda recalculam ([camadas](../supabase/migrations/20260820140000_verificador_do_retorno.sql#L317)) | "está íntegro" vira afirmação, não medição |
+| **Cartão** (id público + token com HMAC) | **identifica** a credencial apresentada | sem ele, o PIN não sabe de quem é |
+| **PIN** (bcrypt, bloqueio de 30 s a 15 min) | **valida** que quem opera conhece o segredo daquela credencial ([bloqueio](../supabase/migrations/20260816150000_selo_sincronizado.sql#L75)) | **não prova sozinho presença física nem exclusividade do titular**: um segredo pode ser compartilhado ou conhecido. Sem ele, a credencial não tem validação nenhuma |
+| **Autorização de uso único** (online, 2 min, presa ao `document_hash`) | prende a validação a um documento ([autorização](../supabase/migrations/20260816140000_romaneio_de_saida.sql#L453)) | sem ela, uma validação serviria para qualquer saída naqueles minutos |
+| **Envelope** (AES-GCM cifra o conteúdo, RSA protege a chave) | guarda PIN e token **em repouso** durante a queda e prende operação, documento, tipo e hash do evento ([segredos](../src/lib/envelope.ts#L49)) | sem ele, não há substituto implementado e validado neste projeto: o PIN ficaria em claro na fila, ou a validação offline deixaria de existir |
+| **Traços manuscritos** | **manifestam** concordância com aquele conteúdo; entram no `signature_hash` e no hash do evento offline | não são verificáveis como biometria |
+| **`document_hash`** (DCR1 / DCRR1) | **integridade** do conteúdo; o retorno referencia a saída por ele | sem ele, ninguém afirma que o documento de hoje é o confirmado |
+| **`signature_hash` e `final_hash`** | amarram quem, como validou, conteúdo, relógio do servidor e traços | sem eles, o verificador não teria o que recalcular |
+| **Sessão e `papel_no_momento`** | identidade interna vinda do servidor, nunca do cliente | **na saída, o cargo é metadado fora do hash** ([DCR1](../supabase/migrations/20260820140000_verificador_do_retorno.sql#L440)); **no retorno, entra no hash da assinatura interna** ([DCRR1](../supabase/migrations/20260820140000_verificador_do_retorno.sql#L432)). **Offline, o cargo é lido na sincronização**, depois da confirmação no terminal: uma troca de cargo durante a queda impede tratá-lo, sozinho, como o cargo do momento da confirmação |
+| **IP** | metadado. **Offline é o IP da sincronização** ([sync](../supabase/functions/sync-romaneio/index.ts#L406)) | não serve como prova de local |
+| **Geolocalização** | nenhuma desde 04/09 | não está nas fórmulas de assinatura; está no **hash do evento offline**, como `-` |
+| **Dois relógios** | balcão e servidor lado a lado | **não resolvem sozinhos** um terminal com data errada |
+| **Conflito registrado** | preserva a prova de uma retirada que não pôde selar | sem ele, a retirada física some do sistema |
+| **Verificador** | prova que as camadas recalculam ([camadas](../supabase/migrations/20260820140000_verificador_do_retorno.sql#L317)) | **não** observa entrega física, **não** decide se uma cobrança é devida |
 
 ---
 
-## 3. Os seis cenários — o que acontece hoje
+## 4. Os seis cenários — o que acontece hoje
 
-### 3.1 Entrega concluída
+### 4.1 Entrega concluída
 
 **Funciona**, online e offline, para vales já sincronizados (`R-000023`, `R-000025`, `R-000026`, `R-000031`, `R-000032`).
 
-- **Lacuna — implementar:** o vale entra no relatório como serviço **desde o lançamento**, antes de sair.
-- **Decisão:** qual evento dá direito à tarifa (D1) e em que período ele entra (D2).
+- **Implementar:** o vale entra no relatório como serviço **desde o lançamento**, antes de sair. A leitura correta está na seção 6.
 
-### 3.2 Tentativa malsucedida cobrável
+### 4.2 Tentativa malsucedida cobrável
 
-**Registra bem.** O retorno grava `insucesso` com motivo (`ausente`, `endereco_errado`, `recusou`, `outro` com detalhe) no documento assinado ([motivos](../src/lib/canonicoRetorno.ts#L138)). O relatório **já soma a tarifa**, porque só o cancelado fica de fora.
+**Registra bem.** O retorno grava `insucesso` com motivo (`ausente`, `endereco_errado`, `recusou`, `outro` com detalhe) no documento assinado ([motivos](../src/lib/canonicoRetorno.ts#L138)). O relatório já soma a tarifa.
 
-- **Lacuna — implementar:** as mesmas somas contam também a **compra** de uma venda que não aconteceu, no relatório e no fechamento ([fechamento](../src/data/fechamento.ts#L159)).
-- **Decisão:** todo motivo de insucesso é cobrável? `recusou` e `outro` incluídos? (D3)
+- **Implementar:** as mesmas somas contam também a **compra** de uma entrega que não aconteceu ([fechamento](../src/data/fechamento.ts#L159)).
+- **Já decidido:** a regra é o fato (houve tentativa?), não o rótulo do motivo.
 
-### 3.3 Nova tentativa da mesma compra
+### 4.3 Nova tentativa da mesma compra
 
 **Não existe caminho.**
 
-- A tela de saída só oferece vale `pendente` e sem corrida ([filtro](../src/data/romaneios.ts#L614)). O vale com insucesso tem corrida e outro status, então nunca aparece.
-- Se aparecesse, o servidor recusaria com `ja_em_corrida` ou `status_nao_permite` ([conflito](../supabase/migrations/20260902120000_admin_operando_por_filial_saida.sql#L155)).
-- O único contorno hoje é lançar um vale novo do zero. Ele **duplica a compra** nas somas e **não tem vínculo** com a tentativa anterior.
-- **Lacuna — implementar:** abrir nova tentativa a partir de um vale com insucesso selado, com número novo, tarifa, formas previstas copiadas com ids novos, vínculo imutável à tentativa anterior, e a compra contada uma vez por compra.
-- **Decisão:** onde a compra conta, o que é herdado (formas, documentos, receita), se o vínculo entra no documento assinado, e quem pode abrir (D5).
+- A seleção ativa de saída só oferece vale `pendente` e sem corrida ([seleção](../src/data/romaneios.ts#L606)). O vale com insucesso nunca aparece.
+- Se aparecesse, o servidor recusaria com `ja_em_corrida` ou `status_nao_permite` ([recusas](../supabase/migrations/20260902120000_admin_operando_por_filial_saida.sql#L155)).
+- O único contorno hoje é lançar um vale do zero, que **duplica a compra** e **não tem vínculo**.
+- **Implementar:** a proposta A1 (seção 8), inclusive **durante a queda**, com o E12.
 
-A evidência que o plano cita para esta lacuna (`corridas.ts:86`) é o hook antigo que a auditoria marcou como código morto. A seleção real é a de `romaneios.ts`.
+A evidência que o plano citava (`corridas.ts:86`) é um hook que só aparece na própria definição. Foi corrigida no plano.
 
-### 3.4 Divergência de pagamento
+### 4.4 Divergência de pagamento
 
-**Funciona.** No retorno ela é derivada dos fatos e registrada com origem; depois do retorno, "Notificar ocorrência" cobre o que se descobre mais tarde.
+**Funciona.** No retorno ela é derivada dos fatos e registrada com origem; depois, "Notificar ocorrência" cobre o que se descobre mais tarde.
 
-- **Lacuna — implementar:** não existe resolução da divergência. A conferência nunca sobrescreve `divergente`, e nada leva o vale de `divergente` a resolvido. Também não existe retenção do vale na cobrança.
-- **Decisão:** quem resolve e como se registra a resolução; se a divergência retém o vale ou só a conferência do dia (D7).
+- **Já decidido:** a divergência retém **só o vale afetado**.
+- **Implementar:**
+  - não existe resolução — nada leva o vale de `divergente` a resolvido;
+  - não existe retenção na cobrança.
+- **Decidir (P5):** quem resolve a divergência e como a resolução é registrada.
 
-### 3.5 Documento que não voltou
+### 4.5 Documento que não voltou
 
-**Funciona na declaração.** `faltante` no retorno deixa o vale com pendência e grava `documento_faltante`. A baixa posterior registra quem recebeu, conferido no servidor. "Não voltou" registra sem encerrar a pendência.
+**Funciona na declaração.** `faltante` deixa pendência e grava `documento_faltante`; a baixa posterior registra quem recebeu; "Não voltou" registra sem encerrar.
 
-- **Lacuna — implementar:**
+- **Implementar:**
   - a baixa não tem fila offline;
-  - a tela não mostra andamento nem falha (achado do plano);
-  - a baixa de **receita** não deixa evento;
-  - a retenção do vale na cobrança, já decidida, não existe.
-- **Decisão:** quem pode dar baixa física — só quem recebeu, e o admin não (D7).
+  - a tela não mostra andamento nem falha;
+  - a baixa de receita não gera evento;
+  - não existe retenção do vale.
+- **Decidir (P5):** quem pode dar baixa física.
 
-### 3.6 Saída e retorno offline
+### 4.6 Saída e retorno offline
 
-**Funciona para vales que já estavam no servidor.** O `R-000026` provou o caminho (`physical_card_pin_offline_then_verified`). O envelope é aberto e conferido na sincronização, e a porta offline do retorno confere a competência sobre a filial da saída ([competência](../supabase/migrations/20260820170000_selar_romaneio_retorno_sincronizado.sql#L207)).
+**Funciona para vales que já estavam no servidor, com a aba já aberta.** O `R-000026` provou o caminho (`physical_card_pin_offline_then_verified`). A porta offline do retorno confere competência sobre a filial da saída ([competência](../supabase/migrations/20260820170000_selar_romaneio_retorno_sincronizado.sql#L207)).
 
-- **Lacuna — implementar, é o E12:**
-  - vale criado na queda não tem número, logo não sai;
-  - saída feita offline não aparece como corrida para retorno antes de sincronizar;
-  - cancelamento e baixa de documento não entram na fila;
-  - a lista de vales some se a página recarregar offline.
-  - **Não existe nenhum código de reserva de numeração.** O contrato está no [item 94](../NOTAS.md#L8664).
-- **Decisão:** tamanho do bloco reservado, como o terminal é preparado, o que acontece quando o bloco acaba.
+**Implementar, e são três partes (proposta A6):**
+- **abrir e reabrir o aplicativo sem internet:** não existe Service Worker nem Cache API;
+- **as telas lerem o estado local:**
+  - vale criado na queda aparecendo na saída;
+  - saída local aparecendo como corrida para retorno;
+  - cancelamento e baixa na fila;
+- **o E12:**
+  - vale criado na queda não tem número;
+  - **não existe nenhum código de reserva de numeração** ([contrato](../NOTAS.md#L8664)).
 
 ---
 
-## 4. Exceções operacionais
+## 5. Exceções operacionais
 
-| Exceção | Hoje | Lacuna |
+| Exceção | Hoje | O que falta |
 |---|---|---|
-| **Sem cartão, PIN esquecido ou credencial bloqueada** | a saída e o retorno **não conseguem selar**. O fluxo excepcional (online, gestor, motivo, marcado no rosto do documento) foi decidido em 19/08 e **não tem código** | decisão sobre o processo real (D4), depois implementar |
-| **Outro motoboy traz o retorno** | o servidor recusa `outro_motoboy` e grava conflito ([recusa](../supabase/migrations/20260826120000_pagamento_alterado_todos_previstos.sql#L235)) | decisão (D4): é custódia errada ou troca legítima com autorização? |
-| **Todos os terminais offline** | saída e retorno de vales já sincronizados funcionam; o resto não | E12 |
-| **Credencial bloqueada usada offline** | vira conflito na sincronização, com prova preservada | nenhuma, se o fluxo excepcional existir online |
-| **Motoboy sai e não volta no dia** | o vale fica `em_rota` indefinidamente e já soma no relatório | decisão (D1): "tentativa sem desfecho registrado" não é cobrável até resolver |
+| **Sem cartão, PIN esquecido ou credencial bloqueada** | saída e retorno **não conseguem selar**. O fluxo excepcional decidido em 19/08 (online, gestor, motivo, marcado no documento) **não tem código** | o processo real (P4), depois implementar |
+| **Outro motoboy traz o retorno** | o servidor recusa `outro_motoboy` e grava conflito ([recusa](../supabase/migrations/20260826120000_pagamento_alterado_todos_previstos.sql#L235)) | o processo real (P4) |
+| **Todos os terminais offline** | saída e retorno de vales já sincronizados funcionam, só com aba já aberta | A6 |
+| **Credencial bloqueada usada offline** | vira conflito na sincronização, com prova preservada | nenhum, se o fluxo excepcional existir online |
+| **Cargo, filial ou acesso mudam durante a queda** | o servidor lê o perfil na sincronização; o documento pode sair com o cargo novo ou ser recusado por inativo | proposta técnica na seção 9 |
+| **Motoboy sai e não volta no dia** | o vale fica `em_rota` e já soma no relatório | leitura "aguardando desfecho" (seção 6) |
 
 ---
 
-## 5. Lacunas comprovadas
+## 6. A leitura do serviço — sem estados novos
 
-### O que falta implementar — já decidido
+Substitui a regra da versão 1, que misturava o serviço realizado com a comprovação técnica. **Não são seis estados armazenados**: são leituras de fatos que já existem, ou que A1, A5 e A6 criam.
+
+| Situação | Como apresentar |
+|---|---|
+| Vale criado, ainda sem saída | **serviço previsto**; não compõe valor liberado |
+| Saiu, sem retorno registrado | **aguardando desfecho ou comprovação**; não afirmar que a tentativa não ocorreu |
+| Retorno registrado no terminal, sem sincronizar | **operação registrada; validação no servidor pendente** |
+| Retorno validado, entregue ou insucesso de tentativa realizada | **serviço confirmado**; liberável se não houver pendência impeditiva |
+| Documento ou acerto pendente | **vale retido com motivo**; os demais seguem |
+| Conflito de sincronização ou recuperação excepcional | **exige resolução identificada**; não apagar o ato relatado nem liberar em silêncio |
+
+- **O caminho normal usa o retorno validado como condição de liberação.**
+- **Um retorno excepcional autorizado** deixa evidência equivalente do tratamento, **sem fingir** que houve a confirmação normal do motoboy.
+- **As somas passam a separar** previsão, serviços confirmados, valores retidos e valores aprovados.
+- **A aprovação parcial conhece a cobrança inteira:** ela não torna aceitável uma soma cortada pelo teto.
+
+---
+
+## 7. Lacunas comprovadas — o que falta implementar
 
 | # | Lacuna | Evidência | Passo |
 |---|---|---|---|
-| I1 | nova tentativa com novo vale vinculado à mesma compra | [filtro de saída](../src/data/romaneios.ts#L614), [recusa](../supabase/migrations/20260902120000_admin_operando_por_filial_saida.sql#L155) | 4C ou próprio |
-| I2 | venda separada de serviço nas somas; compra contada uma vez por compra | [relatório](../src/data/relatorios.ts#L113), [fechamento](../src/data/fechamento.ts#L159) | 5 |
-| I3 | serviço cobrável por evento da tentativa, não pelo lançamento | [período](../src/data/relatorios.ts#L210) | 5 e 6 |
-| I4 | E12: reserva de numeração e cadeia local vale → saída → retorno | nenhum código de reserva | 4C |
-| I5 | retenção por vale, cobrança apresentada e aprovação parcial | não existe entidade | 5 e 6 |
-| I6 | fluxo excepcional online | nenhum código | 4B |
-| I7 | baixa de documento e receita com retorno de erro, fila e evento de receita | [baixa](../src/data/documentos.ts#L134) | 4C e UX |
-| I8 | geolocalização residual fora da fórmula offline, dos parâmetros e das colunas | [envelope](../src/lib/envelope.ts#L49) | 4B, no corte |
-
-### O que precisa de decisão sua
-
-| # | Decisão |
-|---|---|
-| D1 | **Qual evento dá direito à tarifa.** Proposta abaixo: retorno selado com desfecho. E o que vale para um vale em rota sem retorno |
-| D2 | **Competência:** calendário da quinzena e a data de qual evento põe o serviço num período |
-| D3 | **Motivos cobráveis:** todos os insucessos, ou `recusou` e `outro` pedem análise? Transferência segue a mesma regra? |
-| D4 | **Exceções reais:** o que a farmácia faz hoje sem cartão ou PIN, e quando outro motoboy traz o retorno. Quem autoriza |
-| D5 | **Nova tentativa:** onde a compra conta, o que herda, se o vínculo entra no documento assinado, quem abre, e se há limite |
-| D6 | **Traços manuscritos:** manter, ou substituir por confirmação autenticada (ver proposta) |
-| D7 | **Quem faz o quê:** quem aprova a conferência, quem aprova a cobrança, quem resolve divergência, quem dá baixa física |
-| D8 | **Papel na transição:** até quando existe, e como recebe o número digital |
+| I1 | nova tentativa com novo vale vinculado à compra, também offline | [seleção](../src/data/romaneios.ts#L606), [recusas](../supabase/migrations/20260902120000_admin_operando_por_filial_saida.sql#L155) | 4C |
+| I2 | somas separadas: previsão, confirmado, retido, aprovado; compras entregues contadas uma vez por compra | [relatório](../src/data/relatorios.ts#L113), [fechamento](../src/data/fechamento.ts#L159) | 5 |
+| I3 | competência pela retirada, não pelo lançamento | [período](../src/data/relatorios.ts#L210) | 5 e 6 |
+| I4 | E12: reserva de numeração e cadeia local vale → saída → retorno → nova tentativa | nenhum código de reserva | 4C |
+| I5 | abrir e reabrir o aplicativo sem internet (Service Worker + Cache API) e telas lendo o estado local | [QueryClient](../src/lib/queryClient.ts#L3), [Vite](../vite.config.ts) | 4C |
+| I6 | retenção por vale, cobrança apresentada e aprovação parcial | não existe entidade | 5 e 6 |
+| I7 | resolução de divergência registrada | nada leva `divergente` a resolvido | 5 |
+| I8 | fluxo excepcional online | nenhum código | 4B |
+| I9 | baixa de documento e receita com evento na mesma transação, retorno de erro e fila | [baixa](../src/data/documentos.ts#L134) | 4C e UX |
+| I10 | geolocalização fora do hash do evento offline, dos parâmetros e das colunas | [envelope](../src/lib/envelope.ts#L49) | 4B, no corte |
 
 ---
 
-## 6. Proposta de contrato
+## 8. Proposta de contrato
 
-**O princípio:** separar quatro funções — identificar, autenticar, manifestar, provar integridade — e dar a cada uma o mecanismo mais forte que o balcão aguenta. Nada sai por ser caro; sai o que não cumpre função.
+**O princípio:** a evidência é o conjunto de identidade da farmácia, credencial do motoboy validada, conteúdo confirmado, horários, desfecho e preservação do registro. Cada peça fica pelo que cumpre, não pelo que custa.
 
 ### Peças existentes
 
 | Peça | Proposta | Justificativa operacional | Impacto nos documentos existentes |
 |---|---|---|---|
-| Cartão | **manter** | identifica sem digitação, funciona offline pelo cache | nenhum |
-| PIN na saída e no retorno | **manter** | é a única prova de presença do motoboy. A agência vai conferir a cobrança contra a evidência da farmácia; sem PIN a evidência vira só a palavra do balcão | nenhum |
-| Autorização de uso único (online) | **manter** | prende o PIN a um documento | nenhum |
-| Envelope RSA (offline) | **manter, sem substituto** | saída e retorno offline são obrigatórios, e o PIN só pode ser conferido na sincronização. Tirar o envelope obriga PIN em claro na fila ou abandono da autenticação offline | nenhum enquanto mantido |
-| Geolocalização residual | **remover no corte**, nos dois gêmeos e no SQL ao mesmo tempo | não prova nada desde 04/09 | a fórmula do hash offline muda de versão; só com a fila vazia. Os `signature_hash` gravados **não** incluem geolocalização, então nenhum documento selado deixa de verificar |
-| `document_hash` DCR1 e DCRR1 | **manter** | é o identificador que o painel da agência cita, por romaneio | nenhum |
-| Traços manuscritos | **decisão D6** — as duas opções abaixo | | |
-| `signature_hash` e `final_hash` | **manter o conceito** | amarram autenticação, conteúdo e relógio | só mudam de fórmula se D6 substituir os traços |
-| Sessão e `papel_no_momento` | **manter** | identidade interna vinda do servidor | nenhum |
-| IP | **manter como metadado, rotulado** | útil para suporte; offline é o IP da sincronização e não pode ser lido como local da retirada | nenhum |
+| Cartão | **manter** | identifica sem digitação e funciona offline pelo cache | nenhum |
+| PIN na saída e no retorno | **manter** | valida a credencial do motoboy no ato; é a parte do conjunto que vem dele | nenhum |
+| Autorização de uso único (online) | **manter** | prende a validação a um documento | nenhum |
+| Envelope (offline) | **manter** | saída e retorno offline são obrigatórios, a validação só ocorre na sincronização, e não existe substituto implementado e validado neste projeto | nenhum enquanto mantido |
+| Geolocalização residual | **remover no corte**, coordenando produtor, consumidor, parâmetros SQL e filas | não prova nada desde 04/09 | a fórmula do hash do evento offline muda de versão, só com fila vazia; **nenhum `signature_hash` gravado a inclui** |
+| `document_hash` DCR1 e DCRR1 | **manter** | é o que o painel da agência cita, por romaneio | nenhum |
+| Traços manuscritos | **recomendação: confirmação explícita** (abaixo) — escolha sua (P3) | | |
+| `signature_hash` e `final_hash` | **manter o conceito** | amarram validação, conteúdo e relógio | nova versão **só nas camadas que mudarem** |
+| Sessão e `papel_no_momento` | **manter**, com a limitação offline tratada (seção 9) | identidade interna vinda do servidor | nenhum |
+| IP | **manter como metadado, rotulado** | útil para suporte; offline é o da sincronização | nenhum |
 | Conflito registrado | **manter** | preserva a prova | nenhum |
-| Verificador | **manter e estender** | passa a reconhecer versões de fórmula e, com o E12, a completude da numeração | nenhum nos antigos |
+| Verificador | **manter e ensinar versões novas de fórmula**. **Não** medir completude de numeração: reservas consumidas, não usadas ou em conflito são controle operacional do E12, e um intervalo reservado pode ter lacunas legítimas sem que documento nenhum fique inválido | | nenhum nos antigos |
 
-**D6 — as duas opções para os traços, sem conclusão prévia:**
+### Traços: confirmação explícita, cobrindo as duas partes
 
-| | A. manter os traços | B. confirmação autenticada |
-|---|---|---|
-| **Como fica** | igual a hoje | a tela mostra os vales, a quantidade e a tarifa; o motoboy confirma e digita o PIN, e o PIN passa a cobrir a manifestação |
-| **A favor** | paridade com o papel enquanto ele existir; nada muda nos gêmeos | menos tempo no balcão e sem depender de caneta no tablet; a manifestação fica presa a um ato autenticado, e não a um desenho sem verificação |
-| **Contra** | tempo e tablet em toda saída e todo retorno | exige nova versão da fórmula de assinatura |
-| **Impacto nos documentos existentes** | nenhum | a versão da assinatura passa a ser lida **da própria linha** (a mesma regra do `tipo_signatario`); os documentos antigos continuam verificando pela fórmula histórica. Os bytes de DCR1 e DCRR1 **não mudam** |
+**Recomendação, sujeita à sua escolha (P3).** Sem afirmar equivalência jurídica entre mecanismos.
 
-**D6 não precisa ser decidido antes das decisões D1, D2 e D5**, que são as que mudam cobrança.
+- **Motoboy:** vê o resumo e o detalhe dos vales, confirma o ato e usa cartão e PIN vinculados àquele conteúdo.
+- **Farmácia:** caixa ou gerente confirma o próprio ato pela sessão autenticada. **Apenas estar logado não é manifestação de concordância**: é preciso um ato explícito de confirmação.
+- **O conteúdo confirmado:**
+  - **na saída**, a retirada dos vales identificados;
+  - **no retorno**, os desfechos, os pagamentos declarados e os documentos recebidos ou faltantes.
+- **Uma confirmação por atendimento**, cobrindo vários vales, e não uma por linha.
+- **Offline:** a tela diz que a validação da credencial depende da sincronização. A operação prossegue conforme o contrato offline; a aprovação financeira respeita validações e conflitos pendentes.
+- **Versões de fórmula só onde algo muda**, com o verificador lendo a versão da própria linha (a mesma regra do `tipo_signatario`). Os documentos preservados continuam verificando pela fórmula histórica, e os bytes de DCR1 e DCRR1 não mudam.
+
+Se você preferir manter os traços, nada muda nos gêmeos, e o custo continua sendo tempo e tablet em toda saída e todo retorno.
 
 ### O que entra no contrato
 
-| # | Proposta | Justificativa | Impacto nos documentos existentes |
-|---|---|---|---|
-| A1 | **Nova tentativa** nasce só de um vale com insucesso selado. Recebe número novo e vínculo imutável à tentativa anterior. Proposta: o vínculo fica **no dado, fora do canônico** | o romaneio da nova tentativa já prova a nova retirada; o vínculo é consultável pelo painel e não obriga mudar os gêmeos. Alternativa (D5): colocar no documento, com versão nova do canônico | nenhum, se ficar fora do canônico |
-| A2 | **Serviço cobrável** = vale com saída selada e **retorno selado com desfecho** (entregue ou insucesso). Vale em rota sem retorno aparece como "tentativa sem desfecho registrado", não cobrável até resolver. Pendente e cancelado não são serviço | o fato cobrável tem que ter as duas partes autenticadas; é o que a agência consegue conferir | nenhum: é regra de leitura |
-| A3 | **Competência** pela retirada no balcão (`ocorrido_em_local` da saída), com o relógio do servidor guardado ao lado | é quando o serviço começou; é a mesma regra que já arquiva romaneio no Drive. Tentativa que atravessa o corte fica na quinzena da saída | nenhum |
-| A4 | **A compra conta uma vez por compra**: entra nas vendas só no vale entregue; tentativas malsucedidas somam só serviço | evita venda fantasma e venda duplicada | nenhum: é regra de leitura |
-| A5 | **Baixa física** de documento e receita registra quem recebeu e gera evento nos dois casos; pendência retém só o vale afetado na cobrança | receita hoje não deixa rastro de baixa; retenção por vale foi decidida | nenhum no passado; eventos só daqui pra frente |
+**A1 — Nova tentativa.**
+- **Vínculo:** nasce de um vale com insucesso, com número novo e vínculo imutável à compra de origem e à tentativa anterior.
+- **Integridade:**
+  - mesma compra de origem, filial e tenant;
+  - reenvio ou clique duplo não cria outra tentativa;
+  - dois terminais não abrem tentativas concorrentes da mesma compra em silêncio — se acontecer offline, vira conflito explícito na sincronização;
+  - o vínculo não é editável depois;
+  - não se reutilizam ids de pagamentos, assinaturas nem estados de recebimento anteriores.
+- **Offline:** a exigência definitiva fica no servidor, mas o terminal representa a cadeia pendente. Retorno registrado localmente → nova tentativa dependente dele → validação ordenada na sincronização.
+- **Preenchimento inicial, revisável antes da saída:**
+  - se o motivo foi endereço errado, a tela facilita corrigir o endereço;
+  - as formas previstas podem mudar;
+  - receita e documentos esperados refletem o que acompanha **aquela** saída, sem copiar a baixa anterior e sem perder uma pendência antiga.
+- **Quem abre:** caixa e gerente, na própria filial. Admin não.
+- **O vínculo fica fora do canônico, e isso tem um custo que precisa estar escrito:** ele é protegido no servidor e sua criação deixa auditoria, mas **não passa a ser comprovado pelo hash histórico do romaneio**.
+
+**A2 — Leitura do serviço.** A tabela da seção 6. A liberação no caminho normal exige retorno validado.
+
+**A3 — Competência.**
+- **Pela retirada**, separada da liberação, da aprovação e do pagamento.
+- **Relógio:** fuso fixado por filial, tratamento de horário incoerente de terminal, e correção autorizada da competência **sem editar os bytes assinados**.
+- **Vale liberado depois:** preserva a competência original e mostra em qual acerto foi aprovado ou pago. A aprovação da quinzena não é reaberta nem reescrita em silêncio.
+- O calendário da quinzena depende de você (P1).
+
+**A4 — Compras entregues.**
+- **Uma vez por compra de origem** — não a soma de todos os vales com status entregue.
+- **Duas conclusões incompatíveis da mesma compra** pedem resolução, não uma soma que escolhe uma delas.
+- **Rótulo "Compras entregues"**, e não "vendas": o sistema complementa o Trier e não promete total fiscal.
+
+**A5 — Baixa física de papel e receita.**
+- **Mudança e evento na mesma transação no servidor, de forma idempotente.** Gravar o status numa requisição e o evento em outra abriria um histórico incompleto novo.
+- **A tela mantém o texto e o andamento até confirmar o resultado.**
+
+**A6 — Continuidade offline em três partes (4C).**
+
+| Parte | Responsabilidade |
+|---|---|
+| **Service Worker + Cache API** | abrir e reabrir o aplicativo sem rede, com telas, scripts, estilos e os recursos carregados sob demanda pelos fluxos obrigatórios |
+| **IndexedDB (o Dexie existente)** | persistir vales novos, corridas, retornos e fila; **as telas leem esse estado local**, não uma resposta antiga da lista em cache |
+| **Sincronização + E12** | preservar a numeração reservada, enviar na ordem das dependências, evitar duplicação e mostrar conflitos |
+
+- **O envelope continua protegendo PIN e token** enquanto aguardam validação; nenhuma das três partes o substitui.
+- **A atualização do cache do aplicativo preserva as operações pendentes** no banco local.
+
+**Aceite do 4C, em ambiente de teste publicado:**
+1. preparar o terminal conectado: recursos, dados, credenciais e números reservados;
+2. desconectar, fechar todas as abas e abrir o aplicativo de novo sem internet;
+3. criar um vale, registrar a saída e registrar o retorno sem rede;
+4. reabrir com operações pendentes e conferir registros e dependências;
+5. reconectar e conferir números preservados, sincronização na ordem certa, nenhuma duplicação e o resultado das validações.
+
+O teste exercita a indisponibilidade **do site e do servidor de dados**. Uma aba já carregada, ou arquivos servidos por um servidor local, não demonstram a reabertura offline do aplicativo publicado.
 
 ### A transição
 
-- **A1 a A5 não mexem em um byte** de DCR1 ou DCRR1: são dado fora do canônico ou regra de leitura.
-- **Versões novas de fórmula** — assinatura, se D6 for B, e hash offline sem geolocalização — só no corte, com a fila vazia, lendo a versão da linha, e com o verificador medido antes e depois no mesmo instrumento.
-- **Os documentos de teste de hoje** somem no corte. Até lá, o placar do verificador tem que continuar fechando (último: `22 · 22 · 0`).
+- **A1 a A5 não mudam bytes de DCR1 nem de DCRR1.** O que eles acrescentam — o vínculo da nova tentativa, a leitura do serviço, a competência — **não fica comprovado pelo hash histórico**; é protegido no servidor e auditado.
+- **Versões novas de fórmula** — assinatura, se a confirmação explícita for escolhida, e hash do evento offline sem geolocalização — só no corte, com fila vazia, lendo a versão da linha.
+- **Antes do corte:** repetir o censo do banco e a verificação. `22 · 22 · 0` é a **última medição registrada**, não resultado deste levantamento.
 
 ---
 
-## 7. Perguntas para você decidir
+## 9. Propostas técnicas — a justificar na implementação, não perguntas
 
-1. **Tarifa (D1):** a tarifa é devida quando o retorno é selado com desfecho? E o vale que saiu e ainda não voltou?
-2. **Quinzena (D2):** quais são as datas de corte, e a competência pode ser a da retirada?
-3. **Motivos (D3):** todo insucesso é cobrável, inclusive `recusou` e `outro`? E a transferência?
-4. **Nova tentativa (D5):**
-   - a compra entra nas vendas só no vale entregue?
-   - a nova tentativa herda formas previstas, documentos esperados e receita?
-   - quem pode abri-la?
-5. **Exceções (D4):** o que a farmácia faz hoje quando falta cartão ou PIN, e quando outro motoboy traz o retorno?
-6. **Quem faz o quê (D7):**
-   - quem aprova a conferência do dia?
-   - quem aprova a cobrança?
-   - quem resolve a divergência?
-   - quem pode dar baixa de papel?
-7. **Traços (D6):** manter, ou confirmação autenticada com PIN?
-8. **Papel (D8):** até quando existe, e como leva o número digital?
+| Tema | Proposta |
+|---|---|
+| **Cargo, filial ou acesso mudando durante a queda** | o servidor continua sendo a fonte, sem aceitar cargo enviado pelo cliente. Recusa, ou gera conflito identificado, quando a mudança retira competência sobre a filial ou o acesso da conta; o documento registra o instante local e o do selo, sem afirmar que o cargo lido é o do momento da confirmação |
+| **Tamanho do bloco do E12, esgotamento e recuperação do terminal** | dimensionar pelo movimento real de cada filial; recarregar com rede; bloco nunca volta ao pool |
+| **Implementação do vínculo da nova tentativa** | coluna imutável protegida por trigger, criação por RPC idempotente com evento |
+| **Transação da baixa com evento** | RPC única, idempotente por chave do cliente |
+| **Versionamento de fórmulas** | só nas camadas que mudarem, lido da linha |
 
 ---
 
-## 8. Registrado, fora deste levantamento
+## 10. Perguntas para você decidir
 
-- **Aceite visual da tabela de receitas:** pendente. Não havia receita pendente para vê-la; não bloqueia o 4A.
-- **Antecipação informal de dinheiro pelo motoboy:** continua fora do sistema.
+1. **Quinzena (P1):** quais são as datas de corte?
+2. **Serviços sem regra (P2):** a transferência e a busca posterior de documento geram vale? Com que regra?
+3. **Traços (P3):** confirmação explícita das duas partes, como recomendado, ou manter os traços?
+4. **Exceções (P4):** o que a farmácia faz hoje quando falta cartão ou PIN, e quando outro motoboy traz o retorno? Quem autoriza?
+5. **Responsáveis (P5):**
+   - quem aprova a conferência do dia;
+   - quem aprova a cobrança;
+   - quem resolve divergência;
+   - quem pede esclarecimento de motivo insuficiente;
+   - quem dá baixa física de papel.
+6. **Papel na transição (P6):** até quando existe, e como recebe o número digital?
+
+---
+
+## 11. Registrado, fora deste levantamento
+
+- **Aceite visual da tabela de receitas:** pendente; não havia receita pendente para vê-la. Não bloqueia.
+- **Antecipação informal de dinheiro:** continua fora do sistema.
 - **Achados de UX do plano:**
   - filial por vale na lista do admin;
   - "Não voltou" fechando antes de gravar;
   - baixa sem retorno de erro;
   - rolagem lateral.
 
-  Estão no item 102 do NOTAS e não foram tratados aqui.
+  Estão no item 102 do NOTAS.

@@ -124,9 +124,9 @@ pré-V1 revisado (`docs/escopo-pre-v1-revisado.md`):
 1  um vale sem adicional · convênio genérico · sem "Outro"   ← feito em 10/09
 2  "Cargo" · filial obrigatória · admin sem lançamento   ← feito em 11/09 (item 100)
 3  snapshot histórico da filial nos documentos   ← feito e aplicado em 11/09 (item 101)
-4A mapear ciclo do vale, tentativa e evidências   ← próximo (item 102)
+4A mapear ciclo do vale, tentativa e evidências   ← levantamento v2 feito, aguarda decisões (103)
 4B implementar o contrato de assinaturas e envelope
-4C continuidade offline completa, com E12
+4C continuidade offline: app sem rede (Service Worker + Cache API), estado local e E12
 5  conferência diária calculada, com exceções e aprovação versionada
 6  painel da agência e conciliação por vale, por quinzena
 7A staging e ensaio do corte
@@ -10193,6 +10193,64 @@ retorno offline. O desenho não fecha só com o caminho feliz.
 5. As regras de cancelamento antes da tentativa, de transferência e de
    busca posterior de documento.
 
+## 103. Levantamento 4A, a revisão dele, e a versão 2
+
+**2026-09-11.** O levantamento 4A saiu em
+`docs/levantamento-4a-2026-09-11.md` (versão 1, commit `1014b5d`): estado
+atual, função de cada peça da evidência, os seis cenários, lacunas e
+proposta de contrato — lendo código, sem banco e sem mudar código. O
+usuário trouxe uma revisão dele, copiada com links relativos em
+`docs/revisao-levantamento-4a-2026-09-11.md`, e o levantamento foi
+**reescrito como versão 2** incorporando-a.
+
+### O que a revisão corrigiu, e o que foi conferido no código
+
+- **PIN não é prova isolada de presença.** Valida o segredo da credencial
+  apresentada; segredo pode ser compartilhado. A evidência é o CONJUNTO, e
+  o verificador prova consistência das camadas, não entrega física nem
+  cobrança devida.
+- **Envelope:** a justificativa é "não existe substituto implementado e
+  validado neste projeto", não "não há arquitetura possível".
+- **Cargo offline é lido na sincronização**, depois da confirmação no
+  terminal. **Conferido:** as duas funções de selo leem `profiles` no
+  instante do selo; e o cargo fica **fora** do hash da saída e **dentro**
+  do hash da assinatura interna do retorno (verificador, fórmulas DCR1 e
+  DCRR1).
+- **A regra "cobrável = retorno selado" misturava serviço e comprovação.**
+  Virou uma leitura em seis situações, sem estados novos armazenados; o
+  retorno validado é condição de LIBERAÇÃO no caminho normal.
+- **Nova tentativa tem que funcionar durante a queda**, com o E12, e
+  ganhou regras de integridade. O vínculo fora do canônico **não fica
+  comprovado pelo hash histórico** — isso agora está escrito.
+- **O 4C inclui abrir o aplicativo sem internet.** **Conferido:** não há
+  Service Worker, Cache API, manifest nem persistência do QueryClient.
+- **Competência** pela retirada, separada de liberação, aprovação e
+  pagamento; **"Compras entregues"** por compra de origem.
+- **Baixa física e evento na mesma transação**, idempotente.
+- **O verificador de documentos não mede completude de numeração** — isso
+  é controle operacional do E12.
+- **Retenção por vale e a regra do insucesso já estavam decididas** e
+  saíram da lista de perguntas; as escolhas técnicas (bloco do E12,
+  vínculo, transação, versionamento) viraram propostas, não perguntas.
+- **A evidência da nova tentativa no plano** (`corridas.ts:86`) foi
+  corrigida para `romaneios.ts#L606`. A revisão dizia ter incorporado isso
+  ao plano exportado; a cópia em Downloads ainda tinha a referência antiga.
+
+### As perguntas que ficam com o usuário
+
+1. datas de corte da quinzena;
+2. regra para transferência e busca posterior de documento;
+3. confirmação explícita das duas partes (recomendada) ou manter traços;
+4. o processo real sem cartão/PIN e com outro motoboy no retorno;
+5. quem aprova conferência e cobrança, resolve divergência, pede
+   esclarecimento de motivo e dá baixa física;
+6. até quando existe papel, e como recebe o número digital.
+
+### A branch
+
+**Publicada.** Na nova tentativa de push, o remoto já estava em
+`1014b5d`: `Everything up-to-date`. Nada foi forçado nem contornado.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
@@ -10252,15 +10310,17 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > ser a contraparte da conciliação por vale. A limpeza de interface que
 > veio junto foi revisada e commitada.
 >
-> **O PRÓXIMO É O 4A, e ele é LEVANTAMENTO, não código:** a matriz de
-> evidências (retirada, entrega, retorno, convênio e receita, serviço
-> cobrável, exceções) com os seis cenários obrigatórios, e depois uma
-> proposta de contrato para decisão — antes de mexer em assinatura,
-> envelope ou documento.
+> **O LEVANTAMENTO 4A ESTÁ FEITO E REVISTO (item 103):**
+> `docs/levantamento-4a-2026-09-11.md`, versão 2, com a revisão ao lado.
+> **Nada de código, migration ou banco** até as seis perguntas da seção 10
+> dele serem respondidas — quinzena, transferência e busca de documento,
+> traços, processo excepcional, responsáveis, papel na transição.
 >
-> **Pendente de decisão do usuário:** o push da branch
-> `feat/e10-admin-filial`, que acumula os passos 0 a 3 e a limpeza do
-> plano.
+> **Depois:** o 4B implementa o contrato de evidências escolhido; o 4C
+> precisa das três partes (Service Worker + Cache API, telas no estado
+> local, E12) coordenadas com a nova tentativa.
+>
+> **A branch `feat/e10-admin-filial` está publicada.**
 >
 > **Graphify ainda não**: uma atualização só, quando as próximas mudanças
 > de código e documentação estabilizarem.

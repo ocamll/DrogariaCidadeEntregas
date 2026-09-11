@@ -3596,9 +3596,9 @@ Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
 1b. sem "Outro" — passo próprio   ✓ 2026-09-10 (migration aplicada)
 2.  "Cargo" · filial obrigatória · admin sem lançamento   ✓ 2026-09-11 (aplicado e aceito)
 3.  snapshot histórico da filial nos documentos   ✓ 2026-09-11 (aplicado)
-4A. mapear ciclo do vale, tentativa e evidências — contrato, sem código   ← PRÓXIMO
+4A. mapear ciclo do vale, tentativa e evidências — levantamento v2 feito, aguarda decisões   ← AQUI
 4B. implementar o contrato de assinaturas e envelope
-4C. continuidade offline completa, com E12 — obrigatória antes do piloto
+4C. continuidade offline: abrir o app sem rede (Service Worker + Cache API), telas no estado local e E12 — obrigatória antes do piloto
 5.  conferência diária calculada, com exceções e aprovação versionada
 6.  painel da agência e conciliação por vale, por quinzena
 7A. staging e ensaio do corte
