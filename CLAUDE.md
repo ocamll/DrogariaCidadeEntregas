@@ -7,8 +7,9 @@
 > do admin — **esta última revista em 2026-09-11: o admin não opera por
 > filial** (ver "E10").
 >
-> **Passo 1 e o "Outro" CONSTRUÍDOS (2026-09-10); passo 2 CONSTRUÍDO em
-> 2026-09-11, com migration e Edge Function A APLICAR; o resto não.** Cada seção afetada aqui traz uma nota
+> **Passo 1 e o "Outro" CONSTRUÍDOS (2026-09-10); passo 2 CONSTRUÍDO e
+> migration APLICADA em 2026-09-11 (republicação da `criar-usuario` a
+> confirmar); o resto não.** Cada seção afetada aqui traz uma nota
 > datada de 2026-09-08 dizendo o que foi decidido e o que o código ainda
 > faz. Onde as duas coisas divergirem, **o código é o que está no ar e o
 > escopo é para onde ele vai** — não confunda um com o outro, e não trate
@@ -3575,13 +3576,13 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
 ### A sequência pré-V1 revisada — decidida em 2026-09-08
 
 Substitui a ordem anterior (`E10 E11 E12 E6 E9 E7 E8 → STAGING → corte`).
-Vem de `docs/escopo-pre-v1-revisado.md`; **construídos até aqui: os passos 0, 1 e 2** (o 2 com migration e Edge Function a aplicar).
+Vem de `docs/escopo-pre-v1-revisado.md`; **construídos até aqui: os passos 0, 1 e 2** (o 2 com migration aplicada; republicação da `criar-usuario` a confirmar).
 
 ```
 0.  alinhar a fonte de verdade ao escopo revisado   ✓ 2026-09-08
 1.  um vale sem adicional · convênio genérico       ✓ 2026-09-10
 1b. sem "Outro" — passo próprio   ✓ 2026-09-10 (migration aplicada)
-2.  "Cargo" · filial obrigatória · admin sem lançamento   ✓ 2026-09-11 (a aplicar)
+2.  "Cargo" · filial obrigatória · admin sem lançamento   ✓ 2026-09-11 (migration aplicada)
 3.  snapshot histórico da filial nos documentos
 4.  concluir o contrato de assinaturas/envelope
 5.  fechamento diário calculado, com exceções e aprovação auditável

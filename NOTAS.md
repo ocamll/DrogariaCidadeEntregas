@@ -9885,25 +9885,54 @@ consulta-render  passa com `npx tsx --tsconfig tsconfig.app.json`;
 referências      zero a lojaOperacional em .ts .tsx .mts .js .json .sql
 ```
 
-### O aceite que falta — depende do usuário
+### A migration aplicada, e o aceite — 2026-09-11
 
-1. **Aplicar `20260911120000`** no SQL Editor e rodar as conferências
-   (a), (b) e (c) do rodapé.
-2. **Republicar `criar-usuario`** (dashboard → Deploy; salvar no editor não
-   publica). Antes disso, criar caixa sem filial ainda passa pela função
-   ANTIGA: ela cria o login, o CHECK recusa o perfil e o login é apagado —
-   recusado, mas pelo caminho caro.
-3. **Entrar com as contas**:
+O usuário aplicou a `20260911120000` e rodou as três conferências. A (b)
+foi entregue numa forma que **termina em erro de propósito**: o SQL Editor
+não mostra `NOTICE`, e o erro também garante que nada fica gravado.
 
-| caso | conta | esperado |
-|---|---|---|
-| admin novo, sem filial | `camiloadmin` | sem "Nova entrega" e "Transferência"; Fechamento, Relatórios e Auditoria com todas as filiais e filtro |
-| admin antigo, com filial | `camiloadmin0` (Matriz) | igual ao de cima — decide o cargo |
-| restrição | caixa nova criada pelo painel (escolha do item 98) | vê os dois botões; enxerga só a própria filial; cadastro sincroniza |
+```
+(a)  profiles_filial_obrigatoria
+     CHECK (((papel <> ALL (ARRAY['caixa','gerente'])) OR (loja_id IS NOT NULL)))
+     convalidated = true
+(b)  P0001  RESULTADO OK: recusado pelo CHECK profiles_filial_obrigatoria
+(c)  admin    com filial   ativo     2
+     admin    sem filial   ativo     1
+     caixa    com filial   inativo   1
+     caixa    com filial   ativo     1
+     gerente  com filial   ativo     2
+```
 
-4. **Formulário**: caixa sem filial é recusado na tela; trocar para admin
-   some o campo; voltar para caixa volta em branco; editar caixa mostra a
-   filial cadastrada.
+- **O pré-voo passou**, e a (c) fecha com o censo de 10/09 (item 98):
+  sete perfis, nenhum caixa ou gerente sem filial.
+- **Os dois admins com filial são os antigos** (`camiloadmin0` e "Admin
+  Teste"), intocados como decidido; o sem filial é o `camiloadmin`.
+- **A (b) prova pelo caminho real.** Com identidade de admin o trigger
+  `fn_profiles_protege_campos` deixa passar, e a mensagem `RESULTADO OK`
+  só sai do handler de `check_violation` — quem recusou foi o CHECK, e
+  não o trigger.
+
+**Na tela — RELATADO pelo usuário, no navegador dele.** O painel desta
+sessão estava sem login, então nada da tabela abaixo foi visto daqui:
+
+| conta | resultado |
+|---|---|
+| `camiloadmin0` — "Camilo · Administrador · Matriz" | só "Retorno de corrida" e "Nova corrida" |
+| `camiloadmin` — admin sem filial | igual |
+| caixa | tudo normal |
+
+### O que ainda não foi confirmado
+
+- **A republicação da `criar-usuario`.** Sem ela, criar caixa sem filial
+  passa pela função antiga: o login nasce, o CHECK recusa o perfil e o
+  login é apagado — recusado, mas pelo caminho caro.
+- **O formulário:** a recusa sem filial, o campo sumindo ao trocar para
+  admin, e voltando em branco ao retornar para caixa.
+- **Qual caixa foi testada.** A (c) mostra os mesmos dois caixas do
+  censo de 10/09, então a conta nova do painel não existia quando a
+  conferência rodou. Se o teste foi com ela, foi criada depois — e vale
+  registrar; se foi com outra, lembrar que as antigas não estão no
+  domínio do E5 (item 98).
 
 **Saiu do aceite:** enfileirar na filial A e trocar para B — a
 funcionalidade não existe. A cobertura da fila continua a das specs.
@@ -9943,12 +9972,13 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > (tela, Edge Function e CHECK), e o admin sem "Nova entrega" nem
 > "Transferência".
 >
-> **PENDENTE DO USUÁRIO antes do aceite do passo 2:**
+> **Migration APLICADA e conferida em 2026-09-11** (item 100): CHECK
+> validado, recusa provada pelo caminho de admin, nenhum caixa ou gerente
+> sem filial. Na tela, relatado pelo usuário: os dois admins sem as ações
+> de lançamento, e o caixa normal.
 >
-> 1. aplicar `20260911120000_caixa_e_gerente_exigem_filial.sql` no SQL
->    Editor e rodar as três conferências do rodapé;
-> 2. republicar a Edge Function `criar-usuario`;
-> 3. entrar com as contas do aceite (item 100) — daqui não se digita senha.
+> **Falta confirmar:** a republicação da `criar-usuario`, as checagens
+> do formulário e qual caixa foi testada (item 100).
 >
 > **Depois, o passo 3**: snapshot histórico da filial nos documentos.
 >
