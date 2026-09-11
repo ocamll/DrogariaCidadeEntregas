@@ -15,7 +15,9 @@
 > escopo é para onde ele vai** — não confunda um com o outro, e não trate
 > a nota como descrição do comportamento atual.
 >
-> A sequência dos 7 passos está em "Ordem de construção", no fim.
+> A sequência está em "Ordem de construção", no fim — **revista em
+> 2026-09-11 pelo plano de execução `docs/plano-pre-v1-2026-09-11.md`**, que
+> manda sobre o escopo revisado onde os dois divergirem.
 >
 > O documento companheiro é `docs/analise-limpeza-pre-v1.md` — a auditoria
 > de limpeza do commit `bc7062a`, com achados técnicos referenciados linha
@@ -36,7 +38,8 @@ esperando no balcão. Velocidade de digitação é o requisito número um.
 Usuário secundário: mototaxista, que só encosta num tablet para assinar.
 
 A farmácia real tem **18 filiais**, espalhadas por mais de uma cidade
-(hoje só 2 existem como dado de teste: Matriz e Filial 02) — o sistema já
+(o banco de desenvolvimento já tem as oito de São Gabriel, medido em
+2026-09-11) — o sistema já
 suporta múltiplas lojas de ponta a ponta (entregas escopadas por
 `loja_id`, transferência entre filiais, relatórios e Registro de
 Auditoria filtráveis por filial). Só a **criação** de loja nova continua
@@ -768,6 +771,12 @@ descrevia um caminho impossível. Implementado em 2026-08-10.
   **não usar o preço enviado pela agência como referência de "taxa
   correta"** — é justamente ele que a conferência do passo 6 existe pra
   comparar.
+- **Tentativa sem entrega também gera vale cobrável, e cada nova tentativa
+  gera OUTRO vale** — decidido em 2026-09-11
+  (`docs/plano-pre-v1-2026-09-11.md`). Cliente ausente ou endereço errado
+  não apagam o serviço. O vale da nova tentativa fica ligado à MESMA
+  compra, e o valor da compra **não** soma de novo no fechamento. **Não
+  construído:** hoje um vale que já entrou numa corrida não sai outra vez.
 
 **O que a farmácia deve = `valor_entrega_cents - entrega_paga_cliente_cents`.**
 Na tela isso se chama **"A pagar à agência"** (ou só "A pagar" nas colunas
@@ -1397,7 +1406,8 @@ cache pra ele:
 
   **ISTO DESCREVE O ESTADO DE HOJE, NÃO UMA INVARIANTE.** O **E12**
   (contrato fechado em 2026-09-03, item 94 do NOTAS, código não
-  começado) resolve exatamente este limite com **reserva antecipada de
+  começado; **obrigatório antes do piloto desde 2026-09-11**, etapa 4C do
+  plano) resolve exatamente este limite com **reserva antecipada de
   numeração** — o talonão: com internet, o terminal reserva um bloco de
   números; offline, o vale nasce com número **definitivo**, e a saída
   segue com romaneio assinado, canônico e hashes intactos, sem exceção
@@ -3577,7 +3587,8 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
 ### A sequência pré-V1 revisada — decidida em 2026-09-08
 
 Substitui a ordem anterior (`E10 E11 E12 E6 E9 E7 E8 → STAGING → corte`).
-Vem de `docs/escopo-pre-v1-revisado.md`; **construídos até aqui: os passos 0, 1, 2 e 3.**
+Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
+`docs/plano-pre-v1-2026-09-11.md`; **construídos até aqui: os passos 0, 1, 2 e 3.**
 
 ```
 0.  alinhar a fonte de verdade ao escopo revisado   ✓ 2026-09-08
@@ -3585,17 +3596,53 @@ Vem de `docs/escopo-pre-v1-revisado.md`; **construídos até aqui: os passos 0, 
 1b. sem "Outro" — passo próprio   ✓ 2026-09-10 (migration aplicada)
 2.  "Cargo" · filial obrigatória · admin sem lançamento   ✓ 2026-09-11 (aplicado e aceito)
 3.  snapshot histórico da filial nos documentos   ✓ 2026-09-11 (aplicado)
-4.  concluir o contrato de assinaturas/envelope
-5.  fechamento diário calculado, com exceções e aprovação auditável
-6.  painel da agência: cobrança discriminada e conferência
-7.  corte/reset coordenado e aceite completo
-────────────────────────────────────────────────────────────
-    STAGING → produção → piloto em 1 filial
+4A. mapear ciclo do vale, tentativa e evidências — contrato, sem código   ← PRÓXIMO
+4B. implementar o contrato de assinaturas e envelope
+4C. continuidade offline completa, com E12 — obrigatória antes do piloto
+5.  conferência diária calculada, com exceções e aprovação versionada
+6.  painel da agência e conciliação por vale, por quinzena
+7A. staging e ensaio do corte
+7B. corte final, produção e piloto em 1 filial, com a agência
 ```
 
 **O passo 2 mudou de conteúdo em 2026-09-11.** O "E10 completo" saiu:
 na operação real o admin não lança vale (ver "E10"). No lugar dele, o
-admin deixou de ver as ações de lançamento.
+admin deixou de ver as ações de balcão — lançamento e, desde a revisão do
+plano no mesmo dia, também saída e retorno.
+
+**O plano de execução de 2026-09-11** (`docs/plano-pre-v1-2026-09-11.md`)
+reorganizou os passos 4 a 7 com respostas do usuário. Decisões confirmadas
+que mudam o desenho — **nenhuma construída**, fora a limpeza de interface
+do admin:
+
+- **O sistema substitui a planilha da farmácia E dá à agência uma
+  contraparte própria.** O piloto precisa das duas partes, e de saída e
+  retorno sem internet.
+- **O vale é a unidade de conferência.** "Marcos: dez vales, R$ 90" é
+  resumo; o sistema guarda QUAIS são os dez, senão não aponta o duplicado.
+  Nome ou endereço iguais não bastam para chamar de duplicidade.
+- **Pendência retém só o vale afetado.** Dez apresentados com um retido
+  aprovam R$ 81 e mantêm R$ 9 pendentes, com os três totais visíveis às
+  duas partes; o retido não é apagado, cancelado nem marcado como pago.
+- **A agência APRESENTA a cobrança**, com a própria lista, responsável,
+  horário e versão. Rascunho gerado não é a agência ter conferido;
+  correção vira revisão; referência sem correspondência vira divergência,
+  nunca entrega fictícia; reenviar não duplica.
+- **Aprovação operacional, aprovação da cobrança e pagamento são três
+  fatos distintos.** "Sem cobrança recebida" não é diferença zero.
+- **A farmácia paga a agência por quinzena, e a agência paga os
+  motoboys.** O repasse interno dela fica pós-V1, e **a antecipação
+  informal de dinheiro pelo motoboy fica FORA do sistema** por decisão
+  explícita — não é lacuna.
+- **Admin consulta e decide; não lança vale, não libera saída nem registra
+  retorno.** Gerente tem filial fixa e cobre o balcão ocasionalmente.
+
+**Abertas, a responder no 4A:** o calendário da quinzena e a competência
+de uma tentativa que atravessa o corte; até quando existe papel e como ele
+recebe o número digital; quem aprova a conferência e quem aprova a
+cobrança; o que acontece hoje sem cartão/PIN, com outro motoboy no retorno
+ou com todos os terminais offline; e as regras de cancelamento,
+transferência e busca posterior de documento.
 
 **Os passos 5 e 6 são duas frentes de produto ligadas.** O fechamento pode
 organizar as exceções operacionais antes de o painel existir, mas **não

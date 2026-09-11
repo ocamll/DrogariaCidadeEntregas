@@ -111,7 +111,7 @@ E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
 E5   login por username                 ✓  item 89 — aceite medido
 E10  admin operando por filial   SERVIDOR FECHADO (91–92) — cliente NÃO será feito (100)
 E11  visibilidade do offline     backlog, sem contrato
-E12  continuidade operacional offline  CONTRATO FECHADO (94), sem código
+E12  continuidade operacional offline  CONTRATO FECHADO (94), sem código — OBRIGATÓRIO antes do piloto (102)
 E6..E9  router, divergência, agência, endereço
 ```
 
@@ -124,11 +124,13 @@ pré-V1 revisado (`docs/escopo-pre-v1-revisado.md`):
 1  um vale sem adicional · convênio genérico · sem "Outro"   ← feito em 10/09
 2  "Cargo" · filial obrigatória · admin sem lançamento   ← feito em 11/09 (item 100)
 3  snapshot histórico da filial nos documentos   ← feito e aplicado em 11/09 (item 101)
-4  concluir o contrato de assinaturas/envelope
-5  fechamento diário com exceções e aprovação auditável
-6  painel da agência: cobrança discriminada e conferência
-7  corte/reset coordenado e aceite completo
-   → STAGING → produção → piloto em 1 filial
+4A mapear ciclo do vale, tentativa e evidências   ← próximo (item 102)
+4B implementar o contrato de assinaturas e envelope
+4C continuidade offline completa, com E12
+5  conferência diária calculada, com exceções e aprovação versionada
+6  painel da agência e conciliação por vale, por quinzena
+7A staging e ensaio do corte
+7B corte final, produção e piloto em 1 filial, com a agência
 ```
 
 **O E10 chegou a ser obrigatório (08/09) e saiu de novo (11/09, item
@@ -9867,6 +9869,8 @@ se faz isso só para montar teste.
   "Retorno de corrida" — a decisão foi sobre lançar vale, não sobre
   custódia. Admin sem filial em Nova corrida continua recebendo o aviso de
   conta sem loja, **pré-existente e não redesenhado**.
+  **REVISTO no mesmo dia (item 102):** saída e retorno também saíram da
+  experiência do admin.
 - **Apagados:** `src/lib/lojaOperacional.ts` e
   `src/data/lojaOperacional.tsx`. **Nunca tinham entrado num commit.**
   Consumidores conferidos antes: só importavam um ao outro; nenhum import,
@@ -10091,6 +10095,102 @@ R-000029  antes dela, sem a chave, join "Matriz"      → página: FILIAL RENOME
 SQL deixou de ser necessário para provar a leitura; continua possível, e é
 decisão do usuário.
 
+## 102. O plano de execução pré-V1 — operação, evidências e conciliação por vale
+
+**2026-09-11.** O usuário trouxe `plano-pre-v1-2026-09-11.md`, escrito numa
+revisão feita **fora desta sessão**, sobre o commit `26a5b53` e sem
+consultar o banco. Ele reorganiza os passos 4 a 7 e registra respostas do
+usuário que mudam o desenho. Entrou sem alteração em
+`docs/plano-pre-v1-2026-09-11.md` — os links dele apontam para caminhos
+locais desta máquina.
+
+### A decisão central
+
+O sistema **substitui a planilha da farmácia e dá à agência uma contraparte
+própria** para conferir os vales. O piloto precisa das duas partes, e de
+saída e retorno sem internet. Digitalizar o lançamento e continuar fechando
+a conta por fora não basta.
+
+### A limpeza de interface que veio junto — revisada antes do commit
+
+A revisão deixou mudanças sem commit. Lidas por diff e conferidas aqui:
+
+| mudança | conferido |
+|---|---|
+| Painel: "Nova corrida" e "Retorno de corrida" também saem do admin — os quatro fluxos de balcão, botões e destinos, só para caixa e gerente | na tela, logado no `camiloadmin0`: nenhum botão de ação no card |
+| cabeçalho do admin mostra "Todas as filiais" | "Camilo · Administrador · Todas as filiais" |
+| Documentos de convênio sem a coluna da empresa e sem o join com `convenios` | tabela com Vale · Cliente · Desde · ações |
+| Receitas sem a coluna que repetia "Receita" | **não visto**: não há receita pendente, e a tabela não renderiza vazia |
+| CLAUDE.md, seção E10 | deixa de dizer que saída e retorno continuam para o admin |
+
+Build ok, lint sem erros, 27 specs passando, e nenhuma leitura restante de
+`convenios(` ou `convenioNome` no cliente. **Isto revê o item 100**, que
+registrou saída e retorno como preservados para o admin.
+
+### As decisões confirmadas
+
+- **O vale é a unidade de conferência**, com a tarifa acordada por vale
+  (R$ 9); a corrida leva vários.
+- **Tentativa sem entrega gera vale cobrável; cada nova tentativa gera
+  outro vale**, ligado à mesma compra, sem somar a compra de novo. **Lacuna
+  aberta:** hoje vale que já entrou numa corrida não sai outra vez.
+- **Pendência de documento ou de acerto retém só o vale afetado** —
+  aprovação parcial, com totais apresentado, aprovado e retido visíveis às
+  duas partes.
+- **A agência apresenta cobrança explícita e versionada.** Correção vira
+  revisão; referência sem correspondência vira divergência, nunca entrega
+  fictícia; reenvio não duplica.
+- **Conferência operacional diária e conciliação da cobrança por período
+  são dois momentos**, e aprovação operacional, aprovação da cobrança e
+  pagamento são três fatos.
+- **A farmácia paga a agência por quinzena; a agência paga os motoboys.** O
+  repasse interno fica pós-V1. **A antecipação informal de dinheiro pelo
+  motoboy fica fora do sistema**, por decisão explícita.
+- **Admin consulta e decide, não opera balcão**; gerente cobre o balcão
+  ocasionalmente.
+- **O E12 é obrigatório antes do piloto**: vale criado durante a queda sai
+  e retorna antes de a rede voltar.
+
+### A sequência nova
+
+```
+4A  mapear ciclo do vale, tentativa e evidências — contrato, sem código
+4B  implementar o contrato de assinaturas e envelope
+4C  continuidade offline completa, com E12
+5   conferência diária calculada, com exceções e aprovação versionada
+6   painel da agência e conciliação por vale, por quinzena
+7A  staging e ensaio do corte
+7B  corte final, produção e piloto em 1 filial, com a agência
+```
+
+**O 4A tem seis cenários obrigatórios:** entrega concluída; tentativa
+malsucedida cobrável; novo vale para outra tentativa da mesma compra;
+retorno com divergência de pagamento; documento que não voltou; saída e
+retorno offline. O desenho não fecha só com o caminho feliz.
+
+### Achados de UX do plano, ainda não tratados
+
+- a lista global do admin não diz de que filial é cada vale;
+- "Não voltou" fecha o diálogo antes de confirmar a gravação — uma falha
+  apaga a justificativa e parece sucesso;
+- dar baixa de documento não mostra andamento nem falha;
+- o admin ainda cancela, notifica ocorrência e dá baixa de documento —
+  pede matriz por ação, porque baixa física é de quem recebeu o papel;
+- um painel só atende rotinas muito diferentes (caixa, gerente, admin,
+  agência);
+- a página rola para o lado.
+
+### Perguntas abertas, para o 4A
+
+1. O calendário exato da quinzena, e em que período entra uma tentativa
+   que atravessa o corte.
+2. Até quando existe papel, e como ele recebe o número digital.
+3. Quem aprova a conferência da filial e quem aprova a cobrança.
+4. O que acontece hoje sem cartão/PIN, com outro motoboy no retorno, ou
+   com todos os terminais offline.
+5. As regras de cancelamento antes da tentativa, de transferência e de
+   busca posterior de documento.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
@@ -10106,7 +10206,7 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: depois do passo 3
+### PRÓXIMA SESSÃO: o plano pré-V1 de 11/09 (item 102)
 
 > **Esta é a seção atual.** As de baixo são históricas: descrevem como
 > "próximo" coisas que já foram feitas.
@@ -10144,7 +10244,21 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > navegador, o `R-000031` continuou "Filial 02" e o antigo `R-000029` caiu
 > no nome atual, como decidido. O PDF não foi gerado.
 >
-> **Depois, o passo 4**: concluir o contrato de assinaturas/envelope.
+> **PLANO DE EXECUÇÃO PRÉ-V1, trazido pelo usuário em 2026-09-11** (item
+> 102, `docs/plano-pre-v1-2026-09-11.md`). O passo 4 virou 4A, 4B e 4C,
+> com o E12 obrigatório antes do piloto, e o painel da agência passou a
+> ser a contraparte da conciliação por vale. A limpeza de interface que
+> veio junto foi revisada e commitada.
+>
+> **O PRÓXIMO É O 4A, e ele é LEVANTAMENTO, não código:** a matriz de
+> evidências (retirada, entrega, retorno, convênio e receita, serviço
+> cobrável, exceções) com os seis cenários obrigatórios, e depois uma
+> proposta de contrato para decisão — antes de mexer em assinatura,
+> envelope ou documento.
+>
+> **Pendente de decisão do usuário:** o push da branch
+> `feat/e10-admin-filial`, que acumula os passos 0 a 3 e a limpeza do
+> plano.
 >
 > **Graphify ainda não**: uma atualização só, quando as próximas mudanças
 > de código e documentação estabilizarem.
