@@ -10427,8 +10427,12 @@ O que muda no desenho:
 - **bipar o cartão do gerente ABRE o fluxo excepcional**, em vez de
   mandar voltar ao cartão do motoboy — que é justamente o que não existe
   nos dois casos que a exceção atende;
-- **três motivos**, não dois: `cartao_perdido`, `pin_esquecido` e
-  `ambos`;
+- **dois motivos nomeados**: `cartao_perdido` e `pin_esquecido`. Cheguei a
+  escrever três, e o usuário desfez o `ambos` no mesmo dia, pelo processo:
+  cartão perdido é credencial NOVA do zero (o PIN daquele cartão nem existe
+  ainda), PIN esquecido é só reset. "Os dois" desemboca no primeiro — valor
+  que sempre cai no mesmo procedimento não é classificação, é sinônimo caro
+  (migration `20260911160000`);
 - **o motoboy é identificado sem cartão**: pelo nome na lista da agência
   (saída) ou pelo que a saída registrou (retorno). Ler o cartão dele,
   quando existir, é atalho — nunca requisito;
