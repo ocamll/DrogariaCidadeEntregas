@@ -4,9 +4,11 @@
 > 2026-09-08 o usuário fechou um escopo pré-V1 revisado que muda decisões
 > estruturais deste arquivo — um vale só, convênio genérico, fim da forma
 > "Outro", fechamento com aprovação, painel da agência e filial operacional
-> do admin.
+> do admin — **esta última revista em 2026-09-11: o admin não opera por
+> filial** (ver "E10").
 >
-> **Passo 1 e o "Outro" CONSTRUÍDOS (2026-09-10); o resto não.** Cada seção afetada aqui traz uma nota
+> **Passo 1 e o "Outro" CONSTRUÍDOS (2026-09-10); passo 2 CONSTRUÍDO em
+> 2026-09-11, com migration e Edge Function A APLICAR; o resto não.** Cada seção afetada aqui traz uma nota
 > datada de 2026-09-08 dizendo o que foi decidido e o que o código ainda
 > faz. Onde as duas coisas divergirem, **o código é o que está no ar e o
 > escopo é para onde ele vai** — não confunda um com o outro, e não trate
@@ -419,7 +421,7 @@ Alvo: 8 a 10 sessões de trabalho. Uma farmácia. Sem cobrança. Sem multi-tenan
 - [x] **Painel de admin criar/gerenciar usuários** — entrou **depois** de a
       checklist original fechar (era "Ideias futuras"), por pedido explícito.
       Sub-aba "Usuários" em Cadastros, só pra `admin`. Cria, edita
-      nome/papel/filial e bloqueia/libera acesso. Trouxe a primeira (e
+      nome/cargo/filial e bloqueia/libera acesso. Trouxe a primeira (e
       única) peça de backend do projeto — ver "Gestão de usuários" abaixo,
       que é onde estão as regras que não dá pra descobrir lendo só o código.
 
@@ -494,14 +496,27 @@ e confundi-las foi o bug original:
 | gerente | só a própria filial | **não** |
 | admin | todas as filiais | sim |
 
-> **NA TELA CHAMA-SE "CARGO" — decidido em 2026-09-08, ainda não
-> aplicado** (seção 6 do escopo revisado). O rótulo de produto passa a ser
+> **NA TELA CHAMA-SE "CARGO" — decidido em 2026-09-08, aplicado em
+> 2026-09-11** (seção 6 do escopo revisado, passo 2). O rótulo de produto é
 > **Cargo**, inclusive na listagem de usuários. **A coluna interna continua
 > `papel`**, e renomear literais em RLS, autenticação, `profiles.papel`,
 > `tipo_signatario` ou `papel_no_momento` **não faz parte disso** — são
 > literais que entram em policy e em hash, e trocá-los quebraria
 > verificação de documento já assinado (ver a armadilha do `|caixa|` na
 > seção do Romaneio de Retorno).
+
+**A filial é do cargo** — passo 2, 2026-09-11:
+
+| cargo | filial no cadastro |
+|---|---|
+| caixa, gerente | **obrigatória** — a tela recusa, a Edge Function recusa **antes** de criar o login, e o banco recusa pelo CHECK `profiles_filial_obrigatoria` (migration `20260911120000`) |
+| admin | **nenhuma** — o formulário esconde o campo e grava nula, na criação e na edição; a lista mostra "Todas as filiais" |
+
+**Admin antigo com filial NÃO foi atualizado em massa.** O perfil fica como
+está até alguém salvá-lo pelo formulário, e aí perde a filial. Não escreva
+"nenhum admin tem filial": nenhum admin **novo ou editado** tem. E para o
+que a tela decide — a lista, as ações de lançamento — quem manda é o
+cargo, nunca `lojaId`.
 
 - **`is_admin()` governa escopo de filial. `is_gerente()` governa
   capacidade de gestão.** Até 2026-08-12 quem liberava ver outra loja era
@@ -545,29 +560,47 @@ e confundi-las foi o bug original:
 
 ## E10 — admin operando por filial
 
-Pedido em 2026-09-01. O admin precisa **enxergar e filtrar** cada filial
-(suporte, e isso já existe em cinco telas) e **operar em nome de qualquer
-uma** — que é o que falta. Contrato completo nos **itens 91 e 92 do
-`NOTAS.md`**; aqui fica só o que muda a forma de trabalhar.
-
-**Virou OBRIGATÓRIO antes da V1 em 2026-09-08.** A seção 6 do escopo
-revisado esconde a filial do cadastro do administrador, e as três telas de
-escrita recusam quem não tem `profile.lojaId` — sem o E10, esconder o campo
-deixaria o admin sem conseguir operar nada. Até então ele era adiável.
+Pedido em 2026-09-01: o admin **enxergar e filtrar** cada filial (isso já
+existe em cinco telas) e **operar em nome de qualquer uma**. Contrato
+original nos **itens 91 e 92 do `NOTAS.md`**.
 
 ```
-E10.1  servidor   ✓ APLICADO   migration 20260902120000
-E10.2  cliente      snapshot da loja operacional + fila
-E10.3  seletor no cabeçalho (sessionStorage por auth.uid)
-E10.4  as três telas de escrita
+E10.1  servidor     ✓ APLICADO   migration 20260902120000
+E10.2  cliente      ✗ NÃO SERÁ CONSTRUÍDO — decisão de 2026-09-11
+E10.3  seletor      ✗ idem
+E10.4  três telas   ✗ idem
 ```
 
-**O E10.1 está aplicado e medido** — a guarda de competência vive dentro de
-`selar_romaneio_interno`, com o gate `antes == depois` do verificador e
-cinco cenários. **O cliente não começou.**
+**REVISTO EM 2026-09-11, olhando a operação real: o admin acompanha todas
+as filiais, mas não lança vale.** Por isso a seleção de filial operacional
+não existe — nem provider, nem seletor "OPERANDO EM", nem
+`sessionStorage`, nem escolha no login, nem congelamento de filial por
+formulário, nem campo novo na fila. Isso substitui, **nesse ponto**, a
+seção 6 do escopo revisado e a nota de 2026-09-08 que tornava o E10.2+
+obrigatório (item 100 do NOTAS).
 
-**A regra que quase quebrou tudo, e que vale para qualquer coisa nova
-dentro daquelas funções:**
+A razão: **"todas as filiais" é escopo de CONSULTA; um vale sempre pertence
+a UMA filial.** Um seletor global criaria escolha desnecessária e risco de
+lançar na filial errada — e uma tela em que o cabeçalho diz B enquanto o
+formulário segue em A. O congelamento protegeria o dado; a divergência de
+contexto continuaria difícil para quem usa.
+
+**O que o admin tem hoje:**
+
+- **não vê "Nova entrega" nem "Transferência"** (`Painel.tsx`). Decide o
+  **cargo**, nunca `profile.lojaId` — o admin antigo com Matriz no perfil
+  também não vê;
+- **isso é UX, não revogação.** A RLS de `entregas` continua aceitando
+  admin em qualquer filial do tenant, e nenhuma permissão SQL mudou. Não
+  apresente a falta dos botões como controle de acesso;
+- **consultas de todas as filiais e filtros por filial continuam**;
+- **Nova corrida e Retorno de corrida continuam visíveis**: a decisão foi
+  sobre lançar vale, não sobre custódia. Admin **sem** filial que abre
+  Nova corrida recebe o aviso de conta sem loja, como antes — esse fluxo
+  não foi redesenhado.
+
+**O E10.1 FICA**, e a regra dele continua valendo para qualquer coisa nova
+dentro das funções de selo:
 
 ```
 o ator é o PARÂMETRO, não a sessão
@@ -580,24 +613,13 @@ o ator é o PARÂMETRO, não a sessão
 A porta sincronizada é chamada pela Edge Function como `service_role`, onde
 **`auth.uid()` é NULL**. Uma guarda escrita com `is_admin()` recusaria
 **toda saída offline**, meses depois, sem ninguém ligar o sintoma à guarda.
+A guarda protege a selagem e **não pressupõe** que exista tela de operação
+para admin.
 
-**Do lado do cliente, três decisões que não se rediscutem:**
-
-- **`sessionStorage`, nunca `localStorage`.** Um admin que abre o sistema
-  dois dias depois e herda em silêncio "Operando em: Filial 02" da semana
-  passada lança na filial errada — e isso não se reescreve (regra 4).
-- **"Por operação" significa SNAPSHOT.** Trocar a filial no cabeçalho com
-  um formulário aberto **não** retargeta aquela operação, nem o que já está
-  na fila. Mesma disciplina da tarifa, que é capturada no cadastro e vai no
-  payload em vez de ser lida na hora do sync.
-- **`donoDaFila` não é sobrecarregado.** Dono do item local
-  (`userId`/`tenantId`/`lojaId`) e loja operacional são eixos distintos;
-  misturá-los faria a sincronização reler a seleção atual do admin, que é
-  exatamente o que o snapshot existe pra impedir.
-
-**Caixa e gerente não mudam:** `lojaOperacional = profile.lojaId`, sem
-seletor, sem override, e o servidor recusa outra loja. E **o frontend
-escolhe contexto, nunca concede competência** — quem recusa é o servidor.
+**Se um dia o admin passar a lançar vale, é decisão de produto NOVA**, não
+retomada de pendência. O item 91 fica como registro do desenho de
+2026-09-01; os dois arquivos que chegaram a ser escritos para ele foram
+apagados sem nunca entrarem num commit.
 
 ---
 
@@ -3415,6 +3437,9 @@ quanto menor a superfície que roda com `service_role`, melhor.
   checado contra lista fechada; a loja precisa ser do mesmo tenant.
 - **Só `admin`** cria/edita usuário — mais restrito que `is_gerente()`,
   que vale pro resto da gestão. Gerente não vê a sub-aba.
+- **Filial obrigatória para caixa e gerente, nula para admin** (passo 2,
+  2026-09-11) — na tela, na Edge Function antes do `createUser`, e no
+  banco pelo CHECK `profiles_filial_obrigatoria`. Ver "Quem vê o quê".
 - **Senha fica fora do app.** Definir a inicial faz parte da criação;
   trocar depois é feito direto no Supabase, decisão consciente pra não
   existir rota de reset.
@@ -3550,13 +3575,13 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
 ### A sequência pré-V1 revisada — decidida em 2026-09-08
 
 Substitui a ordem anterior (`E10 E11 E12 E6 E9 E7 E8 → STAGING → corte`).
-Vem de `docs/escopo-pre-v1-revisado.md`; **construídos até aqui: os passos 0 e 1.**
+Vem de `docs/escopo-pre-v1-revisado.md`; **construídos até aqui: os passos 0, 1 e 2** (o 2 com migration e Edge Function a aplicar).
 
 ```
 0.  alinhar a fonte de verdade ao escopo revisado   ✓ 2026-09-08
 1.  um vale sem adicional · convênio genérico       ✓ 2026-09-10
 1b. sem "Outro" — passo próprio   ✓ 2026-09-10 (migration aplicada)
-2.  "Cargo" · filial obrigatória · E10 completo (2, 3 e 4)
+2.  "Cargo" · filial obrigatória · admin sem lançamento   ✓ 2026-09-11 (a aplicar)
 3.  snapshot histórico da filial nos documentos
 4.  concluir o contrato de assinaturas/envelope
 5.  fechamento diário calculado, com exceções e aprovação auditável
@@ -3565,6 +3590,10 @@ Vem de `docs/escopo-pre-v1-revisado.md`; **construídos até aqui: os passos 0 e
 ────────────────────────────────────────────────────────────
     STAGING → produção → piloto em 1 filial
 ```
+
+**O passo 2 mudou de conteúdo em 2026-09-11.** O "E10 completo" saiu:
+na operação real o admin não lança vale (ver "E10"). No lugar dele, o
+admin deixou de ver as ações de lançamento.
 
 **Os passos 5 e 6 são duas frentes de produto ligadas.** O fechamento pode
 organizar as exceções operacionais antes de o painel existir, mas **não

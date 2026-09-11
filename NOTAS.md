@@ -109,7 +109,7 @@ E2   estados visuais de consulta     ✓  item 86 — 18 de 18 migrados
 E3   id próprio do pagamento previsto  ✓  item 87 — aplicada e conferida
 E4   duas formas de pagamento no cadastro  ✓  itens 88 e 90 — E2E aceito
 E5   login por username                 ✓  item 89 — aceite medido
-E10  admin operando por filial   SERVIDOR FECHADO (91–92) — falta cliente
+E10  admin operando por filial   SERVIDOR FECHADO (91–92) — cliente NÃO será feito (100)
 E11  visibilidade do offline     backlog, sem contrato
 E12  continuidade operacional offline  CONTRATO FECHADO (94), sem código
 E6..E9  router, divergência, agência, endereço
@@ -121,8 +121,8 @@ pré-V1 revisado (`docs/escopo-pre-v1-revisado.md`):
 
 ```
 0  alinhar CLAUDE.md/NOTAS ao escopo revisado   ← feito em 08/09
-1  um vale sem adicional · convênio genérico · sem "Outro"
-2  "Cargo" · filial obrigatória · E10 completo (2, 3 e 4)
+1  um vale sem adicional · convênio genérico · sem "Outro"   ← feito em 10/09
+2  "Cargo" · filial obrigatória · admin sem lançamento   ← feito em 11/09 (item 100)
 3  snapshot histórico da filial nos documentos
 4  concluir o contrato de assinaturas/envelope
 5  fechamento diário com exceções e aprovação auditável
@@ -131,8 +131,10 @@ pré-V1 revisado (`docs/escopo-pre-v1-revisado.md`):
    → STAGING → produção → piloto em 1 filial
 ```
 
-**O E10 deixou de ser adiável**: a decisão de esconder a filial do cadastro
-do admin torna as três telas de escrita inoperantes para ele sem o E10.2+.
+**O E10 chegou a ser obrigatório (08/09) e saiu de novo (11/09, item
+100)**: na operação real o admin acompanha todas as filiais e não lança
+vale, então esconder a filial do cadastro dele não exige seleção
+operacional nenhuma.
 E o **painel da agência saiu da lista "Fora"** do `CLAUDE.md` — é a maior
 frente nova, não um item de limpeza.
 
@@ -9618,6 +9620,10 @@ Nada foi criado nem alterado: preparar o cenário é decisão do usuário.
 
 ### O aceite do E10, nas palavras do usuário
 
+> **SUBSTITUÍDO em 2026-09-11 (item 100).** A seleção operacional não
+> será construída, e o teste A→B deixou de ser requisito. O aceite do
+> passo 2 está no item 100.
+
 - **principal** (sem filial): escolhe uma filial e opera nela;
 - **controle** (admin com Matriz): escolhe **outra** filial sem perder a
   visão administrativa;
@@ -9780,6 +9786,131 @@ responderam normalmente — a correção está no item 97.
 aspas (o script de patch e esta gravação), sem executar nada. A saída foi
 escrever o conteúdo como arquivo e rodar o arquivo.
 
+## 100. Passo 2 — "Cargo", filial obrigatória, e o admin que não lança vale
+
+**2026-09-11. O plano mudou antes do código.** O plano apresentado era
+"Cargo" + filial obrigatória + **E10 completo**: seletor "OPERANDO EM" no
+cabeçalho, `sessionStorage` por usuário, congelamento de filial por
+formulário. Antes da primeira linha, o usuário reviu a operação real:
+
+> o administrador acompanha todas as filiais, mas hoje não lança vales nas
+> farmácias. Portanto, não vamos construir a seleção de filial operacional.
+
+### Por que mudou
+
+- **"Todas as filiais" é escopo de consulta; um vale sempre pertence a uma
+  filial específica.** Como o admin não lança, um seletor global só criaria
+  escolhas desnecessárias e risco de operar na filial errada.
+- **Cabeçalho em B, formulário em A.** O congelamento protegeria o dado,
+  mas a divergência de contexto continuaria difícil para quem usa.
+
+Isso substitui, **nesse ponto**, a seção 6 do escopo revisado e a nota de
+08/09 (item 96) que tornara o E10.2+ obrigatório. A escolha "começar na
+Matriz ou exigir seleção" **deixou de existir**: o admin entra na visão
+administrativa sem informar onde está. **O E10.1 fica** — a guarda protege
+a selagem e não pressupõe tela de operação para admin.
+
+### 2a — Cargo e filial obrigatória (`f796af0`)
+
+```
+UsuariosCadastro.tsx   "Papel" → "Cargo" na tabela e no formulário
+                       caixa/gerente: filial obrigatória; criação começa em
+                         branco (`disabled hidden`), a lista aberta só tem
+                         filiais; edição mostra a cadastrada
+                       admin: campo some, salvar manda lojaId nulo —
+                         inclusive na EDIÇÃO
+                       trocar para admin limpa; voltar exige escolher
+                       lista: admin = "Todas as filiais", pelo cargo
+criar-usuario          recusa caixa/gerente sem filial ANTES do createUser;
+                       admin descarta a filial que vier no corpo
+20260911120000         CHECK validado `profiles_filial_obrigatoria`
+                       + pré-voo que PARA (não preenche por suposição)
+                       + três conferências no rodapé
+corte-pre-v1.sql       o modelo do primeiro admin grava loja_id nulo
+```
+
+**Preservados:** a coluna `papel`, os valores dos cargos, e o "Papel que
+saiu com o motoboy" do retorno, que é documento físico.
+
+**Por que CHECK e não trigger:** `fn_profiles_protege_campos` decide QUEM
+pode mudar a coluna; esta regra é sobre QUE valor é válido, para qualquer
+um — `service_role` e SQL Editor incluídos. Um CHECK cobre a criação
+(insert da Edge Function, que já apagava o login em erro de perfil) e a
+edição (UPDATE do painel).
+
+**A conferência (b) do rodapé tem um detalhe que custaria um falso
+alarme:** no SQL Editor não há `auth.uid()`, e o trigger de proteção
+barraria o UPDATE **antes** do CHECK, com outro erro. O bloco assume a
+identidade de um admin ativo só na transação (`set_config(..., true)`),
+como o PostgREST faz com o JWT, e nos dois desfechos não grava nada.
+
+**O censo não foi refeito em 11/09**: o painel do navegador estava sem
+sessão, e daqui não se digita senha. O de 10/09 (item 98) tinha zero
+caixa/gerente sem filial. **Quem garante é o pré-voo.**
+
+**A DISTINÇÃO QUE NÃO PODE VIRAR FRASE ERRADA:** admins antigos **não**
+foram atualizados em massa. O perfil fica como está até alguém salvá-lo
+pelo formulário, que então aplica `lojaId: null`. Não escreva "nenhum admin
+tem filial" — nenhum admin **novo ou editado** tem. Consequência prática:
+o `camiloadmin0` (controle, Matriz) **perde a Matriz** se alguém salvar o
+próprio cadastro pelo painel. É a regra funcionando, não acidente — e não
+se faz isso só para montar teste.
+
+### 2b — o admin sem lançamento, e a preparação do E10 apagada
+
+- **`Painel.tsx`**: `lancaVale = papel é caixa ou gerente`. Sem ele, os
+  botões "Transferência" e "Nova entrega" não aparecem, e as duas views
+  também não renderizam. **Decide o cargo**, nunca `lojaId`.
+- **É UX, não revogação.** Nenhuma policy mudou; a RLS de `entregas`
+  continua aceitando admin.
+- **Preservados:** consultas e filtros por filial, "Nova corrida" e
+  "Retorno de corrida" — a decisão foi sobre lançar vale, não sobre
+  custódia. Admin sem filial em Nova corrida continua recebendo o aviso de
+  conta sem loja, **pré-existente e não redesenhado**.
+- **Apagados:** `src/lib/lojaOperacional.ts` e
+  `src/data/lojaOperacional.tsx`. **Nunca tinham entrado num commit.**
+  Consumidores conferidos antes: só importavam um ao outro; nenhum import,
+  nenhuma spec. Nada deles servia a outro fluxo — o `sessionStorage`
+  guardado só existia para a seleção.
+
+### O que foi medido
+
+```
+build            ok, nos dois estados (2a e 2b)
+lint             0 erros; os 2 avisos de lojaOperacional.tsx sumiram com ele
+specs            26 passando + a geradora dcrr1-sql (exit 0), nos dois estados
+consulta-render  passa com `npx tsx --tsconfig tsconfig.app.json`;
+                 com `npx tsx` puro continua `React is not defined` —
+                 a falha antiga, do EXECUTOR (item 98), inalterada
+referências      zero a lojaOperacional em .ts .tsx .mts .js .json .sql
+```
+
+### O aceite que falta — depende do usuário
+
+1. **Aplicar `20260911120000`** no SQL Editor e rodar as conferências
+   (a), (b) e (c) do rodapé.
+2. **Republicar `criar-usuario`** (dashboard → Deploy; salvar no editor não
+   publica). Antes disso, criar caixa sem filial ainda passa pela função
+   ANTIGA: ela cria o login, o CHECK recusa o perfil e o login é apagado —
+   recusado, mas pelo caminho caro.
+3. **Entrar com as contas**:
+
+| caso | conta | esperado |
+|---|---|---|
+| admin novo, sem filial | `camiloadmin` | sem "Nova entrega" e "Transferência"; Fechamento, Relatórios e Auditoria com todas as filiais e filtro |
+| admin antigo, com filial | `camiloadmin0` (Matriz) | igual ao de cima — decide o cargo |
+| restrição | caixa nova criada pelo painel (escolha do item 98) | vê os dois botões; enxerga só a própria filial; cadastro sincroniza |
+
+4. **Formulário**: caixa sem filial é recusado na tela; trocar para admin
+   some o campo; voltar para caixa volta em branco; editar caixa mostra a
+   filial cadastrada.
+
+**Saiu do aceite:** enfileirar na filial A e trocar para B — a
+funcionalidade não existe. A cobertura da fila continua a das specs.
+
+**Graphify: não atualizar agora.** Uma atualização só, quando as próximas
+mudanças de código e documentação estabilizarem.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
@@ -9795,44 +9926,41 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: depois do passo 1
+### PRÓXIMA SESSÃO: depois do passo 2
 
 > **Esta é a seção atual.** As de baixo são históricas: descrevem como
 > "próximo" coisas que já foram feitas.
 >
-> **Atualizada em 2026-09-10.** Passo 0 **feito** (item 96) e passo 1
-> **feito** (item 97): um vale sem adicional e convênio genérico,
-> provados de ponta a ponta com o vale de teste `V-000062`.
+> **Atualizada em 2026-09-11.** Passos 0 e 1 **feitos** (itens 96 e 97),
+> o "Outro" **feito e aplicado** (item 99), e o **passo 2 feito em código**
+> (item 100), em dois commits.
 >
-> **ESCOLHIDO em 2026-09-10: "Outro" agora, depois o passo 2**, cada um
-> com escopo e commit próprios. O contrato do "Outro", nas palavras do
-> usuário:
+> **O PASSO 2 MUDOU DE CONTEÚDO em 2026-09-11**, por decisão do usuário
+> depois de rever a operação real: o admin acompanha todas as filiais e
+> **não lança vale**. A seleção de filial operacional (E10.2, E10.3, E10.4)
+> **não será construída**, e os dois arquivos antecipados foram apagados.
+> Entraram no lugar: "Cargo", filial obrigatória para caixa e gerente
+> (tela, Edge Function e CHECK), e o admin sem "Nova entrega" nem
+> "Transferência".
 >
-> - sai das opções de **cadastro, divergência e retorno**;
-> - validação do **cliente e do servidor** recusa em operações NOVAS;
-> - leitura e verificação dos **documentos históricos** preservadas até
->   o corte;
-> - **nenhuma** mudança no formato canônico, **nenhuma** conversão de
->   pagamento antigo;
-> - `outro` **continua** sendo motivo de insucesso.
+> **PENDENTE DO USUÁRIO antes do aceite do passo 2:**
 >
-> **ESTADO em 2026-09-10 (item 99): o "Outro" está CONSTRUÍDO, e a
-> migration `20260910120000` está APLICADA e conferida** — CHECK validado
-> sem `outro`, 66 de 66 vetores no SQL Editor, verificador em 20 · 20 · 0.
+> 1. aplicar `20260911120000_caixa_e_gerente_exigem_filial.sql` no SQL
+>    Editor e rodar as três conferências do rodapé;
+> 2. republicar a Edge Function `criar-usuario`;
+> 3. entrar com as contas do aceite (item 100) — daqui não se digita senha.
 >
-> **O próximo é o passo 2** ("Cargo", filial obrigatória, E10 completo).
-> Antes de montar o cenário, uma decisão do usuário está aberta: o caso
-> de restrição do E10 (item 98) — nenhuma conta de caixa ou gerente está
-> no domínio do E5, então nenhuma entra pela tela atual.
+> **Depois, o passo 3**: snapshot histórico da filial nos documentos.
 >
-> **O E10.2 não foi cancelado — virou o passo 2**, e passou de adiável a
-> obrigatório. O detalhe técnico dele continua válido e está logo abaixo;
-> só mudou a posição na fila. Dois arquivos dele chegaram a ser escritos
-> em 08/09 (`src/lib/lojaOperacional.ts`, `src/data/lojaOperacional.tsx`),
-> **não referenciados por nada** — conferir se ainda fazem sentido antes
-> de reaproveitar.
+> **Graphify ainda não**: uma atualização só, quando as próximas mudanças
+> de código e documentação estabilizarem.
 
 #### Estado exato — LIDO DO `git log`, não de memória
+
+> **ENVELHECIDO: é o estado de 2026-09-02.** Em 2026-09-11 a branch tinha
+> também os passos 0, 1, o "Outro" e o passo 2 (itens 96 a 100), **sem
+> push**. Leia `git log --oneline main..feat/e10-admin-filial` em vez
+> deste bloco.
 
 ```
 main                    29e93e1   E5 mergeado
@@ -9852,13 +9980,13 @@ scripts/e10-cenarios-competencia.sql
 supabase/migrations/20260902120000_admin_operando_por_filial_saida.sql
 ```
 
-#### O E10.1 FECHOU. O que falta é cliente.
+#### O E10.1 FECHOU. O cliente NÃO será feito (item 100)
 
 ```
 E10.1  servidor    ✓ aplicado · gate antes==depois · 5 cenários medidos
-E10.2  cliente     ← AQUI: snapshot da loja operacional + fila
-E10.3  seletor no cabeçalho (sessionStorage por auth.uid)
-E10.4  as três telas de escrita
+E10.2  cliente     ✗ não será construído — decisão de 2026-09-11
+E10.3  seletor     ✗ idem
+E10.4  três telas  ✗ idem
 ```
 
 Detalhe no item 92. O essencial para retomar: a guarda está viva em
@@ -9867,15 +9995,14 @@ cinco cenários; `admin` com `loja_id` NULO **opera** numa filial válida
 do tenant, que é o caso que o `camiloadmin` existe para provar.
 
 **Um item do servidor continua sem prova, e nenhum SQL o alcança:** a
-saída offline via `service_role`. Ele fica coberto naturalmente quando o
-cliente existir e alguém fizer uma saída offline de verdade — não vale
+saída offline via `service_role`. Ele fica coberto naturalmente na próxima
+vez que alguém fizer uma saída offline de verdade — não vale
 forçar antes.
 
-**O contrato do cliente está no item 91** e não se rediscute:
-`sessionStorage` por `auth.uid` (não `localStorage`); a operação
-**congela** a loja ao iniciar e trocar o cabeçalho depois não retargeta
-formulário, fila nem corrida; `donoDaFila` **não** é sobrecarregado —
-dono e loja operacional são eixos distintos; caixa e gerente não mudam.
+**O contrato do cliente do item 91 foi ABANDONADO em 2026-09-11** (item
+100): na operação real o admin não lança vale. Ele fica como registro do
+desenho, não como pendência — se um dia o admin passar a lançar, é
+decisão de produto nova.
 
 #### A LIÇÃO QUE ESTA SEÇÃO CUSTOU — leia antes de escrever estado aqui
 
@@ -9968,7 +10095,7 @@ não encolher entre duas medições.
 Rode SEMPRE como admin: `verificar_integridade_resumo` é
 `security invoker` e devolve baseline parcial sem avisar.
 
-#### E10 — o contrato está no item 91. O essencial:
+#### E10 — o contrato está no item 91 (o cliente foi abandonado em 11/09, item 100). O essencial do servidor, que FICA:
 
 **Metade já existe.** Enxergar/filtrar por filial está pronto em cinco
 telas, e a RLS já tem `is_admin() or loja_id = current_loja_id()` no

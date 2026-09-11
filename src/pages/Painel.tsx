@@ -21,11 +21,23 @@ type View = 'lista' | 'nova' | 'nova-transferencia' | 'nova-corrida' | 'retorno-
 export function Painel({ profile }: { profile: AuthProfile }) {
   const [view, setView] = useState<View>('lista')
 
-  if (view === 'nova') {
+  // LANÇAR VALE É DE QUEM ESTÁ NO BALCÃO — passo 2, 2026-09-11. O admin
+  // acompanha todas as filiais e não lança vale, então "Nova entrega" e
+  // "Transferência" não existem pra ele.
+  //
+  // Decide o CARGO, nunca `profile.lojaId`: o admin antigo ainda tem Matriz
+  // no perfil, e nem por isso lança. E é UX, não permissão — a RLS de
+  // `entregas` continua aceitando admin; nada mudou no servidor.
+  //
+  // Saída e retorno de corrida continuam para todos, de propósito: essa
+  // decisão foi sobre lançar vale, não sobre a custódia.
+  const lancaVale = profile.papel === 'caixa' || profile.papel === 'gerente'
+
+  if (view === 'nova' && lancaVale) {
     return <CadastroEntrega profile={profile} onVoltar={() => setView('lista')} />
   }
 
-  if (view === 'nova-transferencia') {
+  if (view === 'nova-transferencia' && lancaVale) {
     return <CadastroTransferencia profile={profile} onVoltar={() => setView('lista')} />
   }
 
@@ -51,16 +63,18 @@ export function Painel({ profile }: { profile: AuthProfile }) {
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Entregas</CardTitle>
           <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setView('nova-transferencia')}>
-              Transferência
-            </Button>
+            {lancaVale && (
+              <Button variant="outline" onClick={() => setView('nova-transferencia')}>
+                Transferência
+              </Button>
+            )}
             <Button variant="outline" onClick={() => setView('retorno-corrida')}>
               Retorno de corrida
             </Button>
             <Button variant="outline" onClick={() => setView('nova-corrida')}>
               Nova corrida
             </Button>
-            <Button onClick={() => setView('nova')}>Nova entrega</Button>
+            {lancaVale && <Button onClick={() => setView('nova')}>Nova entrega</Button>}
           </div>
         </CardHeader>
         <CardContent>
