@@ -9759,9 +9759,11 @@ verificador não foi rodado IMEDIATAMENTE antes de aplicar; a comparação
 é contra o item 92. Como a migration não toca em documento, e o conjunto
 fecha na mesma contagem, não há o que explicar.
 
-**Recomendado, e não bloqueante:** rodar o `conferir-outro.sql` de novo
-no SQL Editor fecha os 66 de 66 no instrumento original. A única linha
-que falhou já foi re-medida acima.
+**Fechado no instrumento original, em 2026-09-10:** o usuário rodou o
+`conferir-outro.sql` de novo no SQL Editor, agora contra o banco
+migrado, e deu **66 de 66** — os 18 inválidos (I018 incluído) e os 16
+válidos × texto/bytes/hash. A contradição da primeira rodada sumiu
+exatamente onde o diagnóstico dizia que sumiria.
 
 **E um cuidado com o meu próprio instrumento:** a primeira leitura por
 documento filtrou colunas que não existem (`ok`/`valido`) e devolveu um
@@ -9816,7 +9818,7 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 >
 > **ESTADO em 2026-09-10 (item 99): o "Outro" está CONSTRUÍDO, e a
 > migration `20260910120000` está APLICADA e conferida** — CHECK validado
-> sem `outro`, 18 de 18 vetores inválidos, verificador em 20 · 20 · 0.
+> sem `outro`, 66 de 66 vetores no SQL Editor, verificador em 20 · 20 · 0.
 >
 > **O próximo é o passo 2** ("Cargo", filial obrigatória, E10 completo).
 > Antes de montar o cenário, uma decisão do usuário está aberta: o caso

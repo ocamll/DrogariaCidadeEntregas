@@ -2892,7 +2892,7 @@ juntas**.
 > e foi gerada por `scripts/patch-validar-retorno-outro.mts`, que prova
 > que nada fora da lista de formas mudou. **Não edite o bloco do
 > validador à mão.** Conferida ao aplicar: CHECK validado sem `outro`,
-> 18 de 18 vetores inválidos, verificador em 20 · 20 · 0.
+> 66 de 66 vetores DCRR1 no SQL Editor, verificador em 20 · 20 · 0.
 >
 > **Escolher ≠ exibir.** `FORMAS_ACEITAS` (em `lib/formasDePagamento.ts`)
 > governa o que se OFERECE. `FormaPagamento` e `FORMA_PAGAMENTO_LABEL`
