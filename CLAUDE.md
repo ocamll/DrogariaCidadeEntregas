@@ -1248,16 +1248,24 @@ Construído em 2026-08-16, em seis etapas. A saída da tele deixou de ser
 > apenas cartão e pin."* A evidência do motoboy passa a ser **cartão + PIN**;
 > a da farmácia, a **sessão com um ato explícito de confirmar** o conteúdo.
 > O **gerente ganha credencial própria** (cartão + PIN), usada quando o
-> motoboy **perdeu o cartão**, na saída e no retorno — sem travar o fluxo. O
-> documento registra que quem validou foi o gerente, sem fingir a validação
-> do motoboy. PIN esquecido não precisa dela: redefine-se o PIN.
+> motoboy **perdeu o cartão ou esqueceu o PIN** — os dois motivos, nomeados —,
+> na saída e no retorno, sem travar o fluxo. O documento registra que quem
+> autorizou foi o gerente, **sem fingir a validação do motoboy**, e **o vale
+> continua atribuído ao motoboy que fez a tentativa**: o cartão apresentado
+> nunca vira o responsável pelo serviço. O **mesmo gerente pode** confirmar
+> pela farmácia e autorizar a exceção, com as duas responsabilidades
+> registradas em separado. Redefinir PIN continua sendo ato do admin, online,
+> e o gerente **avisa a necessidade** — a autorização vale só para aquela
+> operação.
 >
 > Tudo o que esta seção descreve sobre traços (`strokes`, canvas, as duas
 > assinaturas, `signature_pad`) **continua sendo o código de hoje** e sai no
 > 4B, com versão nova das fórmulas de `signature_hash` e do hash do evento
 > offline, lida da própria linha. **Os bytes de DCR1 e DCRR1 não mudam**: os
-> traços nunca entraram no canônico. Detalhe na seção 12 de
-> `docs/levantamento-4a-2026-09-11.md`.
+> traços nunca entraram no canônico. Decisões na seção 12 de
+> `docs/levantamento-4a-2026-09-11.md`; **o desenho, já revisado, está em
+> `docs/desenho-4b-2026-09-11.md` (versão 2)** — leia-o antes da primeira
+> linha de código do 4B.
 
 ```
 CARTÃO  → quem é?        identifica a credencial física
@@ -3617,7 +3625,7 @@ Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
 2.  "Cargo" · filial obrigatória · admin sem lançamento   ✓ 2026-09-11 (aplicado e aceito)
 3.  snapshot histórico da filial nos documentos   ✓ 2026-09-11 (aplicado)
 4A. mapear ciclo do vale, tentativa e evidências   ✓ 2026-09-11 (decisões respondidas)
-4B. cartão, PIN e confirmação, sem assinatura manuscrita — desenho em docs/desenho-4b-2026-09-11.md   ← AQUI
+4B. cartão, PIN e confirmação, sem assinatura manuscrita — desenho v2 (revisado) em docs/desenho-4b-2026-09-11.md   ← AQUI
 4C. continuidade offline: abrir o app sem rede (Service Worker + Cache API), telas no estado local e E12 — obrigatória antes do piloto
 5.  conferência diária calculada, com exceções e aprovação versionada
 6.  painel da agência e conciliação por vale, por quinzena

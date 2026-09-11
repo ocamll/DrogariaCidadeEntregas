@@ -10351,12 +10351,45 @@ filial validando com o cartão dele quando o motoboy perdeu o próprio.
 - **Seis etapas testáveis**, de 4B.1 (credencial do gerente) a 4B.6
   (aceite com nove casos).
 
-**Duas perguntas de produto ficaram:**
+**A REVISÃO DO USUÁRIO, INCORPORADA NO MESMO DIA — o documento no
+repositório é a VERSÃO 2** (a 1 fica no commit `9698fba`). O que ela mudou, e
+que é o que não dá para ler no diff:
 
-1. o gerente logado no balcão pode confirmar pela farmácia e validar no
-   lugar do motoboy ao mesmo tempo? (recomendação: sim, dito no documento)
-2. validar pelo gerente avisa o admin para revogar e reemitir o cartão
-   perdido? (recomendação: sim, em Notificações, sem bloquear)
+- **a exceção tem DOIS motivos nomeados** — `cartao_perdido` e
+  `pin_esquecido` —, e nunca uma exceção genérica: cada um pede uma
+  providência diferente do admin. Isso supera o limite da versão 1, que só
+  previa cartão perdido;
+- **as duas perguntas de produto foram respondidas.** O mesmo gerente **pode**
+  confirmar pela farmácia e autorizar a exceção, com as responsabilidades
+  separadas no documento; e o aviso ao admin fica **confirmado para PIN
+  esquecido** (pendência acompanhada) e **ainda proposta** para cartão perdido;
+- **a atribuição do vale virou regra escrita:** o vale é do motoboy da
+  saída, o cartão apresentado nunca vira responsável, e **não se cria uma
+  segunda atribuição** — a relação com a corrida já responde. Daí sai a
+  consequência para o fechamento: pendência de PIN não retém, sozinha, vale de
+  operação que o gerente autorizou;
+- **conflito guarda o que foi APRESENTADO e o RESULTADO.** Apresentar cartão
+  não é ter sido aceito, e PIN errado do gerente não pode ficar gravado como
+  "gerente validou";
+- **a transição ganhou pausa da operação**: drenar as filas sem apagar nada,
+  aplicar, recarregar todos os terminais e só então retomar.
+
+**Três leituras degradam em SILÊNCIO com cartão de gerente, e isso foi
+medido no código, não suposto:** `identificar_credencial` faz
+`join mototaxistas` com `m.ativo` e devolveria **zero linhas** — resposta
+idêntica a "cartão não existe"; `log_credencial` usa o mesmo join e cairia no
+fallback com só o `credencial_id`, sem nome nem `public_id`; e o cache offline
+(`credenciais.ts`) voltaria com o bloco do motoboy nulo. As três entram na
+4B.1.
+
+**E dois detalhes do código que mudam texto de tela:** `redefinir_pin` só
+**zera** o PIN (`pin_hash = null`) e `definir_pin` recusa enquanto houver um —
+ou seja, **reset feito ≠ credencial pronta**, o motoboy ainda cadastra o PIN
+novo com o cartão, online (`definir_pin` exige sessão: criar PIN é online por
+construção). E `SELECT_ASSINATURAS` usa `profiles(nome)`: com
+`validador_profile_id`, `assinaturas` passa a ter **duas FKs para `profiles`**,
+que é o `PGRST201` que o Registro de Auditoria já pagou uma vez — precisa de FK
+explícita e alias, ou a página do romaneio para de abrir.
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
@@ -10431,8 +10464,10 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 >
 > **Nenhuma pergunta do 4A bloqueia mais nada.**
 >
-> **O DESENHO DO 4B ESTÁ PRONTO (item 105):** `docs/desenho-4b-2026-09-11.md`.
-> Faltam duas respostas de produto (seção 10 dele) antes da etapa 4B.1.
+> **O DESENHO DO 4B ESTÁ PRONTO E REVISADO (item 105):**
+> `docs/desenho-4b-2026-09-11.md`, versão 2. **Nada de produto bloqueia a
+> 4B.1** — a única coisa em aberto é se o aviso ao admin também vale para
+> cartão perdido, e ela não impede começar pela credencial do gerente.
 >
 > **Depois:** o 4B implementa o contrato de evidências escolhido; o 4C
 > precisa das três partes (Service Worker + Cache API, telas no estado
