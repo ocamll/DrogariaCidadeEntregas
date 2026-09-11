@@ -77,7 +77,7 @@ export function UsuariosCadastro({ profile }: { profile: AuthProfile }) {
             <TableRow>
               <TableHead>Nome</TableHead>
               <TableHead>Usuário</TableHead>
-              <TableHead>Papel</TableHead>
+              <TableHead>Cargo</TableHead>
               <TableHead>Filial</TableHead>
               <TableHead>Acesso</TableHead>
               <TableHead />
@@ -94,7 +94,12 @@ export function UsuariosCadastro({ profile }: { profile: AuthProfile }) {
                   </TableCell>
                   <TableCell>{usernameDoEmail(usuario.email)}</TableCell>
                   <TableCell>{PAPEL_USUARIO_LABEL[usuario.papel] ?? usuario.papel}</TableCell>
-                  <TableCell>{usuario.lojaNome ?? '—'}</TableCell>
+                  {/* Decide o CARGO, não `lojaId`: um admin antigo ainda
+                      pode ter Matriz no perfil, e o alcance dele continua
+                      sendo a rede inteira. */}
+                  <TableCell>
+                    {usuario.papel === 'admin' ? 'Todas as filiais' : (usuario.lojaNome ?? '—')}
+                  </TableCell>
                   <TableCell>
                     {/* Bloquear a própria conta te deixa de fora do sistema
                         na hora, e só outro admin conseguiria devolver o
@@ -161,13 +166,27 @@ function UsuarioFormDialog({
   const [username, setUsername] = useState('')
   const [senha, setSenha] = useState('')
   const [papel, setPapel] = useState<PapelUsuario>(usuario?.papel ?? 'caixa')
-  const [lojaId, setLojaId] = useState(usuario?.lojaId ?? '')
+  // A filial de um admin antigo NÃO entra no estado. Escondida no
+  // formulário, ela iria junto no salvar; e reapareceria preenchida ao
+  // trocar o cargo para caixa, sem ninguém tê-la escolhido.
+  const [lojaId, setLojaId] = useState(
+    usuario && usuario.papel !== 'admin' ? (usuario.lojaId ?? '') : ''
+  )
   const [erro, setErro] = useState<string | null>(null)
 
   const { data: lojas } = useLojas()
   const criar = useCriarUsuario()
   const editar = useEditarUsuario()
   const salvando = criar.isPending || editar.isPending
+
+  const exigeFilial = papel === 'caixa' || papel === 'gerente'
+
+  function trocarPapel(novo: PapelUsuario) {
+    setPapel(novo)
+    // Limpa, e não guarda para depois: voltar para caixa ou gerente tem
+    // que ser uma escolha nova, feita olhando para o campo.
+    if (novo === 'admin') setLojaId('')
+  }
 
   function handleSalvar() {
     const nomeTrim = normalizarNome(nome)
@@ -186,7 +205,11 @@ function UsuarioFormDialog({
     // O gerente entrou aqui junto com a correção do texto de ajuda logo
     // abaixo, que dizia o CONTRÁRIO ("admin e gerente enxergam todas as
     // filiais") e por isso induzia exatamente essa configuração.
-    if ((papel === 'caixa' || papel === 'gerente') && !lojaId) {
+    //
+    // Desde o passo 2 (2026-09-11) o BANCO também recusa, com o CHECK
+    // `profiles_filial_obrigatoria`. Validar aqui é só pra o admin ver o
+    // problema antes do round-trip.
+    if (exigeFilial && !lojaId) {
       setErro(
         papel === 'caixa'
           ? 'Caixa precisa de uma filial — sem ela não consegue lançar entrega.'
@@ -196,9 +219,13 @@ function UsuarioFormDialog({
     }
     setErro(null)
 
+    // Admin sai com filial NULA, inclusive na edição de um admin antigo
+    // que tinha Matriz: salvar pelo formulário aplica a regra de hoje.
+    const lojaDoCadastro = exigeFilial ? lojaId : null
+
     if (editando) {
       editar.mutate(
-        { id: usuario.id, nome: nomeTrim, papel, lojaId: lojaId || null },
+        { id: usuario.id, nome: nomeTrim, papel, lojaId: lojaDoCadastro },
         { onSuccess: () => onOpenChange(false), onError: (e) => setErro(e.message) }
       )
       return
@@ -218,7 +245,7 @@ function UsuarioFormDialog({
     }
 
     criar.mutate(
-      { username, senha, nome: nomeTrim, papel, lojaId: lojaId || null },
+      { username, senha, nome: nomeTrim, papel, lojaId: lojaDoCadastro },
       { onSuccess: () => onOpenChange(false), onError: (e) => setErro(e.message) }
     )
   }
@@ -293,12 +320,12 @@ function UsuarioFormDialog({
           )}
 
           <div className="flex flex-col gap-2">
-            <Label htmlFor="usuario-papel">Papel</Label>
+            <Label htmlFor="usuario-papel">Cargo</Label>
             <select
               id="usuario-papel"
               className={SELECT_CLASSNAME}
               value={papel}
-              onChange={(e) => setPapel(e.target.value as PapelUsuario)}
+              onChange={(e) => trocarPapel(e.target.value as PapelUsuario)}
             >
               {PAPEL_USUARIO_OPTIONS.map(([valor, label]) => (
                 <option key={valor} value={valor}>
@@ -308,57 +335,49 @@ function UsuarioFormDialog({
             </select>
           </div>
 
-          <div className="flex flex-col gap-2">
-            <Label htmlFor="usuario-loja">Filial</Label>
-            <select
-              id="usuario-loja"
-              className={SELECT_CLASSNAME}
-              value={lojaId}
-              onChange={(e) => setLojaId(e.target.value)}
-            >
-              <option value="">Sem filial</option>
-              {lojas?.map((loja) => (
-                <option key={loja.id} value={loja.id}>
-                  {loja.nome}
+          {/* FILIAL É DO CARGO — passo 2, 2026-09-11.
+
+                caixa, gerente   filial obrigatória: é de onde operam e o
+                                 limite do que enxergam
+                admin            sem filial fixa: acompanha a rede inteira
+                                 e não lança vale
+
+              Para admin o campo nem existe, e por isso nada escondido vai
+              no salvar. */}
+          {exigeFilial ? (
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="usuario-loja">Filial</Label>
+              <select
+                id="usuario-loja"
+                className={SELECT_CLASSNAME}
+                value={lojaId}
+                onChange={(e) => setLojaId(e.target.value)}
+              >
+                {/* Marcador, não opção: `disabled hidden` deixa o campo
+                    começar em branco e some da lista aberta, que oferece
+                    só filiais. "Sem filial" não é escolha — o banco
+                    recusa. */}
+                <option value="" disabled hidden>
+                  Selecione a filial
                 </option>
-              ))}
-            </select>
-            <p className="text-xs text-muted-foreground">
-              {/* DUAS CORREÇÕES, e a segunda veio de uma pergunta do
-                  usuário: "admin não devia nem ver esse campo?".
-
-                  1. Dizia "Admin e gerente enxergam todas as filiais",
-                     o que valia até o item 27 prender o gerente à
-                     própria loja (2026-08-12). Induzia a deixar gerente
-                     "Sem filial" — e aí a policy nunca casa `loja_id` e
-                     ele não vê NADA, sem erro nenhum.
-
-                  2. Falando só de quem ENXERGA, o texto sugeria que pro
-                     admin o campo não serve. Serve, e é outra coisa:
-
-                       loja_id   DE ONDE se opera
-                       is_admin  O QUE se enxerga
-
-                     `CadastroEntrega`, `CadastroTransferencia` e
-                     `NovaCorrida` exigem `profile.lojaId`. Admin sem
-                     filial enxerga tudo e não lança nada. */}
-              A filial é <strong>de onde a pessoa opera</strong>: lançar entrega,
-              transferência e corrida saem dela. Para gerente e caixa ela também
-              limita o que enxergam. O admin enxerga todas — mas sem filial não
-              consegue lançar nada.
-            </p>
-            {/* AVISA, NÃO BLOQUEIA. Admin sem filial é configuração
-                legítima — alguém que só administra e nunca encosta no
-                balcão. O que não pode é a pessoa descobrir isso ao abrir
-                "Nova entrega" e levar um "sua conta não tem loja
-                associada" sem entender por quê. */}
-            {papel === 'admin' && !lojaId && (
+                {lojas?.map((loja) => (
+                  <option key={loja.id} value={loja.id}>
+                    {loja.nome}
+                  </option>
+                ))}
+              </select>
               <p className="text-xs text-muted-foreground">
-                Sem filial, este admin enxerga tudo mas <strong>não consegue lançar
-                entrega, transferência nem abrir corrida</strong>.
+                Caixa e gerente enxergam e lançam só na própria filial.
               </p>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              <Label>Filial</Label>
+              <p className="text-sm text-muted-foreground">
+                Todas as filiais — o administrador acompanha a rede inteira, sem filial fixa.
+              </p>
+            </div>
+          )}
 
           {erro && <p className="text-sm text-destructive">{erro}</p>}
         </div>

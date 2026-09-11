@@ -130,7 +130,7 @@ Deno.serve(async (req) => {
   const senha = String(corpo.senha ?? '')
   const nome = String(corpo.nome ?? '').trim()
   const papel = String(corpo.papel ?? '')
-  const lojaId = corpo.lojaId ? String(corpo.lojaId) : null
+  const lojaIdInformada = corpo.lojaId ? String(corpo.lojaId) : null
 
   const erroUsername = validarUsername(username)
   if (erroUsername) return responder({ error: erroUsername }, 400)
@@ -142,6 +142,22 @@ Deno.serve(async (req) => {
   if (!nome) return responder({ error: 'Nome é obrigatório.' }, 400)
   if (!PAPEIS_PERMITIDOS.includes(papel as (typeof PAPEIS_PERMITIDOS)[number])) {
     return responder({ error: 'Papel inválido.' }, 400)
+  }
+
+  // FILIAL: obrigatória pra caixa e gerente, NUNCA gravada pra admin —
+  // passo 2, 2026-09-11.
+  //
+  // A trava de verdade é o CHECK `profiles_filial_obrigatoria` (migration
+  // 20260911120000): sem esta validação ele recusaria o insert do perfil
+  // lá embaixo, e o login recém-criado seria apagado. Checar AQUI, antes
+  // do `createUser`, evita criar um login só pra desfazê-lo, e devolve
+  // uma mensagem que o admin entende.
+  //
+  // Admin DESCARTA a filial em vez de recusar: quem decide é o cargo, não
+  // o que veio no corpo — um cliente antigo ainda mandaria a do formulário.
+  const lojaId = papel === 'admin' ? null : lojaIdInformada
+  if ((papel === 'caixa' || papel === 'gerente') && !lojaId) {
+    return responder({ error: 'Caixa e gerente precisam de uma filial.' }, 400)
   }
 
   const comoServico = createClient(url, serviceKey, {

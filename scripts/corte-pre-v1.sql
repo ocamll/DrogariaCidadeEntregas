@@ -314,9 +314,12 @@ select c.tenant_id, 'Gabrielense', c.id
 --     errado cria um perfil órfão que o app nunca acha, e o sintoma é
 --     "logo, mas não vejo nada".
 --
+--     `loja_id` NULO: admin não tem filial fixa (passo 2, 2026-09-11). A
+--     Matriz aqui só serve para achar o tenant.
+--
 --     TROQUE o e-mail e o nome antes de rodar.
 -- insert into public.profiles (id, tenant_id, loja_id, nome, papel, email)
--- select u.id, l.tenant_id, l.id, 'NOME DO ADMIN', 'admin', u.email
+-- select u.id, l.tenant_id, null, 'NOME DO ADMIN', 'admin', u.email
 --   from auth.users u
 --   cross join public.lojas l
 --  where u.email = 'admin@EXEMPLO.com'
