@@ -43,18 +43,8 @@ function AvisoTemMais({ mostrar }: { mostrar: boolean }) {
   )
 }
 
-// As duas listas (convênio e receita) não têm os mesmos campos, mas têm as
-// mesmas PERGUNTAS: qual vale, de quem, desde quando, e o botão de dar
-// baixa. Antes eram duas tabelas independentes com contagem de colunas
-// diferente, então cada uma calculava as larguras por conta e as colunas
-// iguais não se alinhavam entre si.
-//
-// Aqui as duas usam a mesma grade, e `table-fixed` é o que garante o
-// alinhamento: sem ele, o layout automático ainda dimensionaria cada
-// tabela pelo próprio conteúdo e o "Cliente" de uma cairia num x
-// diferente do "Cliente" da outra. A coluna do meio existe nas duas —
-// quando não há convênio, mostra "—" em vez de sumir e desalinhar tudo.
-const LARGURAS = ['w-[14%]', 'w-[26%]', 'w-[18%]', 'w-[12%]', 'w-[30%]']
+// A mesma grade mantém as colunas de convênios e receitas alinhadas.
+const LARGURAS = ['w-[16%]', 'w-[36%]', 'w-[14%]', 'w-[34%]']
 
 // Notificar que o papel não voltou. A justificativa é obrigatória pelo
 // mesmo motivo do cancelamento e da divergência: sem ela a gestão recebe
@@ -135,19 +125,16 @@ type LinhaPendencia = {
   id: string
   numeroVale: string
   clienteNome: string
-  meio: string
   desde: string
 }
 
 function TabelaPendencias({
   linhas,
-  rotuloMeio,
   rotuloAcao,
   onAcao,
   onNotificar,
 }: {
   linhas: LinhaPendencia[]
-  rotuloMeio: string
   rotuloAcao: string
   onAcao: (id: string) => void
   onNotificar: (id: string) => void
@@ -158,9 +145,8 @@ function TabelaPendencias({
         <TableRow>
           <TableHead className={LARGURAS[0]}>Vale</TableHead>
           <TableHead className={LARGURAS[1]}>Cliente</TableHead>
-          <TableHead className={LARGURAS[2]}>{rotuloMeio}</TableHead>
-          <TableHead className={LARGURAS[3]}>Desde</TableHead>
-          <TableHead className={LARGURAS[4]} />
+          <TableHead className={LARGURAS[2]}>Desde</TableHead>
+          <TableHead className={LARGURAS[3]} />
         </TableRow>
       </TableHeader>
       <TableBody>
@@ -168,7 +154,6 @@ function TabelaPendencias({
           <TableRow key={linha.id}>
             <TableCell className="tabular-nums">{linha.numeroVale}</TableCell>
             <TableCell className="whitespace-normal break-words">{linha.clienteNome}</TableCell>
-            <TableCell className="whitespace-normal break-words">{linha.meio}</TableCell>
             <TableCell className="tabular-nums">{formatarData(linha.desde)}</TableCell>
             <TableCell>
               <div className="flex flex-wrap gap-2">
@@ -258,13 +243,11 @@ function DocumentosConvenio({ profile }: { profile: AuthProfile }) {
     <>
       <AvisoTemMais mostrar={data.temMais} />
       <TabelaPendencias
-        rotuloMeio="Convênio"
         rotuloAcao="Marcar recebido"
         linhas={data.itens.map((doc) => ({
           id: doc.id,
           numeroVale: doc.numeroVale,
           clienteNome: doc.clienteNome,
-          meio: doc.convenioNome ?? '—',
           desde: doc.ocorridoEmLocal,
         }))}
         onAcao={(id) =>
@@ -310,15 +293,11 @@ function ReceitasPendentes({ profile }: { profile: AuthProfile }) {
     <>
       <AvisoTemMais mostrar={data.temMais} />
       <TabelaPendencias
-        rotuloMeio="Documento"
         rotuloAcao="Marcar devolvida"
         linhas={data.itens.map((receita) => ({
           id: receita.id,
           numeroVale: receita.numeroVale,
           clienteNome: receita.clienteNome,
-          // receita não tem convênio: a coluna do meio existe só pra as
-          // duas tabelas continuarem alinhadas coluna a coluna.
-          meio: 'Receita',
           desde: receita.ocorridoEmLocal,
         }))}
         onAcao={(id) =>

@@ -21,31 +21,24 @@ type View = 'lista' | 'nova' | 'nova-transferencia' | 'nova-corrida' | 'retorno-
 export function Painel({ profile }: { profile: AuthProfile }) {
   const [view, setView] = useState<View>('lista')
 
-  // LANÇAR VALE É DE QUEM ESTÁ NO BALCÃO — passo 2, 2026-09-11. O admin
-  // acompanha todas as filiais e não lança vale, então "Nova entrega" e
-  // "Transferência" não existem pra ele.
-  //
-  // Decide o CARGO, nunca `profile.lojaId`: o admin antigo ainda tem Matriz
-  // no perfil, e nem por isso lança. E é UX, não permissão — a RLS de
-  // `entregas` continua aceitando admin; nada mudou no servidor.
-  //
-  // Saída e retorno de corrida continuam para todos, de propósito: essa
-  // decisão foi sobre lançar vale, não sobre a custódia.
-  const lancaVale = profile.papel === 'caixa' || profile.papel === 'gerente'
+  // Lançamento, saída e retorno são ações do balcão. O cargo decide,
+  // inclusive para admins que ainda têm uma filial no perfil.
+  // Esta navegação não substitui as permissões e validações do servidor.
+  const operaBalcao = profile.papel === 'caixa' || profile.papel === 'gerente'
 
-  if (view === 'nova' && lancaVale) {
+  if (view === 'nova' && operaBalcao) {
     return <CadastroEntrega profile={profile} onVoltar={() => setView('lista')} />
   }
 
-  if (view === 'nova-transferencia' && lancaVale) {
+  if (view === 'nova-transferencia' && operaBalcao) {
     return <CadastroTransferencia profile={profile} onVoltar={() => setView('lista')} />
   }
 
-  if (view === 'nova-corrida') {
+  if (view === 'nova-corrida' && operaBalcao) {
     return <NovaCorrida profile={profile} onVoltar={() => setView('lista')} />
   }
 
-  if (view === 'retorno-corrida') {
+  if (view === 'retorno-corrida' && operaBalcao) {
     return <RetornoCorrida profile={profile} onVoltar={() => setView('lista')} />
   }
 
@@ -62,20 +55,20 @@ export function Painel({ profile }: { profile: AuthProfile }) {
       <Card>
         <CardHeader className="flex flex-row items-center justify-between">
           <CardTitle>Entregas</CardTitle>
-          <div className="flex gap-2">
-            {lancaVale && (
+          {operaBalcao && (
+            <div className="flex gap-2">
               <Button variant="outline" onClick={() => setView('nova-transferencia')}>
                 Transferência
               </Button>
-            )}
-            <Button variant="outline" onClick={() => setView('retorno-corrida')}>
-              Retorno de corrida
-            </Button>
-            <Button variant="outline" onClick={() => setView('nova-corrida')}>
-              Nova corrida
-            </Button>
-            {lancaVale && <Button onClick={() => setView('nova')}>Nova entrega</Button>}
-          </div>
+              <Button variant="outline" onClick={() => setView('retorno-corrida')}>
+                Retorno de corrida
+              </Button>
+              <Button variant="outline" onClick={() => setView('nova-corrida')}>
+                Nova corrida
+              </Button>
+              <Button onClick={() => setView('nova')}>Nova entrega</Button>
+            </div>
+          )}
         </CardHeader>
         <CardContent>
           <Tabs defaultValue="hoje">

@@ -11,7 +11,7 @@ const LIMITE_PENDENCIAS = 300
 
 // Custódia de papel — convênio (documento que a agência/convênio exige de
 // volta) e receita (controlada, precisa retornar com o motoboy). As duas
-// já nascem no cadastro de entrega (convenio_id + status_documental,
+// já nascem no cadastro de entrega (forma de pagamento + status_documental,
 // tem_receita) — aqui é só a leitura do que ainda tá pendente e a ação de
 // marcar como recebido. Não é fluxo de balcão correndo, então mutation
 // direta, sem fila offline (mesma lógica de src/data/cadastros.ts).
@@ -20,7 +20,6 @@ export type DocumentoConvenioPendente = {
   id: string
   numeroVale: string
   clienteNome: string
-  convenioNome: string | null
   ocorridoEmLocal: string
 }
 
@@ -29,7 +28,6 @@ type DocumentoConvenioPendenteRow = {
   numero_vale: string
   cliente_nome: string
   ocorrido_em_local: string
-  convenios: { nome: string } | null
 }
 
 async function buscarDocumentosConvenioPendentes(): Promise<
@@ -38,7 +36,7 @@ async function buscarDocumentosConvenioPendentes(): Promise<
   const { itens, temMais } = await buscarComTeto(LIMITE_PENDENCIAS, (limite) =>
     supabase
       .from('entregas')
-      .select('id, numero_vale, cliente_nome, ocorrido_em_local, convenios(nome)')
+      .select('id, numero_vale, cliente_nome, ocorrido_em_local')
       .eq('status_documental', 'pendente')
       .order('ocorrido_em_local', { ascending: true })
       .limit(limite)
@@ -50,7 +48,6 @@ async function buscarDocumentosConvenioPendentes(): Promise<
       id: row.id,
       numeroVale: row.numero_vale,
       clienteNome: row.cliente_nome,
-      convenioNome: row.convenios?.nome ?? null,
       ocorridoEmLocal: row.ocorrido_em_local,
     })),
   }

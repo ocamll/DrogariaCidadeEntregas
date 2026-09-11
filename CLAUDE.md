@@ -595,10 +595,11 @@ contexto continuaria difícil para quem usa.
   admin em qualquer filial do tenant, e nenhuma permissão SQL mudou. Não
   apresente a falta dos botões como controle de acesso;
 - **consultas de todas as filiais e filtros por filial continuam**;
-- **Nova corrida e Retorno de corrida continuam visíveis**: a decisão foi
-  sobre lançar vale, não sobre custódia. Admin **sem** filial que abre
-  Nova corrida recebe o aviso de conta sem loja, como antes — esse fluxo
-  não foi redesenhado.
+- **Nova corrida e Retorno de corrida também saem da experiência do admin**
+  (revisão de 2026-09-11): saída e retorno são ações do balcão. O gate de
+  cargo cobre os botões e os destinos de navegação; vale igualmente para
+  admin sem filial e admin legado com filial. Caixa e gerente mantêm os
+  quatro fluxos operacionais. As permissões SQL permanecem inalteradas.
 
 **O E10.1 FICA**, e a regra dele continua valendo para qualquer coisa nova
 dentro das funções de selo:

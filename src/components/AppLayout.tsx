@@ -36,7 +36,9 @@ export function AppLayout({ children }: { children: ReactNode }) {
           <img src={LOGO_URL} alt="Drogaria Cidade" className="h-9 w-auto" />
           <p className="text-xs opacity-90">
             {profile.nome} · {PAPEL_LABEL[profile.papel]}
-            {profile.lojaNome ? ` · ${profile.lojaNome}` : ''}
+            {profile.papel === 'admin'
+              ? ' · Todas as filiais'
+              : profile.lojaNome ? ` · ${profile.lojaNome}` : ''}
           </p>
         </div>
         <div className="flex items-center gap-2">
