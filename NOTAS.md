@@ -9921,18 +9921,26 @@ sessão estava sem login, então nada da tabela abaixo foi visto daqui:
 | `camiloadmin` — admin sem filial | igual |
 | caixa | tudo normal |
 
-### O que ainda não foi confirmado
+### Confirmado pelo usuário depois — o passo 2 fecha
 
-- **A republicação da `criar-usuario`.** Sem ela, criar caixa sem filial
-  passa pela função antiga: o login nasce, o CHECK recusa o perfil e o
-  login é apagado — recusado, mas pelo caminho caro.
-- **O formulário:** a recusa sem filial, o campo sumindo ao trocar para
-  admin, e voltando em branco ao retornar para caixa.
-- **Qual caixa foi testada.** A (c) mostra os mesmos dois caixas do
-  censo de 10/09, então a conta nova do painel não existia quando a
-  conferência rodou. Se o teste foi com ela, foi criada depois — e vale
-  registrar; se foi com outra, lembrar que as antigas não estão no
-  domínio do E5 (item 98).
+- **A `criar-usuario` já estava republicada** antes das conferências.
+- **O formulário recusa caixa sem filial:** logado no `camiloadmin0`,
+  apareceu "Caixa precisa de uma filial — sem ela não consegue lançar
+  entrega".
+- **A caixa do aceite é conta NOVA, `camilocaixa`,** criada pelo painel
+  depois da (c) — por isso a (c) ainda mostrava só os dois caixas de
+  10/09. É o caso de restrição que o item 98 pedia, agora no domínio do
+  E5.
+
+**Duas ressalvas, para não afirmar mais do que foi visto:**
+
+- **A recusa da Edge Function não foi exercitada isoladamente.** A tela
+  barra antes de chamá-la, então o caminho testado foi o do cliente; o do
+  servidor está provado pela conferência (b), no banco, e pela leitura do
+  código da função.
+- **A troca de cargo** (campo some ao virar admin, volta em branco ao
+  retornar para caixa) **não foi relatada**. Ela é da mesma tela e do
+  mesmo estado que a recusa, mas não entrou no relato.
 
 **Saiu do aceite:** enfileirar na filial A e trocar para B — a
 funcionalidade não existe. A cobertura da fila continua a das specs.
@@ -9977,10 +9985,12 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > sem filial. Na tela, relatado pelo usuário: os dois admins sem as ações
 > de lançamento, e o caixa normal.
 >
-> **Falta confirmar:** a republicação da `criar-usuario`, as checagens
-> do formulário e qual caixa foi testada (item 100).
+> **Aceito em 2026-09-11:** a `criar-usuario` já estava republicada, o
+> formulário recusa caixa sem filial, e a restrição foi testada numa conta
+> nova, `camilocaixa`. Só a troca de cargo não foi relatada (item 100).
 >
-> **Depois, o passo 3**: snapshot histórico da filial nos documentos.
+> **O próximo é o passo 3**: o nome da filial nos documentos, que hoje
+> vem de join vivo e não do snapshot.
 >
 > **Graphify ainda não**: uma atualização só, quando as próximas mudanças
 > de código e documentação estabilizarem.
