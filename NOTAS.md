@@ -9627,7 +9627,7 @@ Nada foi criado nem alterado: preparar o cenário é decisão do usuário.
   **enfileirada na filial A**, seguida da seleção da **filial B** — a
   operação já registrada **continua pertencendo à A**.
 
-## 99. "Outro" sai das formas de pagamento — código feito, migration a aplicar
+## 99. "Outro" sai das formas de pagamento — construído, aplicado e conferido
 
 Construído em 2026-09-10, como passo PRÓPRIO (o usuário o separou do
 passo 1). O contrato, nas palavras dele: sai das opções de cadastro,
@@ -9708,14 +9708,64 @@ tirar" não se confundirem.
   no banco depois, o `V-000062` segue com só o previsto, `na_ordem` e um
   único evento `entrega_criada`.
 
-### O que NÃO está provado, e por quê
+### A migration: aplicada pelo usuário e conferida, em 2026-09-10
 
-**A recusa do SERVIDOR.** A migration está escrita e **não aplicada** —
-migrations deste projeto são aplicadas pelo usuário no SQL Editor, e
-daqui só há a sessão autenticada. Até lá, o banco ainda aceita `outro`,
-e só o cliente recusa. As conferências a rodar estão no rodapé da
-migration: o CHECK sem `outro` e validado, as três respostas do
-validador, os 66 de 66, e o verificador antes e depois.
+O usuário aplicou a `20260910120000` no SQL Editor e rodou as
+conferências do rodapé. **Três de quatro vieram limpas de primeira:**
+
+```
+CHECK        CHECK ((forma = ANY (ARRAY['dinheiro', …, 'crediario'])))
+             convalidated = true — sem `outro`
+validador    forma outro → forma_invalida
+             forma pix → null
+             motivo outro com detalhe → null
+```
+
+**A quarta trouxe uma contradição: o `conferir-outro.sql` deu 65 `true` e
+o I018 `false`** — justamente o vetor de `outro` como forma, que a
+consulta direta ao validador tinha acabado de recusar.
+
+**O diagnóstico, medido e não suposto:**
+
+- a geradora compara `romaneio_retorno_validar(…)` com
+  `'forma_invalida'` — a MESMA função da consulta direta;
+- chamando essa função pela sessão da página, com o jsonb EXATO do I018
+  (o mesmo `paraJsonbRetorno`), o servidor devolve **`forma_invalida`**;
+- e o argumento que não depende de ordem de execução: no placar do
+  usuário o **I013 deu `true` e o I018 `false`**. Os dois vetores são
+  idênticos na estrutura e diferem só no valor da forma (`vale` ×
+  `outro`). Um defeito de montagem do jsonb derrubaria os dois. O único
+  fator que os separa é um validador que **ainda aceitava `outro`** —
+  o de antes da migration.
+
+**Conclusão: o `conferir-outro.sql` rodou contra a função antiga.** Não é
+defeito, e nada foi alterado por causa dele.
+
+**Re-medido contra o banco já migrado**, pela sessão da página:
+
+```
+vetores inválidos   18 de 18, pela mesma função e o mesmo jsonb
+                    (a metade válida, 48 linhas, já estava toda true no
+                    placar do usuário, e a migration não a alcança)
+verificador         saída 15·15·0 · retorno 5·5·0 · TOTAL 20·20·0
+(como admin)        conflito 3 fora do placar
+por documento       20 linhas, nenhuma com divergência
+```
+
+**O verificador bate com a última medição** (item 92, 2026-09-02), e o
+censo desta sessão mostra que nenhum documento foi criado desde então
+(23 romaneios = 20 selados + 3 conflitos). **Ressalva honesta:** o
+verificador não foi rodado IMEDIATAMENTE antes de aplicar; a comparação
+é contra o item 92. Como a migration não toca em documento, e o conjunto
+fecha na mesma contagem, não há o que explicar.
+
+**Recomendado, e não bloqueante:** rodar o `conferir-outro.sql` de novo
+no SQL Editor fecha os 66 de 66 no instrumento original. A única linha
+que falhou já foi re-medida acima.
+
+**E um cuidado com o meu próprio instrumento:** a primeira leitura por
+documento filtrou colunas que não existem (`ok`/`valido`) e devolveu um
+"0 com falha" sem valor. Refeita com a coluna real (`divergencias`).
 
 ### O que a sessão aprendeu sobre a ferramenta
 
@@ -9764,16 +9814,14 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 >   pagamento antigo;
 > - `outro` **continua** sendo motivo de insucesso.
 >
-> **ESTADO em 2026-09-10 (item 99): o código do "Outro" está FEITO e
-> commitado; a migration `20260910120000` está ESCRITA e NÃO APLICADA.**
-> Antes do passo 2, o usuário aplica a migration no SQL Editor e roda as
-> conferências do rodapé dela — inclusive os **66 de 66** dos vetores.
-> Até isso acontecer, **só o cliente recusa `outro`; o banco ainda
-> aceita.**
+> **ESTADO em 2026-09-10 (item 99): o "Outro" está CONSTRUÍDO, e a
+> migration `20260910120000` está APLICADA e conferida** — CHECK validado
+> sem `outro`, 18 de 18 vetores inválidos, verificador em 20 · 20 · 0.
 >
-> Depois, o passo 2. O ponto aberto do item 98 (nenhuma conta de caixa
-> ou gerente no domínio do E5) precisa de decisão antes de montar o
-> cenário de restrição.
+> **O próximo é o passo 2** ("Cargo", filial obrigatória, E10 completo).
+> Antes de montar o cenário, uma decisão do usuário está aberta: o caso
+> de restrição do E10 (item 98) — nenhuma conta de caixa ou gerente está
+> no domínio do E5, então nenhuma entra pela tela atual.
 >
 > **O E10.2 não foi cancelado — virou o passo 2**, e passou de adiável a
 > obrigatório. O detalhe técnico dele continua válido e está logo abaixo;
