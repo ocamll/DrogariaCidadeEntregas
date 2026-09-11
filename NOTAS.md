@@ -10321,6 +10321,43 @@ quinzena no relatório espera as datas existirem.
 
 **Nenhuma pergunta do 4A bloqueia mais nada.** O 4B pode ser desenhado.
 
+## 105. O desenho do 4B
+
+**2026-09-11**, pedido pelo usuário depois das respostas ao 4A. Em
+`docs/desenho-4b-2026-09-11.md`; **nenhum código, migration ou banco**.
+
+**Em uma frase:** saída e retorno sem assinatura manuscrita — motoboy com
+cartão e PIN, farmácia com ato explícito de confirmar, e o gerente da
+filial validando com o cartão dele quando o motoboy perdeu o próprio.
+
+**As escolhas técnicas, e por quê:**
+
+- **Uma tabela de credenciais, com titular** (`motoboy_id` ou
+  `profile_id`), em vez de uma segunda tabela: mesmo token, HMAC, bcrypt,
+  bloqueio e emissão — duplicar seria criar gêmeo onde não precisa. O
+  nome `motoboy_credenciais` fica até o corte.
+- **`versao_evidencia` em `assinaturas`**: versão 1 com traços, versão 2
+  sem. O verificador lê a versão da linha, e os documentos antigos
+  continuam verificando pela fórmula histórica.
+- **Fórmulas da versão 2 com prefixo `EV2`/`OEV2`**, e com
+  `credencial_id` e `validador_profile_id` DENTRO do hash — é o que torna
+  "quem validou" verificável, e não só uma coluna ao lado. Instante com
+  máscara UTC explícita.
+- **DCR1 e DCRR1 não mudam um byte**: os traços nunca entraram neles.
+- **Funções substituídas na mesma migration**, sem compatibilidade com
+  a versão 1 (corte limpo, 2D.6), e com a ordem de aplicação começando
+  por filas vazias. A `sync-romaneio` nova recusa corpo antigo com motivo
+  visível.
+- **Seis etapas testáveis**, de 4B.1 (credencial do gerente) a 4B.6
+  (aceite com nove casos).
+
+**Duas perguntas de produto ficaram:**
+
+1. o gerente logado no balcão pode confirmar pela farmácia e validar no
+   lugar do motoboy ao mesmo tempo? (recomendação: sim, dito no documento)
+2. validar pelo gerente avisa o admin para revogar e reemitir o cartão
+   perdido? (recomendação: sim, em Notificações, sem bloquear)
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
@@ -10392,7 +10429,10 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > nada muda), e **as datas da quinzena não são conhecidas** — o desenho não
 > depende delas, porque a cobrança da agência declara o próprio período.
 >
-> **Nenhuma pergunta do 4A bloqueia mais nada. O 4B pode ser desenhado.**
+> **Nenhuma pergunta do 4A bloqueia mais nada.**
+>
+> **O DESENHO DO 4B ESTÁ PRONTO (item 105):** `docs/desenho-4b-2026-09-11.md`.
+> Faltam duas respostas de produto (seção 10 dele) antes da etapa 4B.1.
 >
 > **Depois:** o 4B implementa o contrato de evidências escolhido; o 4C
 > precisa das três partes (Service Worker + Cache API, telas no estado
