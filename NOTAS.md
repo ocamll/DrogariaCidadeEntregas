@@ -10100,9 +10100,11 @@ decisão do usuário.
 **2026-09-11.** O usuário trouxe `plano-pre-v1-2026-09-11.md`, escrito numa
 revisão feita **fora desta sessão**, sobre o commit `26a5b53` e sem
 consultar o banco. Ele reorganiza os passos 4 a 7 e registra respostas do
-usuário que mudam o desenho. Entrou sem alteração em
-`docs/plano-pre-v1-2026-09-11.md` — os links dele apontam para caminhos
-locais desta máquina.
+usuário que mudam o desenho. Entrou em
+`docs/plano-pre-v1-2026-09-11.md` com uma única alteração: os links, que
+apontavam para caminhos desta máquina, viraram relativos ao repositório
+(`../src/...#L23`), para funcionarem no GitHub e em outra máquina. As
+âncoras de linha são as do commit `26a5b53` e envelhecem com o código.
 
 ### A decisão central
 
