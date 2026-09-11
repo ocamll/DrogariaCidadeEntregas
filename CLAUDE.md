@@ -821,7 +821,8 @@ continua de pé para o histórico: dividir valor pela tarifa daria contagem
 errada se a tarifa mudar, e a regra do convênio quebrava a derivação.
 
 **Transferência entre filiais paga a mesma tarifa, sempre 1 vale** — e
-esta parte **não muda nada**, porque já era assim.
+esta parte **não muda nada**, porque já era assim. **Reconfirmado pelo
+usuário em 2026-09-11:** *"transferências feitas pela tele, geram vale."*
 Confirmado na farmácia em 2026-08-11: quem leva o produto de uma filial
 pra outra é o motoboy da agência, e ela cobra por essa corrida como por
 qualquer outra. Então o vale de transferência nasce com
@@ -3682,10 +3683,15 @@ E, na segunda rodada do mesmo dia:
   existir, o papel precisa levar o número do sistema — e **hoje a tela de
   cadastro não mostra o número depois de salvar**.
 
-**Ainda abertas, e as duas são de cobrança (passos 5 e 6), não do 4B:** as
-datas da quinzena; e **se transferência gera vale — a resposta "acredito
-que não" contradiz a confirmação de 2026-08-11** registrada em "Tarifa", e
-nada muda antes de checar com a farmácia ou a agência.
+E na terceira: **transferência feita pela tele gera vale** — confirma a
+decisão de 2026-08-11 registrada em "Tarifa" e o que o código já faz; o
+conflito fechou sem mudar nada.
+
+**As datas exatas da quinzena não são conhecidas, e o desenho não depende
+delas.** A cobrança da agência **declara o próprio período** (De/Até); a
+competência de cada vale é a **data da retirada**; e a conciliação compara
+os vales daquele período. Nada de calendário fixo no sistema. O atalho de
+quinzena no relatório espera as datas existirem.
 
 **Os passos 5 e 6 são duas frentes de produto ligadas.** O fechamento pode
 organizar as exceções operacionais antes de o painel existir, mas **não

@@ -10307,13 +10307,19 @@ então. Tirar a tarifa da transferência reduziria o acerto com a agência.
    precisa levar o número do sistema: online, mostrar assim que o servidor
    devolve; offline, só com o E12.
 
-### Ainda aberto
+### A terceira rodada
 
-1. datas da quinzena (*"Não sei."*);
-2. transferência (acima).
+- **Transferência:** *"sim, transferências feitas pela tele, geram vale."*
+  Confirma 2026-08-11 e o código; **o conflito fechou sem mudar nada.**
+- **Quinzena:** *"não sabemos as datas exatas da quinzena."*
 
-**As duas são de cobrança (passos 5 e 6), não do 4B.** O contrato de
-evidências já tem o que precisa para ser desenhado.
+**As datas exatas da quinzena não são conhecidas, e o desenho não depende
+delas.** A cobrança da agência **declara o próprio período** (De/Até); a
+competência de cada vale é a **data da retirada**; e a conciliação compara
+os vales daquele período. Nada de calendário fixo no sistema. O atalho de
+quinzena no relatório espera as datas existirem.
+
+**Nenhuma pergunta do 4A bloqueia mais nada.** O 4B pode ser desenhado.
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
@@ -10382,8 +10388,11 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > baixa de papel é do caixa ou do gerente; e o papel continua no começo do
 > piloto.
 >
-> **Ainda aberto, e só de cobrança (passos 5 e 6):** datas da quinzena e o
-> conflito da transferência com 2026-08-11. **O 4B pode ser desenhado.**
+> Na terceira: **transferência pela tele gera vale** (confirma 2026-08-11,
+> nada muda), e **as datas da quinzena não são conhecidas** — o desenho não
+> depende delas, porque a cobrança da agência declara o próprio período.
+>
+> **Nenhuma pergunta do 4A bloqueia mais nada. O 4B pode ser desenhado.**
 >
 > **Depois:** o 4B implementa o contrato de evidências escolhido; o 4C
 > precisa das três partes (Service Worker + Cache API, telas no estado

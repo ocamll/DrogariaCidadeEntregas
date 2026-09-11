@@ -399,3 +399,19 @@ Os bytes de DCR1 e DCRR1 **não mudam**: os traços nunca entraram no canônico.
 - **Transferência gera vale?** Continua o conflito com a confirmação de 2026-08-11.
 
 As duas afetam **cobrança e fechamento (passos 5 e 6)**, e **não o contrato de evidências do 4B**, que já tem o que precisa para ser desenhado.
+
+### A terceira rodada
+
+| Ponto | Resposta, nas palavras do usuário | Como fica |
+|---|---|---|
+| Datas da quinzena | "não sabemos as datas exatas da quinzena." | continuam desconhecidas, e **o desenho não depende delas** (abaixo) |
+| Transferência | "sim, transferências feitas pela tele, geram vale." | **confirma a decisão de 2026-08-11 e o que o código já faz.** O conflito fechou sem mudar nada |
+
+**As datas exatas da quinzena não são conhecidas, e o desenho não depende
+delas.** A cobrança da agência **declara o próprio período** (De/Até); a
+competência de cada vale é a **data da retirada**; e a conciliação compara
+os vales daquele período. Nada de calendário fixo no sistema. O atalho de
+quinzena no relatório espera as datas existirem.
+
+**Com isso, nenhuma pergunta do 4A bloqueia o 4B nem a cobrança.** A única
+coisa que ainda espera informação de fora é o atalho de quinzena.
