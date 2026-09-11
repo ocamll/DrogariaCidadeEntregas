@@ -3604,7 +3604,9 @@ a cobrança dela**.
 **O passo 3 era um defeito medido, não uma melhoria — CONSTRUÍDO e
 APLICADO em 2026-09-11** (migration `20260911130000`). Conferido: `R-000031`
 e `R-000032`, os primeiros depois dela, já carregam o nome, e o
-verificador foi a 22 · 22 · 0 com os dois verificando. O nome da filial nos
+verificador foi a 22 · 22 · 0 com os dois verificando. Na página, com o
+nome atual da filial reescrito só no navegador, o `R-000031` manteve o nome
+gravado e um romaneio antigo caiu no nome atual. O nome da filial nos
 documentos vinha de join vivo: renomear uma filial mudava o cabeçalho de
 PDFs históricos e mandava um reenvio para outra pasta do Drive. Agora ele
 é congelado em `payload.loja_nome` no selo — saída, retorno e conflito — e

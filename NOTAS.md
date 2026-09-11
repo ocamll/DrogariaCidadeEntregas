@@ -9947,6 +9947,12 @@ sessão estava sem login, então nada da tabela abaixo foi visto daqui:
   **some ao selecionar Administrador**. A volta em branco ao retornar
   para caixa não foi relatada à parte.
 
+**Visto daqui em 2026-09-11**, logado no `camiloadmin0`: o painel só com
+"Retorno de corrida" e "Nova corrida"; a lista de usuários com a coluna
+**Cargo** e "Todas as filiais" nos três admins — inclusive "Admin Teste" e
+o próprio `camiloadmin0`, que ainda têm Matriz no perfil. Caixas e gerentes
+mostram a filial; `camilocaixa` em Filial 02.
+
 **Saiu do aceite:** enfileirar na filial A e trocar para B — a
 funcionalidade não existe. A cobertura da fila continua a das specs.
 
@@ -10056,14 +10062,34 @@ código.
 **oito** filiais de São Gabriel, e não só Matriz e Filial 02, como a
 abertura do `CLAUDE.md` ainda diz.
 
-**O que continua sem ser visto:** a página e o PDF lendo o nome do
-snapshot. A leitura está provada pela spec, e o dado gravado pela (f); a
-renderização não foi aberta daqui, porque o painel desta sessão está sem
-login.
+### Visto na página — sem renomear filial nenhuma
 
-**Opcional, e continua sendo decisão do usuário:** renomear por SQL a
-Filial 02, reabrir o `R-000031` (página e PDF), conferir que o nome antigo
-continua, e **desfazer a renomeação**.
+Com o usuário logado no `camiloadmin0`, a resposta de `/rest/v1/romaneios`
+foi reescrita **só no navegador**, trocando o nome atual da filial
+(`lojas.nome`) por "FILIAL RENOMEADA (teste)". O desvio foi em
+`supabase.rest.fetch`, e não em `window.fetch`: o cliente guarda a própria
+referência de fetch ao ser criado, então trocar o global não alcançaria
+nada.
+
+```
+R-000031  depois da migration, loja_nome "Filial 02"  → página: Filial 02
+R-000029  antes dela, sem a chave, join "Matriz"      → página: FILIAL RENOMEADA (teste)
+```
+
+- **O primeiro prova a leitura:** o join chegou "renomeado", e a página
+  mostrou o nome gravado no documento.
+- **O segundo é o CONTROLE, e sem ele o primeiro não prova nada.** Ele
+  mostra que a troca chegava de fato à tela — "a página mostra Filial 02"
+  poderia ser só cache — e que documento anterior à migration cai no nome
+  atual, como decidido.
+- **Nada foi gravado:** o fetch original foi restaurado e a página
+  recarregada antes de seguir.
+
+**O PDF não foi gerado:** baixá-lo pede permissão, e ele lê o mesmo
+`RomaneioCompleto.lojaNome` que a página — a spec confere que
+`romaneioPdf.ts` não lê `lojas` por conta própria. O teste de renomear por
+SQL deixou de ser necessário para provar a leitura; continua possível, e é
+decisão do usuário.
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
@@ -10114,8 +10140,9 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > 22 · 22 · 0 com os dois verificando. Nenhum documento antigo foi
 > reescrito.
 >
-> **Opcional:** renomear por SQL a Filial 02, reabrir o `R-000031` (página
-> e PDF), conferir que o nome antigo continua, e desfazer.
+> **Visto na página** (item 101): com o nome atual reescrito só no
+> navegador, o `R-000031` continuou "Filial 02" e o antigo `R-000029` caiu
+> no nome atual, como decidido. O PDF não foi gerado.
 >
 > **Depois, o passo 4**: concluir o contrato de assinaturas/envelope.
 >
