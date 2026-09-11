@@ -10391,6 +10391,54 @@ construção). E `SELECT_ASSINATURAS` usa `profiles(nome)`: com
 que é o `PGRST201` que o Registro de Auditoria já pagou uma vez — precisa de FK
 explícita e alias, ou a página do romaneio para de abrir.
 
+## 106. 4B.1 — a credencial do gerente, e a correção do fluxo
+
+**2026-09-11.** Migration `20260911140000` **aplicada e conferida**, mais o
+cliente (`0ea69ac`).
+
+**No banco:** uma tabela de credenciais com dois titulares (`motoboy_id`
+ou `profile_id`, CHECK de exatamente um, índice de um cartão ativo por
+gerente), `log_credencial` e `identificar_credencial` deixando de
+pressupor motoboy, e uma porta de emissão própria que recusa quem não é
+gerente, quem está bloqueado e quem está sem filial.
+
+**Conferido no SQL Editor:** as duas colunas nuláveis, o CHECK
+`num_nonnulls(...) = 1`, os dois índices `um_ativo`, o grant só de
+`profile_id` (os dois hashes continuam fora), a recusa de emissão para
+caixa e admin, identificação de lixo devolvendo zero linhas sem exceção,
+a auditoria antiga intacta, e o verificador em **22 · 22 · 0**.
+
+**A conferência (d) falhou por erro MEU, não do código:** `set_config`
+com `is_local = true` vale só na transação, e cada execução no editor é
+uma transação nova — a função exigiu sessão e disse isso. Refeita junto
+com o `set_config`, deu zero linhas.
+
+**E A CORREÇÃO QUE IMPORTA, do usuário:** eu fiz as telas RECUSAREM o
+cartão do gerente com uma frase melhor ("ele autoriza, não retira"). Isso
+não resolve:
+
+> *"A credencial do gerente deve servir para se o motoboy perdeu seu
+> cartão E se esqueceu o PIN, e não apenas uma delas. A solução é permitir
+> identificar o motoboy sem ler o cartão dele. Trocar apenas a mensagem
+> não resolve."*
+
+O que muda no desenho:
+
+- **bipar o cartão do gerente ABRE o fluxo excepcional**, em vez de
+  mandar voltar ao cartão do motoboy — que é justamente o que não existe
+  nos dois casos que a exceção atende;
+- **três motivos**, não dois: `cartao_perdido`, `pin_esquecido` e
+  `ambos`;
+- **o motoboy é identificado sem cartão**: pelo nome na lista da agência
+  (saída) ou pelo que a saída registrou (retorno). Ler o cartão dele,
+  quando existir, é atalho — nunca requisito;
+- **aceite essencial:** concluir saída e retorno **sem apresentar nenhum
+  cartão do motoboy**, com os vales continuando vinculados a ele.
+
+A recusa que está no ar hoje é ANDAIME da 4B.1, e sai na 4B.4. Ela não é
+o destino — é o que impede, enquanto o servidor não sabe autorizar por
+gerente, que a tela prometa uma validação que o selo recusaria.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
@@ -10465,9 +10513,13 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > **Nenhuma pergunta do 4A bloqueia mais nada.**
 >
 > **O DESENHO DO 4B ESTÁ PRONTO E REVISADO (item 105):**
-> `docs/desenho-4b-2026-09-11.md`, versão 2. **Nada de produto bloqueia a
-> 4B.1** — a única coisa em aberto é se o aviso ao admin também vale para
-> cartão perdido, e ela não impede começar pela credencial do gerente.
+> `docs/desenho-4b-2026-09-11.md`, versão 2.
+>
+> **A 4B.1 ESTÁ APLICADA E CONFERIDA (item 106)** — o cartão do gerente
+> existe, emite, identifica e cacheia. **O PRÓXIMO PASSO É A 4B.2**: a
+> autorização com motivo e validador, a evidência versão 2 e o
+> verificador. É ela que faz o cartão do gerente AUTORIZAR de verdade; a
+> recusa que está nas telas hoje é andaime e sai na 4B.4.
 >
 > **Depois:** o 4B implementa o contrato de evidências escolhido; o 4C
 > precisa das três partes (Service Worker + Cache API, telas no estado

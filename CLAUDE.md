@@ -1248,8 +1248,11 @@ Construído em 2026-08-16, em seis etapas. A saída da tele deixou de ser
 > apenas cartão e pin."* A evidência do motoboy passa a ser **cartão + PIN**;
 > a da farmácia, a **sessão com um ato explícito de confirmar** o conteúdo.
 > O **gerente ganha credencial própria** (cartão + PIN), usada quando o
-> motoboy **perdeu o cartão ou esqueceu o PIN** — os dois motivos, nomeados —,
-> na saída e no retorno, sem travar o fluxo. O documento registra que quem
+> motoboy **perdeu o cartão, esqueceu o PIN ou as duas coisas** — três
+> motivos, nomeados —, na saída e no retorno, sem travar o fluxo. **Bipar o
+> cartão do gerente ABRE o caminho excepcional**, e nele o motoboy é
+> identificado pelo NOME (na saída) ou pelo documento de saída (no
+> retorno): nenhuma etapa exige o cartão ou o PIN dele. O documento registra que quem
 > autorizou foi o gerente, **sem fingir a validação do motoboy**, e **o vale
 > continua atribuído ao motoboy que fez a tentativa**: o cartão apresentado
 > nunca vira o responsável pelo serviço. O **mesmo gerente pode** confirmar
