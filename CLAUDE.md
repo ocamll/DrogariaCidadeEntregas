@@ -8,7 +8,8 @@
 > filial** (ver "E10").
 >
 > **Passo 1 e o "Outro" CONSTRUÍDOS (2026-09-10); passo 2 CONSTRUÍDO,
-> APLICADO e aceito em 2026-09-11; o resto não.** Cada seção afetada aqui traz uma nota
+> APLICADO e aceito em 2026-09-11; passo 3 CONSTRUÍDO em 2026-09-11, com
+> migration A APLICAR; o resto não.** Cada seção afetada aqui traz uma nota
 > datada de 2026-09-08 dizendo o que foi decidido e o que o código ainda
 > faz. Onde as duas coisas divergirem, **o código é o que está no ar e o
 > escopo é para onde ele vai** — não confunda um com o outro, e não trate
@@ -3575,14 +3576,14 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
 ### A sequência pré-V1 revisada — decidida em 2026-09-08
 
 Substitui a ordem anterior (`E10 E11 E12 E6 E9 E7 E8 → STAGING → corte`).
-Vem de `docs/escopo-pre-v1-revisado.md`; **construídos até aqui: os passos 0, 1 e 2.**
+Vem de `docs/escopo-pre-v1-revisado.md`; **construídos até aqui: os passos 0, 1, 2 e 3** (o 3 com migration a aplicar).
 
 ```
 0.  alinhar a fonte de verdade ao escopo revisado   ✓ 2026-09-08
 1.  um vale sem adicional · convênio genérico       ✓ 2026-09-10
 1b. sem "Outro" — passo próprio   ✓ 2026-09-10 (migration aplicada)
 2.  "Cargo" · filial obrigatória · admin sem lançamento   ✓ 2026-09-11 (aplicado e aceito)
-3.  snapshot histórico da filial nos documentos
+3.  snapshot histórico da filial nos documentos   ✓ 2026-09-11 (a aplicar)
 4.  concluir o contrato de assinaturas/envelope
 5.  fechamento diário calculado, com exceções e aprovação auditável
 6.  painel da agência: cobrança discriminada e conferência
@@ -3600,11 +3601,26 @@ organizar as exceções operacionais antes de o painel existir, mas **não
 pode se anunciar como conciliado com a agência antes de receber e comparar
 a cobrança dela**.
 
-**O passo 3 é um defeito medido, não uma melhoria.** O nome da filial nos
-documentos vem de join vivo (`data/romaneios.ts:943`), não do snapshot:
-renomear uma filial hoje muda o cabeçalho de PDFs históricos e manda um
-reenvio para outra pasta do Drive. O `document_hash` **não** é afetado — o
-canônico carrega só o `loja_id`.
+**O passo 3 era um defeito medido, não uma melhoria — CONSTRUÍDO em
+2026-09-11, migration `20260911130000` a aplicar.** O nome da filial nos
+documentos vinha de join vivo: renomear uma filial mudava o cabeçalho de
+PDFs históricos e mandava um reenvio para outra pasta do Drive. Agora ele
+é congelado em `payload.loja_nome` no selo — saída, retorno e conflito — e
+`nomeDaFilialDoDocumento` (`lib/filialDoDocumento.ts`) é a única leitura,
+no mapper compartilhado de página, PDF e sangria.
+
+- **Fora do canônico, de propósito.** O `document_hash` continua cobrindo
+  só o `loja_id`; nenhum hash muda, e o verificador não lê o payload.
+- **Documento anterior à migration cai no nome atual.** É leitor de
+  formato histórico, só para dados de teste que o corte apaga. **Não houve
+  preenchimento retroativo**: gravar o nome de hoje seria inventar o do
+  instante do selo.
+- **Chave presente com nulo NÃO cai no nome atual**: o snapshot existe e
+  diz que não havia nome.
+- **A saída offline congela o nome do instante da sincronização**, não o
+  da retirada — só diverge se a filial for renomeada nesse meio tempo.
+- **A migration é gerada** por `scripts/patch-payload-loja-nome.mts`, que
+  prova que só a chave entrou. Não edite à mão.
 
 **O staging continua vindo DEPOIS de todas as funções**, e a razão é do
 usuário: o objetivo dele não é ver se builda fora do localhost, é provar o

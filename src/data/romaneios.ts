@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { sha256Hex } from '@/lib/hash'
 import { montarCanonico, type EntradaCanonica, type ValeCanonico } from '@/lib/canonico'
 import type { EnvelopeSelado } from '@/lib/envelope'
+import { nomeDaFilialDoDocumento } from '@/lib/filialDoDocumento'
 
 // Romaneio de Saída — o documento selado da retirada.
 //
@@ -940,7 +941,10 @@ function mapRomaneio(r: any, assinaturas: AssinaturaDoRomaneio[]): RomaneioCompl
     canonico: r.canonico,
     payload: r.payload,
     conflito: r.conflito,
-    lojaNome: r.lojas?.nome ?? null,
+    // Do SNAPSHOT, não do join vivo — passo 3. Renomear a filial não pode
+    // mudar o cabeçalho de um documento já selado nem a pasta dele no
+    // Drive. O join só responde por documento anterior à migration.
+    lojaNome: nomeDaFilialDoDocumento(r.payload, r.lojas?.nome ?? null),
     criadoPorNome: r.profiles?.nome ?? null,
     ip: r.ip,
     corrida: r.corridas

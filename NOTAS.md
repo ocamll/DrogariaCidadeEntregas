@@ -123,7 +123,7 @@ pré-V1 revisado (`docs/escopo-pre-v1-revisado.md`):
 0  alinhar CLAUDE.md/NOTAS ao escopo revisado   ← feito em 08/09
 1  um vale sem adicional · convênio genérico · sem "Outro"   ← feito em 10/09
 2  "Cargo" · filial obrigatória · admin sem lançamento   ← feito em 11/09 (item 100)
-3  snapshot histórico da filial nos documentos
+3  snapshot histórico da filial nos documentos   ← feito em 11/09, a aplicar (item 101)
 4  concluir o contrato de assinaturas/envelope
 5  fechamento diário com exceções e aprovação auditável
 6  painel da agência: cobrança discriminada e conferência
@@ -9953,6 +9953,90 @@ funcionalidade não existe. A cobertura da fila continua a das specs.
 **Graphify: não atualizar agora.** Uma atualização só, quando as próximas
 mudanças de código e documentação estabilizarem.
 
+## 101. Passo 3 — o nome da filial congelado no documento
+
+**2026-09-11.** O defeito era medido desde o item 96: o nome da filial nos
+romaneios vinha do join vivo `lojas(nome)`, no mapper de
+`src/data/romaneios.ts`. Renomear uma filial mudava o cabeçalho de todo PDF
+histórico e mandava um reenvio ao Drive para outra pasta. O plano da
+auditoria (`docs/analise-limpeza-pre-v1.md`, ordem, item 4) foi seguido,
+com um acréscimo: o retorno também.
+
+### O que foi feito
+
+```
+migration 20260911130000   romaneio_payload          + 'loja_nome'
+                           romaneio_retorno_payload  + 'loja_nome'
+                             (da filial da SAÍDA — é o loja_id que o
+                              selo do retorno grava)
+lib/filialDoDocumento.ts   a regra de leitura, pura
+data/romaneios.ts          o mapper compartilhado passa a usá-la
+```
+
+**Página, PDF, envio individual e sangria herdam sem mudar uma linha**:
+todos recebem `RomaneioCompleto.lojaNome` já resolvido pelo mesmo mapper.
+
+**Por que o retorno entrou junto:** hoje nenhuma tela desenha o retorno (a
+página recusa e a sangria filtra `tipo = 'saida'`), mas o PDF do retorno é
+a etapa 9 pendente. Congelar agora custa uma subconsulta; deixar para
+depois deixaria retornos selados sem o nome, e aí só o join vivo.
+
+### As decisões, e por quê
+
+- **Fora do canônico.** O `document_hash` cobre só o `loja_id`; nome entrar
+  no canônico mudaria os dois gêmeos e o hash de todo documento novo. O
+  payload existe exatamente para o que é pra ler, não pra hashear.
+- **Assinaturas idênticas**, então os quatro chamadores
+  (`selar_romaneio_interno`, `registrar_conflito_romaneio`,
+  `preparar_romaneio`, `selar_romaneio_retorno_interno`) **não foram
+  reabertos**. O conflito também ganha o nome, de graça.
+- **Nenhum documento existente foi reescrito.** `create or replace` troca a
+  função, não `romaneios.payload`. Preencher os antigos seria gravar o nome
+  de HOJE como se fosse o do selo — inventar história. Eles caem no join
+  vivo, e são todos dados de teste que o corte apaga.
+- **Três situações na leitura, não duas:** chave com nome → o nome; chave
+  com nulo ou vazio → `null`, sem cair no nome atual (o snapshot existe e
+  diz que não havia nome); chave ausente → nome atual (documento antigo).
+- **Limite declarado:** a saída offline sela na sincronização, então
+  congela o nome daquele instante, e não o da retirada. Só diverge com
+  renomeação nesse meio tempo — e renomear filial é SQL manual.
+- **Nenhum leitor quebra:** no banco e no cliente o payload só é lido por
+  `-> 'vales'`; ninguém compara o payload inteiro. Conferido por grep antes
+  de escrever.
+
+### O que foi medido
+
+```
+patch-payload-loja-nome.mts   19 provas — cada função definida numa
+                              migration só; tirando a inserção, volta byte
+                              a byte à original; cabeçalho idêntico; o
+                              arquivo não redefine canônico, selo nem
+                              verificador
+filial-do-documento.spec.mts  17 casos: a regra e a fiação
+controle de mutação           voltar o mapper para o join vivo reprova as
+                              duas asserções de fiação — a spec morde
+build · lint                  ok · 0 erros
+specs                         27 passando + a geradora dcrr1-sql (exit 0)
+```
+
+**O que NÃO foi visto:** a página e o PDF com o nome vindo do snapshot. O
+painel do navegador desta sessão está sem login, e nenhum documento tem a
+chave até existir uma saída depois da migration.
+
+### O aceite — depende do usuário
+
+1. **Aplicar `20260911130000`** e rodar as conferências (a) a (e) do
+   rodapé, uma por vez. A (d) tem que dar `com_nome = 0` em tudo — prova
+   de que nada existente foi reescrito — e a (e) o mesmo placar da última
+   medição.
+2. **Fazer uma saída** (e, se possível, o retorno dela) e rodar a (f): o
+   nome tem que aparecer gravado.
+3. **Opcional, o teste que prova o passo inteiro:** renomear por SQL uma
+   filial que tenha a saída nova, reabrir o romaneio (página e PDF) e
+   conferir que o cabeçalho continua com o nome antigo — e depois
+   **desfazer a renomeação**. Renomear filial é mudança de dado real: é
+   decisão do usuário, não parte automática do aceite.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
@@ -9968,7 +10052,7 @@ decisão operacional antes de uso real: o que fazer com os dados de teste
 acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 é SQL manual, e é decisão de tomar antes de virar a chave, não depois.
 
-### PRÓXIMA SESSÃO: depois do passo 2
+### PRÓXIMA SESSÃO: depois do passo 3
 
 > **Esta é a seção atual.** As de baixo são históricas: descrevem como
 > "próximo" coisas que já foram feitas.
@@ -9996,8 +10080,16 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > recusa da própria Edge Function não foi exercitada isoladamente, porque
 > a tela barra antes (item 100).
 >
-> **O próximo é o passo 3**: o nome da filial nos documentos, que hoje
-> vem de join vivo e não do snapshot.
+> **PASSO 3 CONSTRUÍDO em 2026-09-11 (item 101), migration A APLICAR.** O
+> nome da filial passa a ser congelado em `payload.loja_nome` no selo da
+> saída e do retorno, e o mapper compartilhado lê dali. Nenhum hash muda,
+> nenhum documento existente é reescrito.
+>
+> **PENDENTE DO USUÁRIO:** aplicar `20260911130000` e rodar as
+> conferências (a) a (e); fazer uma saída e rodar a (f). O teste de
+> renomear uma filial e reabrir o romaneio é opcional e deve ser desfeito.
+>
+> **Depois, o passo 4**: concluir o contrato de assinaturas/envelope.
 >
 > **Graphify ainda não**: uma atualização só, quando as próximas mudanças
 > de código e documentação estabilizarem.
