@@ -35,7 +35,10 @@ Substitui dois formulários manuscritos que o caixa preenche hoje a cada entrega
 Usuário principal: operador de caixa, PC Windows com Chrome, com fila de cliente
 esperando no balcão. Velocidade de digitação é o requisito número um.
 
-Usuário secundário: mototaxista, que só encosta num tablet para assinar.
+Usuário secundário: mototaxista, que só encosta num tablet para assinar —
+**desde a decisão de 2026-09-11, para passar o cartão e digitar o PIN**: a
+assinatura manuscrita sai do sistema (ainda não construído; ver "Cadeia de
+custódia").
 
 A farmácia real tem **18 filiais**, espalhadas por mais de uma cidade
 (o banco de desenvolvimento já tem as oito de São Gabriel, medido em
@@ -1238,6 +1241,20 @@ foram assinados.
 
 Construído em 2026-08-16, em seis etapas. A saída da tele deixou de ser
 "salvar uma assinatura do motoboy" e virou um documento selado.
+
+> **A ASSINATURA MANUSCRITA SAI — decidido em 2026-09-11, NÃO CONSTRUÍDO.**
+> Nas palavras do usuário: *"Não é para deixar assinaturas do sistema,
+> apenas cartão e pin."* A evidência do motoboy passa a ser **cartão + PIN**;
+> a da farmácia, a **sessão com um ato explícito de confirmar** o conteúdo.
+> O **gestor ganha credencial própria** (cartão + PIN) para verificar a saída
+> sem travar o fluxo.
+>
+> Tudo o que esta seção descreve sobre traços (`strokes`, canvas, as duas
+> assinaturas, `signature_pad`) **continua sendo o código de hoje** e sai no
+> 4B, com versão nova das fórmulas de `signature_hash` e do hash do evento
+> offline, lida da própria linha. **Os bytes de DCR1 e DCRR1 não mudam**: os
+> traços nunca entraram no canônico. Detalhe na seção 12 de
+> `docs/levantamento-4a-2026-09-11.md`.
 
 ```
 CARTÃO  → quem é?        identifica a credencial física
@@ -3637,12 +3654,25 @@ do admin:
 - **Admin consulta e decide; não lança vale, não libera saída nem registra
   retorno.** Gerente tem filial fixa e cobre o balcão ocasionalmente.
 
-**Abertas, a responder no 4A:** o calendário da quinzena e a competência
-de uma tentativa que atravessa o corte; até quando existe papel e como ele
-recebe o número digital; quem aprova a conferência e quem aprova a
-cobrança; o que acontece hoje sem cartão/PIN, com outro motoboy no retorno
-ou com todos os terminais offline; e as regras de cancelamento,
-transferência e busca posterior de documento.
+**Respondido pelo usuário em 2026-09-11** (item 104 do NOTAS; seção 12 do
+levantamento 4A):
+
+- **Sem assinatura manuscrita no sistema — só cartão e PIN** do lado do
+  motoboy. Decidido, não construído (4B).
+- **Gestor com credencial própria** (cartão + PIN) para verificar a saída do
+  motoboy, sem travar o fluxo.
+- **Outro motoboy trazendo o retorno nunca aconteceu**: a recusa
+  `outro_motoboy` fica, sem fluxo novo.
+- **Gestor e financeiro são os responsáveis**: o gestor responde ao
+  financeiro quando algo dá errado.
+- **Busca posterior de documento não gera vale.**
+
+**Ainda abertas:** as datas da quinzena (o usuário não sabe); **se
+transferência gera vale — a resposta "acredito que não" contradiz a
+confirmação de 2026-08-11** registrada em "Tarifa", e nada muda antes de
+checar com a farmácia ou a agência; quando a credencial do gestor é usada;
+se o financeiro é o admin; quem dá baixa de papel; e o vale de papel
+durante a transição.
 
 **Os passos 5 e 6 são duas frentes de produto ligadas.** O fechamento pode
 organizar as exceções operacionais antes de o painel existir, mas **não

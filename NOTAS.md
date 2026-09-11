@@ -10251,6 +10251,49 @@ usuário trouxe uma revisão dele, copiada com links relativos em
 **Publicada.** Na nova tentativa de push, o remoto já estava em
 `1014b5d`: `Everything up-to-date`. Nada foi forçado nem contornado.
 
+## 104. As respostas do usuário ao 4A
+
+**2026-09-11**, às seis perguntas da seção 10 do levantamento. Registradas
+por inteiro na seção 12 dele; aqui fica o que muda a forma de trabalhar.
+
+### Decidido
+
+- **A assinatura manuscrita sai do sistema.** *"Não é para deixar
+  assinaturas do sistema, apenas cartão e pin."* Motoboy: cartão + PIN.
+  Farmácia: sessão com um ato explícito de confirmar. **Não construído**
+  — é o 4B. Os bytes de DCR1 e DCRR1 não mudam (traços nunca entraram no
+  canônico); mudam as fórmulas de `signature_hash` e do hash do evento
+  offline, com versão lida da linha, o PDF, as telas e o verificador.
+- **O gestor ganha credencial própria**, cartão + PIN, para verificar a
+  saída do motoboy — *"sendo uma pessoa de mais confiança na filial. Sem
+  travar o fluxo."*
+- **Outro motoboy trazendo o retorno nunca aconteceu.** A recusa
+  `outro_motoboy` fica como está; nenhum fluxo novo.
+- **Gestor e financeiro.** *"O gestor deve explicações ao financeiro caso
+  algo dê errado."* O gestor confere o dia e resolve divergência; o
+  financeiro aprova a cobrança.
+- **Busca posterior de documento não gera vale.**
+
+### O conflito, registrado para não passar
+
+Sobre transferência gerar vale, a resposta foi *"acredito que não"*. Isso
+**contradiz** a confirmação feita na farmácia em 2026-08-11 — *"quem leva o
+produto de uma filial pra outra é o motoboy da agência, e ela cobra por
+essa corrida como por qualquer outra"* —, que é o que o código faz desde
+então. Tirar a tarifa da transferência reduziria o acerto com a agência.
+**Nada muda até checar com a farmácia ou a agência.**
+
+### Ainda aberto
+
+1. datas da quinzena (*"Não sei."*);
+2. transferência (acima);
+3. credencial do gestor: é o gerente? usada só quando o motoboy está sem
+   cartão ou PIN, ou em qualquer saída? também no retorno?
+4. financeiro: é o admin, ou pessoa sem cargo no sistema?
+5. quem dá baixa de papel: o caixa que recebeu ou o gestor?
+6. o vale de papel na transição — pergunta reformulada, porque a primeira
+   versão não ficou clara.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
@@ -10310,11 +10353,13 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > ser a contraparte da conciliação por vale. A limpeza de interface que
 > veio junto foi revisada e commitada.
 >
-> **O LEVANTAMENTO 4A ESTÁ FEITO E REVISTO (item 103):**
-> `docs/levantamento-4a-2026-09-11.md`, versão 2, com a revisão ao lado.
-> **Nada de código, migration ou banco** até as seis perguntas da seção 10
-> dele serem respondidas — quinzena, transferência e busca de documento,
-> traços, processo excepcional, responsáveis, papel na transição.
+> **O LEVANTAMENTO 4A ESTÁ FEITO E REVISTO (item 103), e o usuário
+> respondeu às perguntas (item 104):** a assinatura manuscrita sai — só
+> cartão e PIN —, o gestor ganha credencial própria, e gestor e financeiro
+> são os responsáveis. **Ainda aberto:** datas da quinzena, o conflito da
+> transferência com 2026-08-11, o uso da credencial do gestor, se o
+> financeiro é o admin, quem dá baixa de papel, e o papel na transição.
+> **Nada de código, migration ou banco** antes de fechar esses pontos.
 >
 > **Depois:** o 4B implementa o contrato de evidências escolhido; o 4C
 > precisa das três partes (Service Worker + Cache API, telas no estado

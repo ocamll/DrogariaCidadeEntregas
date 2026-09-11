@@ -302,7 +302,7 @@ O teste exercita a indisponibilidade **do site e do servidor de dados**. Uma aba
 
 ---
 
-## 10. Perguntas para você decidir
+## 10. Perguntas para você decidir — respondidas em parte na seção 12
 
 1. **Quinzena (P1):** quais são as datas de corte?
 2. **Serviços sem regra (P2):** a transferência e a busca posterior de documento geram vale? Com que regra?
@@ -329,3 +329,48 @@ O teste exercita a indisponibilidade **do site e do servidor de dados**. Uma aba
   - rolagem lateral.
 
   Estão no item 102 do NOTAS.
+
+---
+
+## 12. Respostas do usuário — 11/09
+
+| # | Resposta, nas palavras dele | Como fica | Situação |
+|---|---|---|---|
+| P1 | "Não sei." | as datas de corte da quinzena continuam abertas. Proposta a confirmar com o financeiro e a agência: dias 1 a 15 e 16 ao último dia do mês | **aberta** |
+| P2 | "Acredito que não." | **busca posterior de documento não gera vale** — não existe fluxo para isso, e nada muda. **Transferência: ver o conflito abaixo** | **transferência aberta** |
+| P3 | "Não é para deixar assinaturas do sistema, apenas cartão e pin." | **a assinatura manuscrita sai**, do motoboy e da farmácia, na saída e no retorno. Do motoboy fica **cartão + PIN**. Da farmácia fica a **sessão com o ato explícito de confirmar** — o botão de confirmação, e não o simples fato de estar logado | **decidido, não construído** |
+| P4 | "Podemos criar cartões credenciais para os gestores também, assim ele pode verificar a saída do motoboy, sendo uma pessoa de mais confiança na filial. Sem travar o fluxo. Nunca antes outro motoboy trouxe o retorno." | **o gestor ganha credencial própria (cartão + PIN)** para verificar a saída do motoboy, sem que isso trave o fluxo normal. **Outro motoboy trazendo o retorno nunca aconteceu**: a recusa `outro_motoboy` fica, e nenhum fluxo novo é criado | **decidido, com dúvidas abaixo** |
+| P5 | "Gestor e Financeiro. Pois o gestor deve explicações ao financeiro caso algo dê errado." | o **gestor** confere o dia, resolve divergência e responde por ela; o **financeiro** aprova a cobrança | **decidido, com dúvidas abaixo** |
+| P6 | "Não entendi a pergunta." | reformulada abaixo | **aberta** |
+
+### O conflito da transferência
+
+A resposta "acredito que não" **contradiz** o que foi confirmado na farmácia em 2026-08-11 e está no `CLAUDE.md`, seção "Tarifa":
+
+> quem leva o produto de uma filial pra outra é o motoboy da agência, e ela cobra por essa corrida como por qualquer outra
+
+O código cobra tarifa na transferência desde então: o vale de transferência nasce com a tarifa da filial que pediu. Tirar isso muda o acerto com a agência para menos. **Nada muda até confirmar com a farmácia ou a agência.**
+
+### O que P3 muda no 4B — técnico, não é pergunta
+
+Os bytes de DCR1 e DCRR1 **não mudam**: os traços nunca entraram no canônico. Mudam:
+
+| Onde | O que muda |
+|---|---|
+| `assinaturas` | nova versão sem traços; `strokes` deixa de ser exigido nos registros novos |
+| fórmulas de `signature_hash` (saída e retorno) | versão nova, sem traços, lida da própria linha; documentos antigos continuam verificando pela fórmula histórica |
+| hash do evento offline (`envelope.ts` e a cópia na `sync-romaneio`) | versão nova sem traços, nos dois gêmeos ao mesmo tempo, só com a fila vazia — junto com a saída da geolocalização |
+| Nova corrida e Retorno | sai o canvas; entra a confirmação explícita do conteúdo |
+| PDF do romaneio e página do romaneio | deixam de desenhar assinatura e passam a mostrar a validação por cartão e PIN e quem confirmou pela farmácia |
+| verificador | aprende a versão nova |
+| `signature_pad` | pode sair da stack quando nada mais o usar |
+
+### Dúvidas que as respostas abriram
+
+1. **Credencial do gestor (P4):**
+   - "gestor" é o **gerente da filial**?
+   - ela é usada **só quando o motoboy está sem cartão ou PIN** — o gestor valida no lugar para a saída não parar — ou pode ser usada **em qualquer saída**, como verificação extra opcional?
+   - vale **também no retorno**?
+2. **Financeiro (P5):** é o **administrador** do sistema, ou uma pessoa diferente que ainda não tem cargo? Hoje existem só caixa, gerente e admin.
+3. **Baixa de papel (P5):** quem marca que o documento de convênio ou a receita voltou — o caixa que recebeu no balcão, ou o gestor?
+4. **Papel na transição (P6), reformulada:** quando o piloto começar, o motoboy ainda vai levar algum **vale de papel escrito à mão**? Se sim, por quanto tempo, e o número escrito nele vai ser o mesmo que o sistema gerou (V-000123)? Ou o papel acaba no primeiro dia?
