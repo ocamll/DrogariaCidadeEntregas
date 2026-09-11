@@ -105,12 +105,26 @@ type ItemFilaOperacaoV2 = {
 // chegam ao navegador, porque o GRANT por coluna não os inclui. Aqui
 // dentro há um `public_id`, que sozinho não autentica nada (quem
 // autentica é o PIN, e ele nunca sai do envelope selado).
+//
+// DOIS TITULARES desde o 4B.1 (2026-09-11): o cartão do motoboy e o do
+// GERENTE, que autoriza a saída e o retorno quando o motoboy perdeu o
+// cartão ou esqueceu o PIN. `titular` diz qual é, e os pares de campos
+// abaixo nascem nulos do lado que não se aplica — um motoboy não tem
+// filial, um gerente não tem agência.
+//
+// `titularNome` existe pra tela não precisar escolher entre dois campos
+// para dizer de quem é o cartão. Ele substituiu `motoboyNome`, que
+// mentiria na metade dos casos.
 export type CredencialEmCache = {
   publicId: string
-  motoboyId: string
-  motoboyNome: string
+  titular: 'motoboy' | 'gerente'
+  titularNome: string
+  motoboyId: string | null
   agenciaId: string | null
   agenciaNome: string | null
+  profileId: string | null
+  lojaId: string | null
+  lojaNome: string | null
   temPin: boolean
   atualizadoEm: string
 }
@@ -263,6 +277,40 @@ db.version(7)
     console.warn(
       `[fila offline] corte pré-V1: ${antes} operação(ões) local(is) descartada(s), ` +
         'mais os caches de credencial e de contexto. Ver a v7 em lib/db.ts.'
+    )
+  })
+
+// =====================================================================
+// v8 — o cache de credenciais muda de FORMA (4B.1, 2026-09-11)
+//
+// `motoboyNome` virou `titularNome`, e entraram `titular`, `profileId`,
+// `lojaId` e `lojaNome`. Um registro do formato antigo lido pela tela
+// nova não daria erro: mostraria `undefined` no lugar do nome de quem
+// bipou — exatamente o tipo de mentira baixinho que este projeto passa o
+// tempo todo evitando.
+//
+// Apagar aqui é seguro, e é o oposto do que a v7 fez: **isto é cache, não
+// é fila**. Não há operação de ninguém aqui dentro — só uma cópia local
+// de quais cartões existem, que a próxima abertura com rede reconstrói
+// sozinha. O custo de apagar é um terminal que fica sem identificar
+// cartão offline até a primeira vez que tiver internet; o custo de não
+// apagar é um cartão identificado com nome errado.
+//
+// A fila NÃO é tocada. O aviso da v7 continua valendo para ela: depois de
+// haver produção, limpeza de fila é cirúrgica, nunca `clear()`.
+// =====================================================================
+db.version(8)
+  .stores({
+    filaOperacoes: 'id, status, tipo, userId, chave, proximaTentativaEm',
+    credenciaisCache: 'publicId, motoboyId',
+    contextosRetorno: 'corridaId, atualizadoEm',
+  })
+  .upgrade(async (tx) => {
+    const antes = await tx.table('credenciaisCache').count()
+    await tx.table('credenciaisCache').clear()
+    console.warn(
+      `[cache de credenciais] formato novo (titular): ${antes} registro(s) local(is) ` +
+        'descartado(s). Reconstrói sozinho na primeira abertura com rede.'
     )
   })
 

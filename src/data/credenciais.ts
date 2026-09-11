@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { publicIdDoToken } from '@/lib/tokenCartao'
+import { credencialEntraNoCache } from '@/lib/credencialNoCache'
 import { supabase } from '@/lib/supabase'
 import { db, type CredencialEmCache } from '@/lib/db'
 
@@ -21,7 +22,8 @@ const LIMITE_CADASTRO = 500
 // quando `supabase gen types typescript` estiver configurado neste projeto.
 type CredencialRow = {
   id: string
-  motoboy_id: string
+  motoboy_id: string | null
+  profile_id: string | null
   public_id: string
   ativo: boolean
   tem_pin: boolean
@@ -31,9 +33,13 @@ type CredencialRow = {
   bloqueado_ate: string | null
 }
 
+// Um titular, nunca os dois — o CHECK `motoboy_credenciais_um_titular`
+// garante isso no banco. Aqui os dois campos existem nulos porque a
+// listagem do admin mostra as duas tabelas a partir da mesma consulta.
 export type Credencial = {
   id: string
-  motoboyId: string
+  motoboyId: string | null
+  profileId: string | null
   publicId: string
   ativo: boolean
   temPin: boolean
@@ -47,7 +53,7 @@ async function buscarCredenciais(): Promise<Credencial[]> {
   const { data, error } = await supabase
     .from('motoboy_credenciais')
     .select(
-      'id, motoboy_id, public_id, ativo, tem_pin, emitido_em, ultimo_uso_em, tentativas_pin, bloqueado_ate'
+      'id, motoboy_id, profile_id, public_id, ativo, tem_pin, emitido_em, ultimo_uso_em, tentativas_pin, bloqueado_ate'
     )
     .eq('ativo', true)
     .order('emitido_em', { ascending: false })
@@ -58,6 +64,7 @@ async function buscarCredenciais(): Promise<Credencial[]> {
   return (data as unknown as CredencialRow[]).map((row) => ({
     id: row.id,
     motoboyId: row.motoboy_id,
+    profileId: row.profile_id,
     publicId: row.public_id,
     ativo: row.ativo,
     temPin: row.tem_pin,
@@ -94,6 +101,45 @@ export function useEmitirCredencial() {
     mutationFn: async (motoboyId: string): Promise<CredencialEmitida> => {
       const { data, error } = await supabase.rpc('emitir_credencial', {
         p_motoboy_id: motoboyId,
+      })
+      if (error) throw error
+
+      const linhas = data as unknown as Array<{
+        credencial_id: string
+        public_id: string
+        token: string
+      }>
+      if (!linhas || linhas.length === 0) throw new Error('A emissão não devolveu o cartão.')
+
+      return {
+        credencialId: linhas[0].credencial_id,
+        publicId: linhas[0].public_id,
+        token: linhas[0].token,
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['credenciais'] })
+      queryClient.invalidateQueries({ queryKey: ['eventos-auditoria'] })
+    },
+  })
+}
+
+// O cartão do GERENTE — 4B.1, 2026-09-11.
+//
+// Mesma emissão, outro titular e outra recusa: o banco barra quem não é
+// gerente, quem está bloqueado e quem está sem filial (a autorização é
+// conferida contra a filial do documento, então um gerente sem filial
+// receberia um cartão que nunca casa com documento nenhum).
+//
+// A porta é outra função de propósito. Uma só, com dois parâmetros
+// nuláveis, deixaria "emitir para ninguém" representável — e o erro
+// apareceria no balcão, não aqui.
+export function useEmitirCredencialDeGerente() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (profileId: string): Promise<CredencialEmitida> => {
+      const { data, error } = await supabase.rpc('emitir_credencial_de_gerente', {
+        p_profile_id: profileId,
       })
       if (error) throw error
 
@@ -157,16 +203,36 @@ export function useRedefinirPin() {
 // document_hash) é outra coisa e entra na etapa 3.
 // =====================================================================
 
-export type CredencialIdentificada = {
-  credencialId: string
-  publicId: string
-  motoboyId: string
-  motoboyNome: string
-  agenciaId: string | null
-  agenciaNome: string | null
-  temPin: boolean
-  bloqueadoAte: string | null
-}
+// UNIÃO, e não campos nuláveis — 4B.1, 2026-09-11.
+//
+// O cartão do gerente não identifica motoboy nenhum, e um tipo com
+// `motoboyNome: string | null` deixaria cada tela decidir sozinha o que
+// fazer com o nulo (na prática: mostrar "—" e seguir). Com a união, o
+// compilador ENUMERA quem precisa tratar o caso, que é o mesmo mecanismo
+// que a 2D.6 usou pra tirar o `fechamento_corrida` da fila.
+export type CredencialIdentificada =
+  | {
+      titular: 'motoboy'
+      credencialId: string
+      publicId: string
+      motoboyId: string
+      motoboyNome: string
+      agenciaId: string | null
+      agenciaNome: string | null
+      temPin: boolean
+      bloqueadoAte: string | null
+    }
+  | {
+      titular: 'gerente'
+      credencialId: string
+      publicId: string
+      profileId: string
+      gerenteNome: string
+      lojaId: string | null
+      lojaNome: string | null
+      temPin: boolean
+      bloqueadoAte: string | null
+    }
 
 // Zero linhas = cartão desconhecido, revogado, de outro tenant, ou com o
 // segredo errado. A tela mostra a mesma coisa nos quatro casos, de
@@ -180,21 +246,42 @@ export async function identificarCredencial(
   const linhas = data as unknown as Array<{
     credencial_id: string
     public_id: string
-    motoboy_id: string
-    motoboy_nome: string
+    titular_tipo: 'motoboy' | 'gerente'
+    motoboy_id: string | null
+    motoboy_nome: string | null
     agencia_id: string | null
     agencia_nome: string | null
+    profile_id: string | null
+    titular_nome: string | null
+    loja_id: string | null
+    loja_nome: string | null
     tem_pin: boolean
     bloqueado_ate: string | null
   }>
   if (!linhas || linhas.length === 0) return null
 
   const linha = linhas[0]
+
+  if (linha.titular_tipo === 'gerente') {
+    return {
+      titular: 'gerente',
+      credencialId: linha.credencial_id,
+      publicId: linha.public_id,
+      profileId: linha.profile_id as string,
+      gerenteNome: linha.titular_nome ?? '—',
+      lojaId: linha.loja_id,
+      lojaNome: linha.loja_nome,
+      temPin: linha.tem_pin,
+      bloqueadoAte: linha.bloqueado_ate,
+    }
+  }
+
   return {
+    titular: 'motoboy',
     credencialId: linha.credencial_id,
     publicId: linha.public_id,
-    motoboyId: linha.motoboy_id,
-    motoboyNome: linha.motoboy_nome,
+    motoboyId: linha.motoboy_id as string,
+    motoboyNome: linha.motoboy_nome ?? '—',
     agenciaId: linha.agencia_id,
     agenciaNome: linha.agencia_nome,
     temPin: linha.tem_pin,
@@ -284,33 +371,63 @@ export function pinAceitavel(pin: string): string | null {
 
 type LinhaCache = {
   public_id: string
-  motoboy_id: string
+  motoboy_id: string | null
+  profile_id: string | null
   tem_pin: boolean
   mototaxistas: { nome: string; agencia_id: string | null; agencias: { nome: string } | null } | null
+  // `motoboy_credenciais` tem TRÊS FKs para `profiles` — o titular,
+  // `emitido_por` e `revogado_por`. Sem dizer qual, o PostgREST recusa a
+  // consulta inteira por ambiguidade (PGRST201), que é o mesmo erro que o
+  // Registro de Auditoria pagou com `entregas(lojas(nome))`.
+  profiles: { nome: string; loja_id: string | null; lojas: { nome: string } | null } | null
 }
 
 // Chamada quando a tela de Nova Corrida monta, e só se houver rede. Se
 // falhar, não é erro de tela: o cache anterior continua valendo, e é
 // justamente pra isso que ele existe.
-export async function sincronizarCacheDeCredenciais(): Promise<number> {
+//
+// A FILIAL DE QUEM ESTÁ NO TERMINAL entra como parâmetro desde o 4B.1:
+// ela decide quais cartões de gerente ficam guardados aqui. A regra mora
+// em `lib/credencialNoCache.ts`, testável sem banco.
+export async function sincronizarCacheDeCredenciais(
+  lojaIdDoUsuario: string | null
+): Promise<number> {
   const { data, error } = await supabase
     .from('motoboy_credenciais')
-    .select('public_id, motoboy_id, tem_pin, mototaxistas(nome, agencia_id, agencias(nome))')
+    .select(
+      'public_id, motoboy_id, profile_id, tem_pin, ' +
+        'mototaxistas(nome, agencia_id, agencias(nome)), ' +
+        'profiles!motoboy_credenciais_profile_id_fkey(nome, loja_id, lojas(nome))'
+    )
     .eq('ativo', true)
     .limit(LIMITE_CADASTRO)
 
   if (error) throw error
 
   const agora = new Date().toISOString()
-  const linhas = (data as unknown as LinhaCache[]).map<CredencialEmCache>((row) => ({
-    publicId: row.public_id,
-    motoboyId: row.motoboy_id,
-    motoboyNome: row.mototaxistas?.nome ?? '—',
-    agenciaId: row.mototaxistas?.agencia_id ?? null,
-    agenciaNome: row.mototaxistas?.agencias?.nome ?? null,
-    temPin: row.tem_pin,
-    atualizadoEm: agora,
-  }))
+  const linhas = (data as unknown as LinhaCache[])
+    .map<CredencialEmCache>((row) => {
+      const eMotoboy = row.motoboy_id !== null
+      return {
+        publicId: row.public_id,
+        titular: eMotoboy ? 'motoboy' : 'gerente',
+        titularNome: (eMotoboy ? row.mototaxistas?.nome : row.profiles?.nome) ?? '—',
+        motoboyId: row.motoboy_id,
+        agenciaId: row.mototaxistas?.agencia_id ?? null,
+        agenciaNome: row.mototaxistas?.agencias?.nome ?? null,
+        profileId: row.profile_id,
+        lojaId: row.profiles?.loja_id ?? null,
+        lojaNome: row.profiles?.lojas?.nome ?? null,
+        temPin: row.tem_pin,
+        atualizadoEm: agora,
+      }
+    })
+    .filter((linha) =>
+      credencialEntraNoCache(
+        { titular: linha.titular, lojaIdDoTitular: linha.lojaId },
+        lojaIdDoUsuario
+      )
+    )
 
   // Substitui inteiro: cartão revogado tem que SUMIR do cache, senão
   // continuaria identificando alguém offline depois de revogado.

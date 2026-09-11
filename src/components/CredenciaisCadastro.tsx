@@ -4,12 +4,14 @@ import { useMototaxistasCadastro, useAgenciasCadastro } from '@/data/cadastros'
 import {
   useCredenciais,
   useEmitirCredencial,
+  useEmitirCredencialDeGerente,
   useRevogarCredencial,
   useRedefinirPin,
   credencialBloqueada,
   type Credencial,
   type CredencialEmitida,
 } from '@/data/credenciais'
+import { useUsuarios } from '@/data/usuarios'
 import {
   generateMotoboyCredential,
   formatTokenForDisplay,
@@ -55,20 +57,32 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
   const agencias = estadoAgencias.estado === 'ready' ? estadoAgencias.dados : undefined
   const credenciais = estadoCredenciais.estado === 'ready' ? estadoCredenciais.dados : undefined
 
+  // Os gerentes: mesma tabela de credenciais, outro titular. A consulta é
+  // a de usuários, que o admin já enxerga inteira.
+  const consultaUsuarios = useUsuarios()
+  const estadoUsuarios = derivarEstado(consultaUsuarios)
+  const gerentes =
+    estadoUsuarios.estado === 'ready'
+      ? estadoUsuarios.dados.filter((u) => u.papel === 'gerente' && u.ativo)
+      : undefined
+
   const emitir = useEmitirCredencial()
+  const emitirDeGerente = useEmitirCredencialDeGerente()
   const revogar = useRevogarCredencial()
   const redefinir = useRedefinirPin()
 
   const [emitida, setEmitida] = useState<{
     dados: CredencialEmitida
-    motoboyNome: string
-    agenciaNome: string
+    titularNome: string
+    vinculoNome: string
   } | null>(null)
   const [confirmando, setConfirmando] = useState<
-    { acao: 'revogar' | 'redefinir'; credencial: Credencial; motoboyNome: string } | null
+    { acao: 'revogar' | 'redefinir'; credencial: Credencial; titularNome: string } | null
   >(null)
 
   const credencialDe = (motoboyId: string) => credenciais?.find((c) => c.motoboyId === motoboyId)
+  const credencialDoGerente = (profileId: string) =>
+    credenciais?.find((c) => c.profileId === profileId)
 
   // "Não tem agência" e "não sei qual é" eram os dois o mesmo `—`.
   const nomeAgencia = (agenciaId: string | null) => {
@@ -86,7 +100,15 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
   // tabela — uma fonte só.
   async function handleEmitir(motoboyId: string, motoboyNome: string, agenciaNome: string) {
     const dados = await emitir.mutateAsync(motoboyId)
-    setEmitida({ dados, motoboyNome, agenciaNome })
+    setEmitida({ dados, titularNome: motoboyNome, vinculoNome: agenciaNome })
+  }
+
+  // Mesmo cartão, mesmo desenho: no lugar da agência vai a FILIAL, que é
+  // o vínculo que importa para um gerente — e é contra ela que o selo vai
+  // conferir a autorização.
+  async function handleEmitirGerente(profileId: string, nome: string, lojaNome: string) {
+    const dados = await emitirDeGerente.mutateAsync(profileId)
+    setEmitida({ dados, titularNome: nome, vinculoNome: lojaNome })
   }
 
   return (
@@ -210,7 +232,7 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
                             setConfirmando({
                               acao: 'redefinir',
                               credencial,
-                              motoboyNome: motoboy.nome,
+                              titularNome: motoboy.nome,
                             })
                           }
                         >
@@ -225,7 +247,7 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
                             setConfirmando({
                               acao: 'revogar',
                               credencial,
-                              motoboyNome: motoboy.nome,
+                              titularNome: motoboy.nome,
                             })
                           }
                         >
@@ -257,11 +279,182 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
         </p>
       )}
 
+      {/* =================================================================
+          O CARTÃO DO GERENTE — 4B.1
+
+          Mesmo cartão, outro papel: ele não retira corrida nenhuma. Serve
+          para AUTORIZAR a saída ou o retorno quando o motoboy perdeu o
+          cartão ou esqueceu o PIN, e é conferido contra a filial do
+          documento — por isso a coluna da filial fica ao lado do nome, e
+          por isso o banco recusa emitir para gerente sem filial.
+
+          A tela diz o que o cartão ainda NÃO faz. Enquanto a autorização
+          excepcional não existir, anunciar "pronto para usar" seria a
+          tela afirmando o que ela não sabe.
+          ================================================================= */}
+      <div className="mt-6 flex flex-col gap-2 border-t pt-4">
+        <div>
+          <h3 className="text-sm font-medium">Cartões de autorização — gerentes</h3>
+          <p className="text-sm text-muted-foreground">
+            O gerente usa o cartão e o PIN dele para autorizar uma saída ou um retorno quando o
+            motoboy perdeu o cartão ou esqueceu o PIN. Ele nunca substitui o motoboy no documento:
+            o vale continua sendo de quem faz a entrega.
+          </p>
+          <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
+            A autorização pelo cartão do gerente <strong>ainda não está no fluxo da saída e do
+            retorno</strong>. O que já funciona é emitir o cartão e o gerente criar o PIN dele —
+            e é isso que precisa estar pronto antes, porque criar PIN exige internet.
+          </p>
+        </div>
+
+        <Consulta
+          estado={estadoUsuarios}
+          estaVazio={(us) => us.filter((u) => u.papel === 'gerente' && u.ativo).length === 0}
+          vazio={
+            <p className="text-sm text-muted-foreground">
+              Nenhum gerente ativo. Cadastra um em Usuários primeiro.
+            </p>
+          }
+          aoRecarregar={() => void consultaUsuarios.refetch()}
+        >
+          {() => (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Gerente</TableHead>
+                  <TableHead>Filial</TableHead>
+                  <TableHead>Cartão</TableHead>
+                  <TableHead>PIN</TableHead>
+                  <TableHead>Emitido em</TableHead>
+                  <TableHead>Último uso</TableHead>
+                  <TableHead />
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {(gerentes ?? []).map((gerente) => {
+                  const credencial = credencialDoGerente(gerente.id)
+                  const bloqueada = credencial ? credencialBloqueada(credencial) : false
+
+                  return (
+                    <TableRow key={gerente.id}>
+                      <TableCell>{gerente.nome}</TableCell>
+                      {/* Gerente sem filial é o único que o banco recusa,
+                          e a tela precisa dizer por quê ANTES do clique. */}
+                      <TableCell>
+                        {gerente.lojaNome ?? (
+                          <span className="text-destructive">sem filial</span>
+                        )}
+                      </TableCell>
+
+                      <TableCell>
+                        {credencial ? (
+                          <span className="font-mono text-xs">
+                            ••••{credencial.publicId.slice(-4)}
+                          </span>
+                        ) : sabeDasCredenciais ? (
+                          <span className="text-sm text-muted-foreground">Sem cartão</span>
+                        ) : (
+                          <span className="text-sm text-muted-foreground">…</span>
+                        )}
+                      </TableCell>
+
+                      <TableCell>
+                        {!credencial && <span className="text-sm text-muted-foreground">—</span>}
+                        {credencial && bloqueada && (
+                          <Badge variant="destructive">
+                            Bloqueado até{' '}
+                            {new Date(credencial.bloqueadoAte!).toLocaleTimeString('pt-BR')}
+                          </Badge>
+                        )}
+                        {credencial && !bloqueada && (
+                          <Badge variant={credencial.temPin ? 'secondary' : 'outline'}>
+                            {credencial.temPin ? 'Configurado' : 'Aguardando ativação'}
+                          </Badge>
+                        )}
+                      </TableCell>
+
+                      <TableCell className="text-xs text-foreground/70">
+                        {credencial
+                          ? new Date(credencial.emitidoEm).toLocaleDateString('pt-BR')
+                          : '—'}
+                      </TableCell>
+
+                      <TableCell className="text-xs text-foreground/70">
+                        {credencial?.ultimoUsoEm
+                          ? new Date(credencial.ultimoUsoEm).toLocaleString('pt-BR')
+                          : credencial
+                            ? 'nunca'
+                            : '—'}
+                      </TableCell>
+
+                      <TableCell>
+                        <div className="flex justify-end gap-1">
+                          {credencial && credencial.temPin && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                setConfirmando({
+                                  acao: 'redefinir',
+                                  credencial,
+                                  titularNome: gerente.nome,
+                                })
+                              }
+                            >
+                              Redefinir PIN
+                            </Button>
+                          )}
+                          {credencial && (
+                            <Button
+                              variant="ghost"
+                              size="sm"
+                              onClick={() =>
+                                setConfirmando({
+                                  acao: 'revogar',
+                                  credencial,
+                                  titularNome: gerente.nome,
+                                })
+                              }
+                            >
+                              Revogar
+                            </Button>
+                          )}
+                          <Button
+                            variant={credencial ? 'ghost' : 'default'}
+                            size="sm"
+                            disabled={emitirDeGerente.isPending || gerente.lojaId === null}
+                            onClick={() =>
+                              void handleEmitirGerente(
+                                gerente.id,
+                                gerente.nome,
+                                gerente.lojaNome ?? '—'
+                              )
+                            }
+                          >
+                            {credencial ? 'Emitir novo' : 'Emitir cartão'}
+                          </Button>
+                        </div>
+                      </TableCell>
+                    </TableRow>
+                  )
+                })}
+              </TableBody>
+            </Table>
+          )}
+        </Consulta>
+
+        {emitirDeGerente.isError && (
+          <p className="text-sm text-destructive">
+            Não consegui emitir: {(emitirDeGerente.error as Error).message}
+          </p>
+        )}
+      </div>
+
       {emitida && (
         <CredencialEmitidaDialog
           emitida={emitida.dados}
-          motoboyNome={emitida.motoboyNome}
-          agenciaNome={emitida.agenciaNome}
+          titularNome={emitida.titularNome}
+          vinculoNome={emitida.vinculoNome}
           onFechar={() => setEmitida(null)}
         />
       )}
@@ -269,7 +462,7 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
       {confirmando && (
         <ConfirmarAcaoDialog
           acao={confirmando.acao}
-          motoboyNome={confirmando.motoboyNome}
+          titularNome={confirmando.titularNome}
           pendente={revogar.isPending || redefinir.isPending}
           onConfirmar={async () => {
             if (confirmando.acao === 'revogar') {
@@ -303,15 +496,18 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
 // autentica é o token, e ele não mudou.
 // =====================================================================
 
+// `titularNome` e `vinculoNome` porque o mesmo diálogo serve os dois
+// cartões: o do motoboy, com a agência, e o do gerente, com a filial. O
+// desenho é o mesmo — o que muda é o valor impresso naquela linha.
 function CredencialEmitidaDialog({
   emitida,
-  motoboyNome,
-  agenciaNome,
+  titularNome,
+  vinculoNome,
   onFechar,
 }: {
   emitida: CredencialEmitida
-  motoboyNome: string
-  agenciaNome: string
+  titularNome: string
+  vinculoNome: string
   onFechar: () => void
 }) {
   const [gerada, setGerada] = useState<GeneratedCredential | null>(null)
@@ -323,8 +519,8 @@ function CredencialEmitidaDialog({
     // O valor EXATO que o leitor precisa devolver. Nunca o formatado —
     // os espaços são só pro olho humano.
     barcodeValue: emitida.token,
-    fullName: motoboyNome,
-    agency: agenciaNome,
+    fullName: titularNome,
+    agency: vinculoNome,
   }
 
   useEffect(() => {
@@ -340,7 +536,7 @@ function CredencialEmitidaDialog({
       cancelado = true
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [emitida.token, motoboyNome, agenciaNome])
+  }, [emitida.token, titularNome, vinculoNome])
 
   async function baixarPdf() {
     if (!gerada) return
@@ -368,7 +564,7 @@ function CredencialEmitidaDialog({
     <Dialog open onOpenChange={onFechar}>
       <DialogContent className="sm:max-w-2xl">
         <DialogHeader>
-          <DialogTitle>Credencial de {motoboyNome}</DialogTitle>
+          <DialogTitle>Credencial de {titularNome}</DialogTitle>
         </DialogHeader>
 
         <div className="flex flex-col gap-4">
@@ -457,13 +653,13 @@ function CredencialEmitidaDialog({
 
 function ConfirmarAcaoDialog({
   acao,
-  motoboyNome,
+  titularNome,
   pendente,
   onConfirmar,
   onFechar,
 }: {
   acao: 'revogar' | 'redefinir'
-  motoboyNome: string
+  titularNome: string
   pendente: boolean
   onConfirmar: () => Promise<void>
   onFechar: () => void
@@ -473,7 +669,7 @@ function ConfirmarAcaoDialog({
       <DialogContent className="sm:max-w-md">
         <DialogHeader>
           <DialogTitle>
-            {acao === 'revogar' ? 'Revogar o cartão' : 'Redefinir o PIN'} de {motoboyNome}
+            {acao === 'revogar' ? 'Revogar o cartão' : 'Redefinir o PIN'} de {titularNome}
           </DialogTitle>
         </DialogHeader>
 

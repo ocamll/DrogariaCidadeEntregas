@@ -110,6 +110,13 @@ type MotivoDoCartao =
   | 'bloqueada'
   /** Existe, mas é de uma agência que não atende esta filial. */
   | 'fora_de_escopo'
+  /**
+   * É um cartão nosso, válido — e é do GERENTE. Ele identifica quem
+   * AUTORIZA, não quem leva a corrida, então não substitui o do motoboy.
+   * Recusa explícita, e não "não reconhecida": as duas frases mandam a
+   * pessoa fazer coisas diferentes.
+   */
+  | 'cartao_de_gerente'
 
 /** Idem para o PIN. `error` continua sendo outra coisa — ver o handler. */
 type MotivoDoPin = 'pin_incorreto' | 'bloqueado' | 'nao_autenticado'
@@ -226,11 +233,14 @@ function NovaCorridaFluxo({
   // O cache de credenciais é o que faz bipar funcionar sem rede. Atualiza
   // quando a tela monta e houver internet; se falhar, o cache anterior
   // continua valendo — que é exatamente pra isso que ele existe.
+  //
+  // A FILIAL VAI JUNTO desde o 4B.1: ela decide quais cartões de gerente
+  // ficam guardados neste terminal — só os de quem pode autorizar AQUI.
   useEffect(() => {
     if (navigator.onLine) {
-      void sincronizarCacheDeCredenciais().catch(() => {})
+      void sincronizarCacheDeCredenciais(profile.lojaId).catch(() => {})
     }
-  }, [])
+  }, [profile.lojaId])
 
   // Vale que já saiu numa operação AINDA NA FILA não pode reaparecer aqui.
   //
@@ -307,6 +317,18 @@ function NovaCorridaFluxo({
 
       if (navigator.onLine) {
         const online = await identificarCredencial(limpo)
+        if (online && online.titular === 'gerente') {
+          setEstadoCartao(
+            prontoCom(
+              recusado(
+                'cartao_de_gerente',
+                `Este é o cartão de ${online.gerenteNome}, gerente${online.lojaNome ? ' da ' + online.lojaNome : ''}. Ele autoriza, não retira: bipa o cartão do motoboy.`
+              )
+            )
+          )
+          setToken('')
+          return
+        }
         if (online) {
           achada = {
             motoboyId: online.motoboyId,
@@ -346,9 +368,25 @@ function NovaCorridaFluxo({
           setToken('')
           return
         }
+        // O cache guarda os dois titulares (o do gerente é da própria
+        // filial, ver lib/credencialNoCache.ts). Aqui vale a mesma recusa
+        // do caminho online — e ela é honesta offline também, porque
+        // saber DE QUEM é o cartão não depende de validar o HMAC.
+        if (local.titular === 'gerente') {
+          setEstadoCartao(
+            prontoCom(
+              recusado(
+                'cartao_de_gerente',
+                `Este é o cartão de ${local.titularNome}, gerente${local.lojaNome ? ' da ' + local.lojaNome : ''}. Ele autoriza, não retira: bipa o cartão do motoboy.`
+              )
+            )
+          )
+          setToken('')
+          return
+        }
         achada = {
-          motoboyId: local.motoboyId,
-          motoboyNome: local.motoboyNome,
+          motoboyId: local.motoboyId as string,
+          motoboyNome: local.titularNome,
           agenciaId: local.agenciaId,
           agenciaNome: local.agenciaNome,
           temPin: local.temPin,

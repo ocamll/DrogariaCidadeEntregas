@@ -481,12 +481,13 @@ function FluxoDeRetorno({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [expiraEm, segundosRestantes])
 
-  // O cache de credenciais é o que faz bipar funcionar sem rede.
+  // O cache de credenciais é o que faz bipar funcionar sem rede. A filial
+  // vai junto: ela decide quais cartões de gerente ficam neste terminal.
   useEffect(() => {
     if (navigator.onLine) {
-      void sincronizarCacheDeCredenciais().catch(() => {})
+      void sincronizarCacheDeCredenciais(profile.lojaId).catch(() => {})
     }
-  }, [])
+  }, [profile.lojaId])
 
   const idsPrevistos = useMemo(
     () => contexto.vales.flatMap((v) => v.pagamentosPrevistos.map((p) => p.pagamentoId)),
@@ -645,14 +646,30 @@ function FluxoDeRetorno({
         return
       }
 
+      // CARTÃO DO GERENTE (4B.1): ele identifica quem AUTORIZA, e a
+      // autorização excepcional ainda não existe. Recusar dizendo isso é
+      // diferente de "credencial não reconhecida" — as duas frases mandam
+      // o balcão fazer coisas diferentes.
+      if (achada.titular === 'gerente') {
+        const gerente = 'gerenteNome' in achada ? achada.gerenteNome : achada.titularNome
+        despachar({
+          tipo: 'CARTAO_RECUSADO',
+          mensagem: `Este é o cartão de ${gerente}, gerente. Ele autoriza, não devolve a corrida: bipa o cartão do motoboy.`,
+        })
+        return
+      }
+
+      const motoboyIdDoCartao = achada.motoboyId as string
+      const nomeDoCartao = 'motoboyNome' in achada ? achada.motoboyNome : achada.titularNome
+
       // O DOCUMENTO JÁ NOMEIA O MOTOBOY — ele saiu do romaneio de saída.
       // Um cartão de outra pessoa não é "trocar de motoboy": é o cartão
       // errado, e a transação recusaria `outro_motoboy` depois de duas
       // assinaturas.
-      if (achada.motoboyId !== contexto.motoboyId) {
+      if (motoboyIdDoCartao !== contexto.motoboyId) {
         despachar({
           tipo: 'CARTAO_RECUSADO',
-          mensagem: `Este cartão é de ${achada.motoboyNome}, e esta corrida saiu com ${contexto.motoboyNome ?? 'outro motoboy'}. Quem devolve a corrida é quem a levou.`,
+          mensagem: `Este cartão é de ${nomeDoCartao}, e esta corrida saiu com ${contexto.motoboyNome ?? 'outro motoboy'}. Quem devolve a corrida é quem a levou.`,
         })
         return
       }
@@ -661,7 +678,7 @@ function FluxoDeRetorno({
       despachar({
         tipo: 'CARTAO_LIDO',
         publicId: achada.publicId,
-        motoboyId: achada.motoboyId,
+        motoboyId: motoboyIdDoCartao,
       })
     } catch (e) {
       // ANTES ESTE `catch` NÃO DESPACHAVA NADA. A máquina ficava em
