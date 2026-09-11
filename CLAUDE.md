@@ -1246,8 +1246,10 @@ Construído em 2026-08-16, em seis etapas. A saída da tele deixou de ser
 > Nas palavras do usuário: *"Não é para deixar assinaturas do sistema,
 > apenas cartão e pin."* A evidência do motoboy passa a ser **cartão + PIN**;
 > a da farmácia, a **sessão com um ato explícito de confirmar** o conteúdo.
-> O **gestor ganha credencial própria** (cartão + PIN) para verificar a saída
-> sem travar o fluxo.
+> O **gerente ganha credencial própria** (cartão + PIN), usada quando o
+> motoboy **perdeu o cartão**, na saída e no retorno — sem travar o fluxo. O
+> documento registra que quem validou foi o gerente, sem fingir a validação
+> do motoboy. PIN esquecido não precisa dela: redefine-se o PIN.
 >
 > Tudo o que esta seção descreve sobre traços (`strokes`, canvas, as duas
 > assinaturas, `signature_pad`) **continua sendo o código de hoje** e sai no
@@ -3667,12 +3669,23 @@ levantamento 4A):
   financeiro quando algo dá errado.
 - **Busca posterior de documento não gera vale.**
 
-**Ainda abertas:** as datas da quinzena (o usuário não sabe); **se
-transferência gera vale — a resposta "acredito que não" contradiz a
-confirmação de 2026-08-11** registrada em "Tarifa", e nada muda antes de
-checar com a farmácia ou a agência; quando a credencial do gestor é usada;
-se o financeiro é o admin; quem dá baixa de papel; e o vale de papel
-durante a transição.
+E, na segunda rodada do mesmo dia:
+
+- **O gestor é o gerente da filial**, e a credencial dele serve **quando o
+  motoboy perde o cartão**, na saída e no retorno.
+- **O financeiro é o admin**: o gerente confere o dia e resolve
+  divergência; o admin aprova a cobrança.
+- **Baixa de papel é do caixa, e eventualmente do gerente**, na própria
+  filial — não do admin.
+- **O vale de papel continua no começo do piloto** e acaba se ele for
+  aprovado, porque o vale passa a estar no painel da agência. Enquanto
+  existir, o papel precisa levar o número do sistema — e **hoje a tela de
+  cadastro não mostra o número depois de salvar**.
+
+**Ainda abertas, e as duas são de cobrança (passos 5 e 6), não do 4B:** as
+datas da quinzena; e **se transferência gera vale — a resposta "acredito
+que não" contradiz a confirmação de 2026-08-11** registrada em "Tarifa", e
+nada muda antes de checar com a farmácia ou a agência.
 
 **Os passos 5 e 6 são duas frentes de produto ligadas.** O fechamento pode
 organizar as exceções operacionais antes de o painel existir, mas **não

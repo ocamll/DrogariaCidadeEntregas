@@ -374,3 +374,28 @@ Os bytes de DCR1 e DCRR1 **não mudam**: os traços nunca entraram no canônico.
 2. **Financeiro (P5):** é o **administrador** do sistema, ou uma pessoa diferente que ainda não tem cargo? Hoje existem só caixa, gerente e admin.
 3. **Baixa de papel (P5):** quem marca que o documento de convênio ou a receita voltou — o caixa que recebeu no balcão, ou o gestor?
 4. **Papel na transição (P6), reformulada:** quando o piloto começar, o motoboy ainda vai levar algum **vale de papel escrito à mão**? Se sim, por quanto tempo, e o número escrito nele vai ser o mesmo que o sistema gerou (V-000123)? Ou o papel acaba no primeiro dia?
+
+### As dúvidas respondidas
+
+| Dúvida | Resposta, nas palavras do usuário | Como fica |
+|---|---|---|
+| Credencial do gestor | "Sim. Em caso do motoboy perder o cartão, já que se ele esquecer o PIN, temos como redefinir já no sistema. Sim." | o **gestor é o gerente da filial**. A credencial dele é usada **quando o motoboy perdeu o cartão**, **na saída e no retorno**. PIN esquecido não precisa dela: redefine-se o PIN |
+| Financeiro | "Sim" | o **financeiro é o administrador**. O gerente confere o dia e resolve divergência; o admin aprova a cobrança |
+| Baixa de papel | "O caixa geralmente, ou o gestor eventualmente" | **caixa e gerente da própria filial** dão baixa; o admin não, porque não recebe papel no balcão |
+| Papel na transição | "No início sim. Se for aprovado acredito que não, já que o vale já ficaria registrado no painel da agência." | **no começo do piloto o vale de papel continua**; se o piloto for aprovado, ele acaba, porque o vale passa a estar no painel da agência |
+
+### O que essas respostas exigem — técnico, para o 4B, 4C e 6
+
+- **Redefinir PIN existe, mas só pelo admin e só com internet** (`redefinir_pin` exige `is_admin()`, [credenciais](../supabase/migrations/20260816130000_motoboy_credenciais.sql#L605)). Um motoboy que esquece o PIN numa filial sem internet, ou sem o admin disponível, fica parado. Isso é provisionamento, e continua fora do offline pelo contrato do E12; o que se pode decidir depois é se o gerente também redefine.
+- **A credencial de hoje é só de motoboy** (`emitir_credencial(p_motoboy_id)`, ligada a `mototaxistas`). A do gerente é **um tipo novo de credencial**, ligada a `profiles`.
+- **O documento tem que dizer quem validou.** Com cartão perdido, o motoboy continua identificado no documento, escolhido na lista, mas **quem valida é o gerente, com o cartão e o PIN dele**. O documento registra isso como validação pelo gerente, e **não finge** que houve a validação normal do motoboy. Offline, o PIN do gerente vai no mesmo envelope e é conferido na sincronização.
+- **Baixa física:** hoje qualquer cargo dá baixa, inclusive o admin. Passa a ser caixa e gerente, na própria filial — é o achado de UX do plano, agora com resposta.
+- **O papel do piloto precisa levar o número do sistema, e hoje a tela não mostra esse número.** Depois de salvar, o cadastro diz "Entrega de José salva", sem o `V-000123`: o número só aparece na lista, depois que o vale sincroniza. **Online:** mostrar o número assim que o servidor o devolve. **Offline:** só existe com o E12, que reserva o número antes da queda.
+- **O fim do papel depende do painel da agência (passo 6).** O critério de aprovação do piloto passa a incluir a agência conseguir conferir os vales pelo painel.
+
+### Ainda aberto
+
+- **Datas da quinzena.**
+- **Transferência gera vale?** Continua o conflito com a confirmação de 2026-08-11.
+
+As duas afetam **cobrança e fechamento (passos 5 e 6)**, e **não o contrato de evidências do 4B**, que já tem o que precisa para ser desenhado.

@@ -10283,16 +10283,37 @@ essa corrida como por qualquer outra"* —, que é o que o código faz desde
 então. Tirar a tarifa da transferência reduziria o acerto com a agência.
 **Nada muda até checar com a farmácia ou a agência.**
 
+### A segunda rodada, no mesmo dia
+
+- **O gestor é o gerente da filial.** A credencial dele serve **quando o
+  motoboy perde o cartão** — *"se ele esquecer o PIN, temos como redefinir
+  já no sistema"* —, **na saída e no retorno**.
+- **O financeiro é o admin.**
+- **Baixa de papel:** *"O caixa geralmente, ou o gestor eventualmente."*
+- **Papel na transição:** *"No início sim. Se for aprovado acredito que
+  não, já que o vale já ficaria registrado no painel da agência."*
+
+**Três coisas que essas respostas exigem, medidas no código:**
+
+1. **Redefinir PIN hoje é só do admin e só online** (`redefinir_pin` exige
+   `is_admin()`). Motoboy que esquece o PIN sem internet, ou sem o admin,
+   fica parado — é provisionamento, fora do offline pelo contrato do E12.
+2. **A credencial de hoje é só de motoboy** (`emitir_credencial` recebe
+   `p_motoboy_id`). A do gerente é tipo novo, ligada a `profiles`, e o
+   documento tem que registrar que quem validou foi ele — sem fingir a
+   validação do motoboy.
+3. **A tela de cadastro não mostra o número do vale depois de salvar** —
+   diz só "Entrega de José salva". Enquanto houver papel no piloto, ele
+   precisa levar o número do sistema: online, mostrar assim que o servidor
+   devolve; offline, só com o E12.
+
 ### Ainda aberto
 
 1. datas da quinzena (*"Não sei."*);
-2. transferência (acima);
-3. credencial do gestor: é o gerente? usada só quando o motoboy está sem
-   cartão ou PIN, ou em qualquer saída? também no retorno?
-4. financeiro: é o admin, ou pessoa sem cargo no sistema?
-5. quem dá baixa de papel: o caixa que recebeu ou o gestor?
-6. o vale de papel na transição — pergunta reformulada, porque a primeira
-   versão não ficou clara.
+2. transferência (acima).
+
+**As duas são de cobrança (passos 5 e 6), não do 4B.** O contrato de
+evidências já tem o que precisa para ser desenhado.
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
@@ -10356,10 +10377,13 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > **O LEVANTAMENTO 4A ESTÁ FEITO E REVISTO (item 103), e o usuário
 > respondeu às perguntas (item 104):** a assinatura manuscrita sai — só
 > cartão e PIN —, o gestor ganha credencial própria, e gestor e financeiro
-> são os responsáveis. **Ainda aberto:** datas da quinzena, o conflito da
-> transferência com 2026-08-11, o uso da credencial do gestor, se o
-> financeiro é o admin, quem dá baixa de papel, e o papel na transição.
-> **Nada de código, migration ou banco** antes de fechar esses pontos.
+> são os responsáveis. Na segunda rodada: o gestor é o gerente e usa a
+> credencial quando o motoboy perde o cartão; o financeiro é o admin;
+> baixa de papel é do caixa ou do gerente; e o papel continua no começo do
+> piloto.
+>
+> **Ainda aberto, e só de cobrança (passos 5 e 6):** datas da quinzena e o
+> conflito da transferência com 2026-08-11. **O 4B pode ser desenhado.**
 >
 > **Depois:** o 4B implementa o contrato de evidências escolhido; o 4C
 > precisa das três partes (Service Worker + Cache API, telas no estado
