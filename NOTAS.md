@@ -123,7 +123,7 @@ pré-V1 revisado (`docs/escopo-pre-v1-revisado.md`):
 0  alinhar CLAUDE.md/NOTAS ao escopo revisado   ← feito em 08/09
 1  um vale sem adicional · convênio genérico · sem "Outro"   ← feito em 10/09
 2  "Cargo" · filial obrigatória · admin sem lançamento   ← feito em 11/09 (item 100)
-3  snapshot histórico da filial nos documentos   ← feito em 11/09, a aplicar (item 101)
+3  snapshot histórico da filial nos documentos   ← feito e aplicado em 11/09 (item 101)
 4  concluir o contrato de assinaturas/envelope
 5  fechamento diário com exceções e aprovação auditável
 6  painel da agência: cobrança discriminada e conferência
@@ -10023,19 +10023,47 @@ specs                         27 passando + a geradora dcrr1-sql (exit 0)
 painel do navegador desta sessão está sem login, e nenhum documento tem a
 chave até existir uma saída depois da migration.
 
-### O aceite — depende do usuário
+### Aplicada e conferida — 2026-09-11
 
-1. **Aplicar `20260911130000`** e rodar as conferências (a) a (e) do
-   rodapé, uma por vez. A (d) tem que dar `com_nome = 0` em tudo — prova
-   de que nada existente foi reescrito — e a (e) o mesmo placar da última
-   medição.
-2. **Fazer uma saída** (e, se possível, o retorno dela) e rodar a (f): o
-   nome tem que aparecer gravado.
-3. **Opcional, o teste que prova o passo inteiro:** renomear por SQL uma
-   filial que tenha a saída nova, reabrir o romaneio (página e PDF) e
-   conferir que o cabeçalho continua com o nome antigo — e depois
-   **desfazer a renomeação**. Renomear filial é mudança de dado real: é
-   decisão do usuário, não parte automática do aceite.
+O usuário aplicou a `20260911130000`, fez uma saída e o retorno dela, e
+rodou as seis conferências:
+
+```
+(a)  romaneio_payload · romaneio_retorno_payload   tem_loja_nome = true
+(b)  8 filiais — filial = no_snapshot em todas
+(c)  5 saídas seladas, R-000031 a R-000022 — iguais
+(d)  retorno  selado     6 documentos   com_nome 1
+     saida    conflito   3              com_nome 0
+     saida    selado    16              com_nome 1
+(e)  saida 16·16·0 · retorno 6·6·0 · TOTAL 22·22·0 · conflito 3 fora do placar
+(f)  R-000032  retorno  Filial 02
+     R-000031  saida    Filial 02
+```
+
+**A (d) não deu zero, e o número prova mais do que o zero provaria.** A
+saída e o retorno foram feitos antes de rodá-la, então o esperado passa a
+ser: `com_nome` igual aos documentos criados DEPOIS da migration. É
+exatamente isso — 1 saída e 1 retorno com a chave, os mesmos da (f) — e
+os 15 + 5 + 3 anteriores sem ela. Nenhum documento antigo foi reescrito.
+
+**O verificador subiu exatamente pelos dois documentos novos**: de
+15 · 5 · 20 (item 99) para 16 · 6 · 22, sem divergência, conflitos ainda
+3. E os dois novos **carregam a chave e verificam** — é a prova medida de
+que `loja_nome` no payload não toca hash nenhum, e não só a leitura do
+código.
+
+**A (b) mediu uma coisa de passagem:** o banco de desenvolvimento já tem as
+**oito** filiais de São Gabriel, e não só Matriz e Filial 02, como a
+abertura do `CLAUDE.md` ainda diz.
+
+**O que continua sem ser visto:** a página e o PDF lendo o nome do
+snapshot. A leitura está provada pela spec, e o dado gravado pela (f); a
+renderização não foi aberta daqui, porque o painel desta sessão está sem
+login.
+
+**Opcional, e continua sendo decisão do usuário:** renomear por SQL a
+Filial 02, reabrir o `R-000031` (página e PDF), conferir que o nome antigo
+continua, e **desfazer a renomeação**.
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
@@ -10080,14 +10108,14 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > recusa da própria Edge Function não foi exercitada isoladamente, porque
 > a tela barra antes (item 100).
 >
-> **PASSO 3 CONSTRUÍDO em 2026-09-11 (item 101), migration A APLICAR.** O
-> nome da filial passa a ser congelado em `payload.loja_nome` no selo da
-> saída e do retorno, e o mapper compartilhado lê dali. Nenhum hash muda,
-> nenhum documento existente é reescrito.
+> **PASSO 3 CONSTRUÍDO e APLICADO em 2026-09-11 (item 101).** O nome da
+> filial é congelado em `payload.loja_nome` no selo da saída e do retorno;
+> `R-000031` e `R-000032` já o carregam, e o verificador foi a
+> 22 · 22 · 0 com os dois verificando. Nenhum documento antigo foi
+> reescrito.
 >
-> **PENDENTE DO USUÁRIO:** aplicar `20260911130000` e rodar as
-> conferências (a) a (e); fazer uma saída e rodar a (f). O teste de
-> renomear uma filial e reabrir o romaneio é opcional e deve ser desfeito.
+> **Opcional:** renomear por SQL a Filial 02, reabrir o `R-000031` (página
+> e PDF), conferir que o nome antigo continua, e desfazer.
 >
 > **Depois, o passo 4**: concluir o contrato de assinaturas/envelope.
 >

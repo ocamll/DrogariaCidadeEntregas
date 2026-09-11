@@ -8,8 +8,8 @@
 > filial** (ver "E10").
 >
 > **Passo 1 e o "Outro" CONSTRUÍDOS (2026-09-10); passo 2 CONSTRUÍDO,
-> APLICADO e aceito em 2026-09-11; passo 3 CONSTRUÍDO em 2026-09-11, com
-> migration A APLICAR; o resto não.** Cada seção afetada aqui traz uma nota
+> APLICADO e aceito em 2026-09-11; passo 3 CONSTRUÍDO e APLICADO em
+> 2026-09-11; o resto não.** Cada seção afetada aqui traz uma nota
 > datada de 2026-09-08 dizendo o que foi decidido e o que o código ainda
 > faz. Onde as duas coisas divergirem, **o código é o que está no ar e o
 > escopo é para onde ele vai** — não confunda um com o outro, e não trate
@@ -3576,14 +3576,14 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
 ### A sequência pré-V1 revisada — decidida em 2026-09-08
 
 Substitui a ordem anterior (`E10 E11 E12 E6 E9 E7 E8 → STAGING → corte`).
-Vem de `docs/escopo-pre-v1-revisado.md`; **construídos até aqui: os passos 0, 1, 2 e 3** (o 3 com migration a aplicar).
+Vem de `docs/escopo-pre-v1-revisado.md`; **construídos até aqui: os passos 0, 1, 2 e 3.**
 
 ```
 0.  alinhar a fonte de verdade ao escopo revisado   ✓ 2026-09-08
 1.  um vale sem adicional · convênio genérico       ✓ 2026-09-10
 1b. sem "Outro" — passo próprio   ✓ 2026-09-10 (migration aplicada)
 2.  "Cargo" · filial obrigatória · admin sem lançamento   ✓ 2026-09-11 (aplicado e aceito)
-3.  snapshot histórico da filial nos documentos   ✓ 2026-09-11 (a aplicar)
+3.  snapshot histórico da filial nos documentos   ✓ 2026-09-11 (aplicado)
 4.  concluir o contrato de assinaturas/envelope
 5.  fechamento diário calculado, com exceções e aprovação auditável
 6.  painel da agência: cobrança discriminada e conferência
@@ -3601,8 +3601,10 @@ organizar as exceções operacionais antes de o painel existir, mas **não
 pode se anunciar como conciliado com a agência antes de receber e comparar
 a cobrança dela**.
 
-**O passo 3 era um defeito medido, não uma melhoria — CONSTRUÍDO em
-2026-09-11, migration `20260911130000` a aplicar.** O nome da filial nos
+**O passo 3 era um defeito medido, não uma melhoria — CONSTRUÍDO e
+APLICADO em 2026-09-11** (migration `20260911130000`). Conferido: `R-000031`
+e `R-000032`, os primeiros depois dela, já carregam o nome, e o
+verificador foi a 22 · 22 · 0 com os dois verificando. O nome da filial nos
 documentos vinha de join vivo: renomear uma filial mudava o cabeçalho de
 PDFs históricos e mandava um reenvio para outra pasta do Drive. Agora ele
 é congelado em `payload.loja_nome` no selo — saída, retorno e conflito — e
