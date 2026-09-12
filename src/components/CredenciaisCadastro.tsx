@@ -8,6 +8,9 @@ import {
   useRevogarCredencial,
   useRedefinirPin,
   credencialBloqueada,
+  definirPin,
+  pinAceitavel,
+  publicIdDoToken,
   type Credencial,
   type CredencialEmitida,
 } from '@/data/credenciais'
@@ -21,6 +24,7 @@ import {
 import { baixarSvg, baixarArquivo } from '@/lib/credencialDownload'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
+import { Input } from '@/components/ui/input'
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from '@/components/ui/table'
 import {
   Dialog,
@@ -79,6 +83,7 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
   const [confirmando, setConfirmando] = useState<
     { acao: 'revogar' | 'redefinir'; credencial: Credencial; titularNome: string } | null
   >(null)
+  const [ativando, setAtivando] = useState<{ titularNome: string } | null>(null)
 
   const credencialDe = (motoboyId: string) => credenciais?.find((c) => c.motoboyId === motoboyId)
   const credencialDoGerente = (profileId: string) =>
@@ -389,6 +394,21 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
 
                       <TableCell>
                         <div className="flex justify-end gap-1">
+                          {/* ATIVAR O PIN AQUI, e não no balcão. O cartão
+                              do motoboy é ativado na Nova corrida porque
+                              é lá que ele aparece; o do gerente não passa
+                              por aquela tela — ele autoriza, não retira.
+                              Sem este botão, a credencial do gerente
+                              ficaria impressa e inerte para sempre. */}
+                          {credencial && !credencial.temPin && (
+                            <Button
+                              variant="secondary"
+                              size="sm"
+                              onClick={() => setAtivando({ titularNome: gerente.nome })}
+                            >
+                              Ativar PIN
+                            </Button>
+                          )}
                           {credencial && credencial.temPin && (
                             <Button
                               variant="ghost"
@@ -456,6 +476,17 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
           titularNome={emitida.titularNome}
           vinculoNome={emitida.vinculoNome}
           onFechar={() => setEmitida(null)}
+        />
+      )}
+
+      {ativando && (
+        <AtivarPinDialog
+          titularNome={ativando.titularNome}
+          onPronto={() => {
+            setAtivando(null)
+            void consultaCredenciais.refetch()
+          }}
+          onFechar={() => setAtivando(null)}
         />
       )}
 
@@ -644,6 +675,118 @@ function CredencialEmitidaDialog({
           </Button>
           <Button onClick={() => void baixarPdf()} disabled={!gerada || ocupado}>
             {ocupado ? <EmAndamento>Gerando PDF</EmAndamento> : 'Baixar PDF'}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+// =====================================================================
+// ATIVAR O PIN DO CARTÃO DO GERENTE
+//
+// Quem digita é o GERENTE, com o cartão dele na mão — o admin abre a
+// tela e sai da frente. `definir_pin` exige o token completo justamente
+// por isso, e só funciona enquanto a credencial não tem PIN: não existe
+// "mostrar PIN" nem "escolher para o outro", e não pode passar a existir.
+//
+// ONLINE POR CONSTRUÇÃO, e isso não é uma checagem de tela: a função SQL
+// depende da sessão e recusa sem ela. O aviso aqui existe pra a
+// impossibilidade aparecer ANTES de alguém contar com a exceção offline
+// no meio de uma queda de internet.
+// =====================================================================
+
+function AtivarPinDialog({
+  titularNome,
+  onPronto,
+  onFechar,
+}: {
+  titularNome: string
+  onPronto: () => void
+  onFechar: () => void
+}) {
+  const [token, setToken] = useState('')
+  const [pin, setPin] = useState('')
+  const [confirmacao, setConfirmacao] = useState('')
+  const [erro, setErro] = useState<string | null>(null)
+  const [ocupado, setOcupado] = useState(false)
+
+  async function salvar() {
+    setErro(null)
+    const limpo = token.trim()
+    // A mesma recusa local do balcão: isto não é um cartão do sistema, e
+    // o sistema sabe disso sem perguntar a ninguém.
+    if (!publicIdDoToken(limpo)) return setErro('Isso não parece um cartão do sistema. Bipa de novo.')
+    const problema = pinAceitavel(pin)
+    if (problema) return setErro(problema)
+    if (pin !== confirmacao) return setErro('Os dois PINs não são iguais.')
+    if (!navigator.onLine) return setErro('Criar PIN precisa de internet.')
+
+    setOcupado(true)
+    try {
+      await definirPin(limpo, pin)
+      onPronto()
+    } catch (e) {
+      setErro(e instanceof Error ? e.message : String(e))
+    } finally {
+      setOcupado(false)
+    }
+  }
+
+  return (
+    <Dialog open onOpenChange={onFechar}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader>
+          <DialogTitle>Ativar o PIN de {titularNome}</DialogTitle>
+        </DialogHeader>
+
+        <div className="flex flex-col gap-3">
+          <p className="text-sm">
+            <strong>{titularNome}</strong> bipa o próprio cartão e escolhe o PIN. Ninguém mais vê o
+            que ele escolher, e não há como recuperá-lo depois — se esquecer, o caminho é redefinir
+            e criar outro.
+          </p>
+
+          <Input
+            autoFocus
+            placeholder="Bipa o cartão do gerente"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            onKeyDown={(e) => {
+              // O leitor age como teclado e termina com Enter. Sem isto,
+              // o Enter dele submeteria o diálogo com os PINs vazios.
+              if (e.key === 'Enter') e.preventDefault()
+            }}
+          />
+
+          <div className="flex gap-2">
+            <Input
+              type="password"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="Crie o PIN"
+              value={pin}
+              onChange={(e) => setPin(e.target.value.replace(/\D/g, ''))}
+            />
+            <Input
+              type="password"
+              inputMode="numeric"
+              maxLength={6}
+              placeholder="Confirme"
+              value={confirmacao}
+              onChange={(e) => setConfirmacao(e.target.value.replace(/\D/g, ''))}
+            />
+          </div>
+
+          {erro && <p className="text-sm text-destructive">{erro}</p>}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={onFechar}>
+            Cancelar
+          </Button>
+          <Button onClick={() => void salvar()} disabled={ocupado}>
+            {ocupado ? <EmAndamento>Salvando</EmAndamento> : 'Salvar PIN'}
           </Button>
         </DialogFooter>
       </DialogContent>
