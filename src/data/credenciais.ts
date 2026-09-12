@@ -82,7 +82,10 @@ export function useCredenciais() {
 // O bloqueio tem prazo, então "bloqueado" é uma pergunta sobre AGORA, não
 // um estado guardado. Quem chama precisa reavaliar quando a tela
 // re-renderiza — por isso é função, não campo.
-export function credencialBloqueada(credencial: Credencial): boolean {
+// Recebe só o campo que a pergunta usa, e não a `Credencial` inteira: a
+// mesma regra responde pelo cartão listado no painel do admin e pelo
+// cartão do próprio gerente, que são tipos diferentes e a mesma pergunta.
+export function credencialBloqueada(credencial: { bloqueadoAte: string | null }): boolean {
   return credencial.bloqueadoAte !== null && new Date(credencial.bloqueadoAte) > new Date()
 }
 
@@ -189,6 +192,79 @@ export function useRedefinirPin() {
       if (error) throw error
     },
     onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['credenciais'] })
+      queryClient.invalidateQueries({ queryKey: ['eventos-auditoria'] })
+    },
+  })
+}
+
+// =====================================================================
+// O CARTÃO DE QUEM ESTÁ LOGADO — 4B, 2026-09-11
+//
+// O gerente não vê Cadastros, então não teria como saber o estado do
+// próprio cartão nem destravá-lo. Isso importa porque a exceção do
+// gerente existe pra DESTRAVAR o balcão: se o destravamento dependesse de
+// o admin atender o telefone, ela deixaria de existir na hora em que é
+// necessária.
+//
+// Redefinir o próprio PIN é seguro porque continuam sendo necessárias
+// duas coisas: a SESSÃO (prova quem é) e o CARTÃO (prova posse — sem ele
+// o PIN novo não se cria). Ver a migration 20260911190000.
+// =====================================================================
+
+export type MinhaCredencial = {
+  id: string
+  publicId: string
+  temPin: boolean
+  bloqueadoAte: string | null
+  ultimoUsoEm: string | null
+}
+
+export function useMinhaCredencial(profileId: string) {
+  return useQuery({
+    queryKey: ['minha-credencial', profileId],
+    queryFn: async (): Promise<MinhaCredencial | null> => {
+      const { data, error } = await supabase
+        .from('motoboy_credenciais')
+        .select('id, public_id, tem_pin, bloqueado_ate, ultimo_uso_em')
+        .eq('profile_id', profileId)
+        .eq('ativo', true)
+        .limit(1)
+
+      if (error) throw error
+
+      const linha = (data as unknown as Array<{
+        id: string
+        public_id: string
+        tem_pin: boolean
+        bloqueado_ate: string | null
+        ultimo_uso_em: string | null
+      }>)[0]
+      if (!linha) return null
+
+      return {
+        id: linha.id,
+        publicId: linha.public_id,
+        temPin: linha.tem_pin,
+        bloqueadoAte: linha.bloqueado_ate,
+        ultimoUsoEm: linha.ultimo_uso_em,
+      }
+    },
+  })
+}
+
+// Sem parâmetro nenhum, e isso é o desenho: a função SQL resolve o
+// titular por `auth.uid()`, então não existe como pedir a credencial de
+// outra pessoa nem por engano.
+export function useRedefinirMeuPin() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async () => {
+      const { error } = await supabase.rpc('redefinir_meu_pin')
+      if (error) throw error
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['minha-credencial'] })
       queryClient.invalidateQueries({ queryKey: ['credenciais'] })
       queryClient.invalidateQueries({ queryKey: ['eventos-auditoria'] })
     },

@@ -5,6 +5,7 @@ import { Button } from '@/components/ui/button'
 import { Notificacoes } from '@/components/Notificacoes'
 import { RegistroAuditoria } from '@/components/RegistroAuditoria'
 import { FilaOfflineIndicador } from '@/components/FilaOfflineIndicador'
+import { MeuCartao } from '@/components/MeuCartao'
 import {
   Dialog,
   DialogContent,
@@ -43,6 +44,11 @@ export function AppLayout({ children }: { children: ReactNode }) {
         </div>
         <div className="flex items-center gap-2">
           <FilaOfflineIndicador />
+          {/* Só o gerente: é dele o cartão de autorização, e é ele quem
+              precisa destravar o próprio PIN sem depender do admin. O
+              admin já administra todos os cartões em Cadastros; o caixa
+              não tem cartão nenhum. */}
+          {profile.papel === 'gerente' && <MeuCartao profile={profile} />}
           {(profile.papel === 'admin' || profile.papel === 'gerente') && (
             <>
               <RegistroAuditoria profile={profile} />
