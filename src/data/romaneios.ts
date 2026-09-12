@@ -755,15 +755,27 @@ type LinhaAssinatura = {
   papel_no_momento: 'caixa' | 'gerente' | 'admin' | null
 }
 
-// Cada tabela alvo tem exatamente UMA FK vinda de `assinaturas`, então o
-// embed sem hint é inequívoco. O PGRST201 que já mordeu este projeto duas
-// vezes acontece quando há DUAS FKs pro mesmo alvo (caso de entregas →
-// lojas). Se alguém acrescentar outra FK aqui, este select passa a
-// precisar de hint.
+// `profiles` VAI COM HINT DESDE 2026-09-12, e isto é conserto de um
+// defeito que chegou a ficar no ar. A 4B.2a acrescentou
+// `assinaturas.validador_profile_id`, a SEGUNDA FK de `assinaturas` para
+// `profiles` (a primeira é `user_id`), e o embed sem hint passou a ser
+// recusado inteiro com PGRST201 — página do romaneio, custódia do vale e
+// sangria pararam de abrir. Medido no navegador: sem hint, PGRST201; com
+// `profiles!assinaturas_user_id_fkey`, resolve.
+//
+// É a terceira vez que este erro aparece no projeto (entregas → lojas;
+// motoboy_credenciais → profiles, que já nasceu com hint). A regra que
+// sobra: TODA FK nova para uma tabela que já é alvo de embed obriga a
+// procurar os `select` que embutem aquela tabela ANTES de aplicar a
+// migration, não depois.
+//
+// `mototaxistas` e `motoboy_credenciais` continuam com UMA FK cada vinda
+// daqui, então seguem sem hint.
 const SELECT_ASSINATURAS =
   'romaneio_id, tipo_signatario, strokes, auth_method, signature_hash, ' +
   'assinado_em_local, capturado_em, ip, papel_no_momento, ' +
-  'profiles(nome), mototaxistas(nome, agencias(nome)), motoboy_credenciais(public_id)'
+  'profiles!assinaturas_user_id_fkey(nome), mototaxistas(nome, agencias(nome)), ' +
+  'motoboy_credenciais(public_id)'
 
 function mapAssinatura(linha: LinhaAssinatura): AssinaturaDoRomaneio {
   return {
