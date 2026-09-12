@@ -91,10 +91,11 @@ type SegredosComuns = {
 }
 
 /**
- * UNIÃO desde o 4B (2026-09-12), e a assimetria é o estado real:
+ * QUEM VALIDOU E POR QUÊ, nos dois documentos — desde o 4B.
  *
- *   saída    versão 2 — sem traço; carrega QUEM validou e POR QUÊ
- *   retorno  versão 1 — ainda com os traços, até a etapa dele
+ * Foi união por um dia (2026-09-12): a saída já carregava o modo e o
+ * retorno ainda carregava traços. Com o retorno na versão 2 as duas formas
+ * ficaram iguais, e a união virou um tipo só.
  *
  * `validacao` e `motivoExcecao` vão DENTRO do envelope pelo mesmo motivo
  * que `tipo` foi: o cliente não consegue reabrir nem reescrever o
@@ -102,16 +103,13 @@ type SegredosComuns = {
  * acreditar. Fora dele, trocar "motoboy" por "gerente" no caminho seria
  * editar um campo em claro.
  *
- * Sendo união, "saída sem modo de validação" não compila — a mesma
- * escolha do `tipo` obrigatório da 2D.6.
+ * Obrigatórios no tipo, então "envelope sem modo de validação" não
+ * compila — a mesma escolha do `tipo` obrigatório da 2D.6.
  */
-export type SegredosDoRomaneio =
-  | (SegredosComuns & {
-      tipo: 'saida'
-      validacao: ValidacaoDaSaida
-      motivoExcecao: MotivoExcecao | null
-    })
-  | (SegredosComuns & { tipo: 'retorno' })
+export type SegredosDoRomaneio = SegredosComuns & {
+  validacao: ValidacaoDaSaida
+  motivoExcecao: MotivoExcecao | null
+}
 
 function paraBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer)
@@ -293,9 +291,9 @@ async function calcularOfflineEventHash(entrada: {
 // existiria lá. Mexeu numa, mexe na outra — `scripts/offline-hash-v2.spec.mts`
 // confere as duas contra digests congelados antes delas.
 //
-// A versão 1, logo acima, FICA: o retorno ainda sela com traços até a
-// etapa dele, e trocar as duas de uma vez quebraria a sincronização do
-// retorno offline sem motivo.
+// A versão 1, logo acima, ficou SEM CHAMADOR quando o retorno passou à
+// versão 2 (logo abaixo). Ela sai junto com o resto dos traços, na
+// limpeza de `CampoAssinatura` e `signature_pad` — com os specs dela.
 // =====================================================================
 export async function calcularOfflineEventHashSaidaV2(entrada: {
   documentHash: string
@@ -310,6 +308,50 @@ export async function calcularOfflineEventHashSaidaV2(entrada: {
     entrada.documentHash,
     entrada.romaneioId.toLowerCase(),
     'saida',
+    entrada.validacao,
+    entrada.motivoExcecao ?? '-',
+    entrada.motoboyId.toLowerCase(),
+    entrada.ocorridoEmLocal,
+  ]
+  const bytes = new TextEncoder().encode(partes.join('|'))
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+// =====================================================================
+// O HASH DO EVENTO OFFLINE DO RETORNO — versão 2 (4B, 2026-09-12)
+//
+//   OEV2|documentHash|romaneioId|retorno|validacao|motivoExcecao ou '-'|
+//        motoboyId|ocorridoEmLocal
+//
+// A MESMA forma da saída, com `retorno` no quarto campo. É uma função
+// própria, e não um parâmetro `tipo` na da saída, de propósito: a da saída
+// já está publicada e congelada por digests, e mexer na assinatura dela
+// para acomodar o retorno seria reabrir um contrato aceito.
+//
+// O `retorno` literal separa os dois documentos no hash mesmo que um dia
+// dois ids e dois hashes coincidam; o que diferencia o conteúdo já está no
+// `documentHash` (DCR1 × DCRR1). No retorno o motoboy não é escolhido — ele
+// vem da saída —, mas entra igual: é o que o corpo declara, e o corpo não
+// pode trocá-lo mantendo o envelope.
+//
+// GÊMEA de uma função com o mesmo nome na `sync-romaneio`, tipos
+// primitivos pelo mesmo motivo da da saída. Os digests congelados moram em
+// `scripts/offline-hash-v2.spec.mts`, calculados antes desta função existir.
+// =====================================================================
+export async function calcularOfflineEventHashRetornoV2(entrada: {
+  documentHash: string
+  romaneioId: string
+  validacao: string
+  motivoExcecao: string | null
+  motoboyId: string
+  ocorridoEmLocal: string
+}): Promise<string> {
+  const partes = [
+    'OEV2',
+    entrada.documentHash,
+    entrada.romaneioId.toLowerCase(),
+    'retorno',
     entrada.validacao,
     entrada.motivoExcecao ?? '-',
     entrada.motoboyId.toLowerCase(),

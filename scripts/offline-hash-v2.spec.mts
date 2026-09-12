@@ -28,7 +28,10 @@ import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { calcularOfflineEventHashSaidaV2 } from '../src/lib/envelope.ts'
+import {
+  calcularOfflineEventHashSaidaV2,
+  calcularOfflineEventHashRetornoV2,
+} from '../src/lib/envelope.ts'
 
 let falhas = 0
 function checa(nome: string, condicao: boolean, extra = '') {
@@ -36,25 +39,27 @@ function checa(nome: string, condicao: boolean, extra = '') {
   if (!condicao) falhas++
 }
 
-// ---- extrai a gêmea da Edge Function ----
-const fonte = readFileSync('supabase/functions/sync-romaneio/index.ts', 'utf8')
-const inicio = fonte.indexOf('async function calcularOfflineEventHashSaidaV2')
-if (inicio < 0) throw new Error('não localizei calcularOfflineEventHashSaidaV2 na Edge Function')
-const fim = fonte.indexOf('\n}', fonte.indexOf('return Array.from', inicio)) + 2
-const corpo = fonte.slice(inicio, fim)
-
 type Entrada = Parameters<typeof calcularOfflineEventHashSaidaV2>[0]
+type Gemea = (e: Entrada) => Promise<string>
 
+// ---- extrai as gêmeas da Edge Function, pelo NOME, uma por arquivo ----
+const fonte = readFileSync('supabase/functions/sync-romaneio/index.ts', 'utf8')
 const dir = mkdtempSync(join(tmpdir(), 'gemea-v2-'))
-const arquivo = join(dir, 'gemea-edge-v2.mts')
-writeFileSync(arquivo, `${corpo}\nexport { calcularOfflineEventHashSaidaV2 }\n`, 'utf8')
-const daEdge = (
-  (await import(pathToFileURL(arquivo).href)) as {
-    calcularOfflineEventHashSaidaV2: (e: Entrada) => Promise<string>
-  }
-).calcularOfflineEventHashSaidaV2
 
-console.log(`\n  extraídas ${corpo.length} chars da Edge Function\n`)
+async function extrair(nome: string): Promise<Gemea> {
+  const inicio = fonte.indexOf(`async function ${nome}(`)
+  if (inicio < 0) throw new Error(`não localizei ${nome} na Edge Function`)
+  const fim = fonte.indexOf('\n}', fonte.indexOf('return Array.from', inicio)) + 2
+  const corpo = fonte.slice(inicio, fim)
+  const arquivo = join(dir, `${nome}.mts`)
+  writeFileSync(arquivo, `${corpo}\nexport { ${nome} }\n`, 'utf8')
+  console.log(`  extraídas ${corpo.length} chars de ${nome}`)
+  return ((await import(pathToFileURL(arquivo).href)) as Record<string, Gemea>)[nome]
+}
+
+const daEdge = await extrair('calcularOfflineEventHashSaidaV2')
+const retornoDaEdge = await extrair('calcularOfflineEventHashRetornoV2')
+console.log('')
 
 const base: Entrada = {
   documentHash: 'a'.repeat(64),
@@ -129,13 +134,57 @@ checa('outro motoboy muda o hash',
 checa('hash tem 64 hex', /^[0-9a-f]{64}$/.test(await h(base)))
 
 // ---------------------------------------------------------------------
-// (4) A VERSÃO 1 CONTINUA NO LUGAR — o retorno ainda depende dela
+// (4) O RETORNO, versão 2 — 4B, 2026-09-12
+//
+//   OEV2|documentHash|romaneioId|retorno|validacao|motivo ou '-'|
+//        motoboyId|ocorridoEmLocal
+//
+// Os três digests abaixo foram calculados com sha256 puro (Python
+// hashlib) sobre as strings do comentário, ANTES de a função existir nos
+// dois lados — mesma disciplina dos da saída.
 // ---------------------------------------------------------------------
 
-checa('a Edge Function ainda tem a versão 1 (retorno)',
-  fonte.includes('async function calcularOfflineEventHash('))
-checa('o cliente ainda exporta a versão 1',
-  readFileSync('src/lib/envelope.ts', 'utf8').includes('async function calcularOfflineEventHash('))
+const congeladosRetorno: [string, Entrada, string][] = [
+  // OEV2|aaaa…aaaa|019fe83f-…d5ea|retorno|motoboy|-|019fe840-…0002|2026-09-12T14:32:05.123Z
+  ['retorno, motoboy', base,
+   '1590375e6e55ddaea67c94ad258f5c58379f4f0279686a3faac1350a14319ee3'],
+  ['retorno, gerente, cartão perdido', { ...base, validacao: 'gerente', motivoExcecao: 'cartao_perdido' },
+   'ccb77cf98878e26fb2f0d7ae8930623b43caee49128284bf4c45cf04df1ce8e4'],
+  ['retorno, gerente, PIN esquecido', { ...base, validacao: 'gerente', motivoExcecao: 'pin_esquecido' },
+   'ff3fac3f7e5dbc3e37b257acca884bcc46ad981dce54d31b83a87c6f41bccb10'],
+]
+
+for (const [nome, entrada, esperado] of congeladosRetorno) {
+  const local = await calcularOfflineEventHashRetornoV2(entrada)
+  const edge = await retornoDaEdge(entrada)
+  checa(`${nome}: cliente = congelado`, local === esperado, local === esperado ? '' : local)
+  checa(`${nome}: Edge = congelado`, edge === esperado, edge === esperado ? '' : edge)
+}
+
+for (const [nome, entrada] of casos) {
+  checa(`gêmeos do retorno concordam: ${nome}`,
+    (await calcularOfflineEventHashRetornoV2(entrada)) === (await retornoDaEdge(entrada)))
+}
+
+const hr = (e: Entrada) => calcularOfflineEventHashRetornoV2(e)
+
+// O literal do documento separa os dois: um envelope de saída não serve de
+// retorno nem com as mesmas entradas.
+checa('retorno ≠ saída com as mesmas entradas', (await hr(base)) !== (await h(base)))
+checa('retorno: motoboy ≠ gerente',
+  (await hr(base)) !== (await hr({ ...base, validacao: 'gerente', motivoExcecao: 'pin_esquecido' })))
+checa('retorno: outro motoboy muda o hash',
+  (await hr(base)) !== (await hr({ ...base, motoboyId: '019fe840-0000-7000-8000-000000000009' })))
+
+// ---------------------------------------------------------------------
+// (5) A VERSÃO 1 FICOU SEM CHAMADOR — e sai na limpeza dos traços
+// ---------------------------------------------------------------------
+
+const handler = fonte.slice(fonte.indexOf('Deno.serve('))
+checa('o handler da Edge Function não chama mais a versão 1',
+  !handler.includes('calcularOfflineEventHash('))
+checa('e o retorno do handler usa a versão 2',
+  handler.includes('calcularOfflineEventHashRetornoV2({'))
 
 console.log(falhas === 0 ? '\nhash offline v2 ok\n' : `\n${falhas} FALHA(S)\n`)
 process.exit(falhas === 0 ? 0 : 1)

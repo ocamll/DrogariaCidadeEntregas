@@ -187,8 +187,10 @@ export type ResultadoAutorizacao =
 // descobre de quem é o cartão e recusa a combinação errada; passar
 // `excecao` com o cartão do motoboy volta `motivo_sem_excecao`.
 //
-// O retorno continua chamando com três argumentos, e a função SQL aceita
-// porque os dois novos têm default nulo.
+// O RETORNO usa a mesma função. Na exceção dele o motoboy também não sai
+// do cartão — mas não é escolhido: é o motoboy da corrida, que a saída
+// nomeia. O nome "saída" ficou por história; a autorização amarra cartão
+// + PIN a um `document_hash` qualquer.
 export async function autorizarSaida(
   token: string,
   pin: string,
@@ -230,7 +232,9 @@ export async function autorizarSaida(
 //   - manda `retornoJsonb` já CONVERTIDO por `paraJsonbRetorno`, o
 //     mesmo objeto que produziu o `documentHash`. Reconverter aqui
 //     abriria a fresta de assinar uma coisa e mandar outra.
-//   - `responsavelStrokes`, nunca `caixaStrokes`.
+//   - sem traço nenhum desde o 4B. Quem validou (motoboy ou gerente) e
+//     por quê já estão na autorização, e é de lá que o servidor os lê —
+//     o cliente não os declara de novo aqui.
 //
 // A autorização é a MESMA `autorizar_saida`: ela amarra cartão + PIN a
 // um `document_hash` qualquer, e o do retorno é um deles. Reaproveitar a
@@ -246,8 +250,6 @@ export async function selarRomaneioRetorno(input: {
   retornoJsonb: unknown[]
   documentHash: string
   autorizacaoId: string
-  responsavelStrokes: unknown
-  motoboyStrokes: unknown
   ocorridoEmLocal: string
 }): Promise<ResultadoSelo> {
   const { data, error } = await supabase.rpc('selar_romaneio_retorno', {
@@ -258,8 +260,6 @@ export async function selarRomaneioRetorno(input: {
     p_retorno: input.retornoJsonb,
     p_document_hash: input.documentHash,
     p_autorizacao_id: input.autorizacaoId,
-    p_responsavel_strokes: input.responsavelStrokes,
-    p_motoboy_strokes: input.motoboyStrokes,
     p_ocorrido_em_local: input.ocorridoEmLocal,
     p_geolocalizacao: null,
   })
@@ -280,7 +280,7 @@ export async function selarRomaneioRetorno(input: {
     }
   }
   // Conflito NÃO é exceção aqui tampouco: a transação commitou o
-  // registro com as DUAS assinaturas preservadas, porque a devolução
+  // registro com a validação apresentada preservada, porque a devolução
   // física aconteceu. Tratar isto como erro retryable faria a tela
   // sugerir "tente de novo", que é o oposto do que se deve fazer.
   return {
@@ -344,7 +344,7 @@ export type SaidaOfflineInput = {
  *
  * Depois de enfileirado, o artefato é
  *
- *     retornoJsonb  +  documentHash  +  os dois traços
+ *     retornoJsonb  +  documentHash  +  validação e motivo
  *
  * e mais nada. A fila **não chama `paraJsonbRetorno` nem
  * `montarCanonicoRetorno` de novo** — é por isso que o objeto de domínio
@@ -353,7 +353,7 @@ export type SaidaOfflineInput = {
  * Se ele estivesse, uma atualização do app entre enfileirar e
  * sincronizar poderia converter diferente: o servidor reconstruiria
  * outro DCRR1, chegaria a outro hash e recusaria `documento_alterado` —
- * com as duas assinaturas já colhidas e o motoboy no balcão. Foi
+ * com a custódia já colhida e o motoboy no balcão. Foi
  * exatamente esse defeito (o `paraJsonbRetorno` sem `documentos`) que a
  * conferência dos vetores pegou em 2026-08-20; aqui ele é impedido por
  * construção, tirando do payload aquilo de que a reconversão precisaria.
@@ -390,22 +390,19 @@ export type RetornoOfflineInput = {
   versaoDocumento: 'DCRR1'
   /** Já convertido por `paraJsonbRetorno`. Nunca reconverter. */
   retornoJsonb: unknown[]
-  /** O que as duas partes assinaram. */
+  /** O que a farmácia confirmou e o motoboy (ou o gerente) validou. */
   documentHash: string
 
   /**
-   * `responsavelStrokes`, NUNCA `caixaStrokes`.
+   * QUEM VALIDOU, e por quê — no lugar dos traços desde o 4B.
    *
-   * O protocolo da saída chama o lado interno de `caixaStrokes` e assim
-   * fica — corpos já gravados dizem isso, e renomear no fio quebraria
-   * fila antiga. Mas não existe `romaneio_retorno` antigo em IndexedDB
-   * nenhum, então aceitar o nome velho aqui seria criar hoje
-   * compatibilidade com um formato que nunca existiu, e perpetuar um
-   * nome que mente sobre quem assinou — a armadilha do `tipo_signatario`
-   * outra vez.
+   * Vão aqui em claro E dentro do envelope: a Edge Function compara os
+   * dois e recusa `validacao_divergente` se discordarem. Na exceção o
+   * cartão selado é o do GERENTE, e `motoboyId` acima continua sendo o
+   * motoboy da saída — o responsável pelos vales.
    */
-  responsavelStrokes: unknown
-  motoboyStrokes: unknown
+  validacao: ValidacaoDaSaida
+  motivoExcecao: MotivoExcecao | null
 
   ocorridoEmLocal: string
 
@@ -531,7 +528,7 @@ export async function sincronizarSaidaOffline(input: SaidaOfflineInput): Promise
  *   - `tipo: retorno` no corpo, EXPLÍCITO. A ausência significa saída,
  *     e isso é compatibilidade histórica — não vale pro retorno, que
  *     nunca teve fila antiga.
- *   - `responsavelStrokes`, nunca `caixaStrokes`.
+ *   - sem traço; `validacao` e `motivoExcecao`, iguais aos da saída.
  *   - manda `retornoJsonb` CONGELADO, sem reconverter nada. É o ponto
  *     inteiro da 2C.4: o que sobe é o que foi assinado.
  *   - não manda `corridaId` nem `lojaId` — o servidor deriva os dois do
@@ -554,8 +551,8 @@ export async function sincronizarRetornoOffline(input: RetornoOfflineInput): Pro
       motoboyId: input.motoboyId,
       retornoJsonb: input.retornoJsonb,
       documentHash: input.documentHash,
-      responsavelStrokes: input.responsavelStrokes,
-      motoboyStrokes: input.motoboyStrokes,
+      validacao: input.validacao,
+      motivoExcecao: input.motivoExcecao,
       ocorridoEmLocal: input.ocorridoEmLocal,
       envelope: input.envelope,
     },

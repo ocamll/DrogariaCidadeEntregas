@@ -24,7 +24,12 @@ import {
 } from '@/data/credenciais'
 import { selarSegredos, calcularOfflineEventHashSaidaV2, envelopeDisponivel } from '@/lib/envelope'
 import { useOnline } from '@/lib/useOnline'
-import { MOTIVOS_EXCECAO, MOTIVO_EXCECAO_LABEL, type MotivoExcecao } from '@/lib/excecaoDoGerente'
+import {
+  MOTIVOS_EXCECAO,
+  MOTIVO_EXCECAO_LABEL,
+  mensagemDaAutorizacao,
+  type MotivoExcecao,
+} from '@/lib/excecaoDoGerente'
 import {
   enfileirarOperacao,
   donoDaFila,
@@ -139,30 +144,6 @@ function prontoCom<T, M extends string>(
   procedencia: Procedencia = 'servidor'
 ): ConsultaComVeredito<T, M> {
   return { estado: 'ready', dados: veredito, procedencia }
-}
-
-// O que o servidor respondeu ao `autorizar_saida`, em frase de balcão. Os
-// motivos novos são do 4B: é o SQL que descobre de quem é o cartão e
-// recusa a combinação errada, e a tela só traduz.
-function mensagemDaAutorizacao(motivo: string, porGerente: boolean): string {
-  switch (motivo) {
-    case 'pin_incorreto':
-      return 'PIN incorreto.'
-    case 'bloqueado':
-      return 'Credencial bloqueada por tentativas seguidas de PIN incorreto.'
-    case 'gerente_invalido':
-      return 'Este cartão não é de um gerente ativo. A autorização excepcional é só do gerente da filial.'
-    case 'motoboy_invalido':
-      return 'O motoboy escolhido não está ativo. Escolha outro.'
-    case 'excecao_exige_motoboy_e_motivo':
-      return 'Falta escolher o motoboy e o motivo.'
-    case 'cartao_de_outro_motoboy':
-      return 'Este cartão é de outro motoboy.'
-    case 'motivo_sem_excecao':
-      return 'Com o cartão do próprio motoboy não há exceção a registrar.'
-    default:
-      return porGerente ? 'Não consegui autenticar o gerente.' : 'Não consegui autenticar o motoboy.'
-  }
 }
 
 type GerenteDaExcecao = {
@@ -700,7 +681,7 @@ function NovaCorridaFluxo({
           gerente && motivo ? { motoboyId: entrada.motoboyId, motivo } : undefined
         )
         if (!autorizacao.ok) {
-          setErro(mensagemDaAutorizacao(autorizacao.motivo, gerente !== null))
+          setErro(mensagemDaAutorizacao(autorizacao.motivo, { porGerente: gerente !== null, operacao: 'saida' }))
           setOcupado(null)
           return
         }

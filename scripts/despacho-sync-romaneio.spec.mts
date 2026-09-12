@@ -198,54 +198,53 @@ console.log('\n--- a ordem: primeiro prova o envelope, depois escolhe a porta --
   )
 }
 
-console.log('\n--- o vocabulário dos traços é rígido por tipo ---')
+console.log('\n--- 4B: nenhum traço, e o modo de validação conferido nos DOIS tipos ---')
 {
   const handler = fonteCodigo.slice(fonteCodigo.indexOf('Deno.serve('))
-  checa(
-    'retorno lê responsavelStrokes',
-    handler.includes('assinaturaInternaStrokes: corpo.responsavelStrokes')
-  )
-  checa(
-    'e recusa retorno sem responsavelStrokes',
-    handler.includes("corpo.responsavelStrokes === undefined")
-  )
-  // RECUSA os dois sentidos, e não só a ausência. Ignorar um campo do
-  // protocolo errado seria aceitar em silêncio um corpo confuso.
-  checa(
-    'recusa retorno que traga caixaStrokes',
-    handler.includes("tipo === 'retorno' && corpo.caixaStrokes !== undefined")
-  )
-  checa(
-    'recusa saída que traga qualquer traço (4B)',
-    handler.includes("tipo === 'saida' &&") &&
-      handler.includes('corpo.caixaStrokes !== undefined ||') &&
-      handler.includes('corpo.motoboyStrokes !== undefined ||') &&
-      handler.includes('corpo.responsavelStrokes !== undefined')
-  )
-  // Sem fallback: o retorno nunca pode cair em caixaStrokes.
-  const rpcRetorno = handler.slice(handler.indexOf("'selar_romaneio_retorno_sincronizado'"))
-  const ateOFim = rpcRetorno.slice(0, rpcRetorno.indexOf('})'))
-  checa('a RPC do retorno não menciona caixaStrokes', !ateOFim.includes('caixaStrokes'))
-
-  // ---- 4B: a saída sem traço, com o modo de validação conferido ----
-  //
   // `pos` e `primeiraRpc` do bloco da ORDEM não existem aqui — cada bloco
   // tem o próprio escopo, e usá-los rendia `ReferenceError`. Estas são as
   // mesmas medidas, sobre o mesmo `handler` deste bloco.
   const posAqui = (agulha: string) => handler.indexOf(agulha)
   const primeiraRpcAqui = posAqui('.rpc(')
+
+  // A RECUSA DE TRAÇO NÃO DEPENDE DO TIPO. Até o retorno v2 ela era
+  // `tipo === 'saida' && …`, e o retorno EXIGIA traço; agora qualquer
+  // traço em qualquer corpo é bundle anterior ao 4B.
+  const recusaTraco = posAqui('corpo.caixaStrokes !== undefined ||')
+  checa('recusa qualquer traço, em qualquer tipo',
+    recusaTraco > 0 &&
+      handler.includes('corpo.motoboyStrokes !== undefined ||') &&
+      handler.includes('corpo.responsavelStrokes !== undefined'))
+  checa('e a recusa não está presa a um tipo',
+    !handler.slice(recusaTraco - 80, recusaTraco).includes('tipo ==='))
+  checa('a recusa de traço vem ANTES de qualquer RPC', recusaTraco > 0 && recusaTraco < primeiraRpcAqui)
+  checa('nada no handler lê traço do corpo para usar',
+    !handler.includes('Strokes: corpo.') && !handler.includes('p_responsavel_strokes') &&
+      !handler.includes('p_motoboy_strokes'))
+
   checa('modo × envelope conferido ANTES de qualquer RPC',
     posAqui("motivo: 'validacao_divergente'") > 0 &&
       posAqui("motivo: 'validacao_divergente'") < primeiraRpcAqui)
   checa('domínio do modo conferido ANTES de qualquer RPC',
     posAqui("motivo: 'validacao_invalida'") > 0 &&
       posAqui("motivo: 'validacao_invalida'") < primeiraRpcAqui)
+  // A conferência do modo valia só para a saída; o retorno v2 a herda.
+  const trechoDoModo = handler.slice(posAqui('const modoValido'), posAqui("motivo: 'validacao_divergente'"))
+  checa('e a conferência do modo não está presa à saída', !trechoDoModo.includes("tipo === 'saida'"))
+
   checa('a saída usa o hash offline v2', handler.includes('calcularOfflineEventHashSaidaV2({'))
-  const rpcSaida = handler.slice(handler.indexOf("'selar_romaneio_sincronizado'"))
-  const ateOFimSaida = rpcSaida.slice(0, rpcSaida.indexOf('})'))
-  checa('a RPC da saída não manda traço nenhum', !/strokes/i.test(ateOFimSaida))
-  checa('a RPC da saída manda modo e motivo',
-    ateOFimSaida.includes('p_validacao:') && ateOFimSaida.includes('p_motivo:'))
+  checa('o retorno usa o hash offline v2', handler.includes('calcularOfflineEventHashRetornoV2({'))
+
+  for (const [rotulo, rpc] of [
+    ['saída', "'selar_romaneio_sincronizado'"],
+    ['retorno', "'selar_romaneio_retorno_sincronizado'"],
+  ] as const) {
+    const trecho = handler.slice(handler.indexOf(rpc))
+    const ateOFim = trecho.slice(0, trecho.indexOf('})'))
+    checa(`a RPC do ${rotulo} não manda traço nenhum`, !/strokes/i.test(ateOFim))
+    checa(`a RPC do ${rotulo} manda modo e motivo`,
+      ateOFim.includes('p_validacao:') && ateOFim.includes('p_motivo:'))
+  }
 }
 
 console.log(falhas === 0 ? '\ndespacho ok\n' : `\n${falhas} FALHA(S)\n`)

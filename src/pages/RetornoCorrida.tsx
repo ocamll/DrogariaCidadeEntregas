@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import type SignaturePad from 'signature_pad'
 import type { AuthProfile } from '@/data/auth'
 import { useCorridasAbertas, type CorridaAberta } from '@/data/corridas'
 import {
@@ -29,6 +28,7 @@ import {
   reduzirCustodia,
   ctaTravado,
   podeGuardarSegredos,
+  validacaoDaCustodia,
   type EstadoCustodia,
   type EventoCustodia,
 } from '@/lib/custodiaDoRetorno'
@@ -42,7 +42,13 @@ import {
   type TipoDocumentoFisico,
 } from '@/lib/canonicoRetorno'
 import { filtrarCorridasRetornaveis } from '@/lib/corridasBloqueadas'
-import { selarSegredos, calcularOfflineEventHash, envelopeDisponivel } from '@/lib/envelope'
+import { selarSegredos, calcularOfflineEventHashRetornoV2, envelopeDisponivel } from '@/lib/envelope'
+import {
+  MOTIVOS_EXCECAO,
+  MOTIVO_EXCECAO_LABEL,
+  mensagemDaAutorizacao,
+  type MotivoExcecao,
+} from '@/lib/excecaoDoGerente'
 import { useOnline } from '@/lib/useOnline'
 import { rotuloDoPapelNoMomento } from '@/lib/papeis'
 import { FORMA_PAGAMENTO_LABEL } from '@/data/pagamentos'
@@ -51,7 +57,6 @@ import { mensagemDeErro } from '@/lib/supabase'
 import { uuidv7 } from '@/lib/uuid'
 import { centsFromDigits, formatBRL } from '@/lib/money'
 import { CampoMoeda } from '@/components/CampoMoeda'
-import { CampoAssinatura } from '@/components/CampoAssinatura'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
@@ -67,16 +72,17 @@ import { normalizarParagrafo } from '@/lib/texto'
 // RETORNO DE CORRIDA — a tela do Romaneio de Retorno (2D)
 //
 // Ela COLETA FATOS E MANIFESTAÇÕES; nunca decide o que é verdade oficial.
-// Congela o mesmo `p_retorno` que vai ser assinado e entrega esse
+// Congela o mesmo `p_retorno` que vai ser confirmado e entrega esse
 // artefato a uma das duas portas já provadas na 2B/2C.
 //
-//     useContextoRetorno   fatos ANTIGOS, do documento assinado da saída
+//     useContextoRetorno   fatos ANTIGOS, do documento selado da saída
 //           ↓
 //     preenchimento        desfecho, pagamento realizado, documentos
 //           ↓
 //     congelarRetorno      ids novos, guard de colisão, documentHash
 //           ↓
-//     reduzirCustodia      cartão, PIN, as duas assinaturas
+//     reduzirCustodia      cartão e PIN (do motoboy, ou do gerente no
+//                          lugar dele) e a confirmação da farmácia
 //           ↓
 //     online → selar_romaneio_retorno | offline → fila romaneio_retorno
 //
@@ -120,7 +126,7 @@ export function RetornoCorrida({
   // Uma corrida com `romaneio_retorno` pendente na fila local não é
   // OFERECIDA. Não é proteção de integridade — quem impede o dano é o
   // `UNIQUE (corrida_id, tipo)` — é custo: sem isto o caixa colheria
-  // duas assinaturas pra descobrir depois que só uma delas pode selar.
+  // cartão e PIN pra descobrir depois que só um retorno pode selar.
   //
   // `undefined` quando a consulta não respondeu, e é isso que separa
   // "não há corrida aberta" de "não sei quais estão abertas".
@@ -238,7 +244,7 @@ export function RetornoCorrida({
 // ---------------------------------------------------------------------
 // O portão do contexto
 //
-// Sem o documento assinado da saída não há retorno a montar, e a tela diz
+// Sem o documento selado da saída não há retorno a montar, e a tela diz
 // o que falta em vez de deixar o caixa concluir que o sistema perdeu
 // alguma coisa. Nada de remendar com o que houver em tabela local: seria
 // inventar o que o motoboy recebeu.
@@ -354,6 +360,13 @@ function preenchimentoInicial(vale: ValeDoContexto): Preenchimento {
   }
 }
 
+/**
+ * O gerente que abriu a exceção — só pra EXIBIR. Quem autentica, e contra
+ * qual filial, é o servidor; o que a máquina guarda é o titular do cartão
+ * e o motivo, carimbados.
+ */
+type GerenteDoRetorno = { nome: string; lojaNome: string | null; temPin: boolean }
+
 type Resultado =
   | { kind: 'selado'; numero: string; finalHash: string | null }
   | { kind: 'offline' }
@@ -390,6 +403,7 @@ function FluxoDeRetorno({
   const [token, setToken] = useState('')
   const [expiraEm, setExpiraEm] = useState<string | null>(null)
   const [agora, setAgora] = useState(() => Date.now())
+  const [gerente, setGerente] = useState<GerenteDoRetorno | null>(null)
 
   // O PIN NÃO é estado do React. O input é não-controlado, e o que o
   // componente guarda é um BOOLEANO — o suficiente pra habilitar o
@@ -401,9 +415,6 @@ function FluxoDeRetorno({
   // O material sensível vive AQUI e só aqui: nunca Dexie, nunca
   // localStorage, nunca payload de fila, nunca evento de auditoria.
   const segredosRef = useRef<{ pin: string; credentialToken: string } | null>(null)
-
-  const responsavelPad = useRef<SignaturePad | null>(null)
-  const motoboyPad = useRef<SignaturePad | null>(null)
 
   // A PERMISSÃO PRA O MATERIAL EXISTIR É DERIVADA DA MÁQUINA.
   //
@@ -421,46 +432,13 @@ function FluxoDeRetorno({
     segredosRef.current = null
   }, [])
 
-  // OS CANVAS SEGUEM A MÁQUINA, PELO MESMO MOTIVO QUE A REF DO PIN.
-  //
-  // Quando a custódia é recolhida — trocar motoboy, autorização vencida,
-  // falha de rede no selo —, os traços saem do estado. Se o desenho
-  // continuasse na tela, ela estaria mostrando uma assinatura que o
-  // documento não tem mais: a tela afirmando o que não sabe, de novo.
-  //
-  // Derivado, e não lembrado em cada handler: assim um caminho de
-  // invalidação novo já nasce coberto.
-  const temTracoResponsavel = custodia?.responsavelStrokes != null
-  const temTracoMotoboy = custodia?.motoboyStrokes != null
-  useEffect(() => {
-    const pad = responsavelPad.current
-    if (!pad) return
-    // E o canvas TRAVA depois de registrado. Sem isto o caixa poderia
-    // continuar rabiscando por cima de uma assinatura já colhida, e o
-    // que está no documento deixaria de ser o que está na tela.
-    if (temTracoResponsavel) pad.off()
-    else {
-      pad.clear()
-      pad.on()
-    }
-  }, [temTracoResponsavel])
-  useEffect(() => {
-    const pad = motoboyPad.current
-    if (!pad) return
-    if (temTracoMotoboy) pad.off()
-    else {
-      pad.clear()
-      pad.on()
-    }
-  }, [temTracoMotoboy])
-
   function despachar(evento: EventoCustodia) {
     setCustodia((atual) => (atual ? reduzirCustodia(atual, evento) : atual))
   }
 
   // O relógio da autorização. Ela vale ~2 minutos e nasce no passo do
-  // PIN, então ela corre DURANTE as duas assinaturas — a tela mostra
-  // quanto falta em vez de deixar o servidor recusar no fim.
+  // PIN, então ela corre até a farmácia confirmar — a tela mostra quanto
+  // falta em vez de deixar o servidor recusar no fim.
   useEffect(() => {
     if (!expiraEm) return
     const t = setInterval(() => setAgora(Date.now()), 1000)
@@ -607,8 +585,7 @@ function FluxoDeRetorno({
     setPinCompleto(false)
     if (pinRef.current) pinRef.current.value = ''
     segredosRef.current = null
-    responsavelPad.current?.clear()
-    motoboyPad.current?.clear()
+    setGerente(null)
     setResultado(null)
   }
 
@@ -646,15 +623,31 @@ function FluxoDeRetorno({
         return
       }
 
-      // CARTÃO DO GERENTE (4B.1): ele identifica quem AUTORIZA, e a
-      // autorização excepcional ainda não existe. Recusar dizendo isso é
-      // diferente de "credencial não reconhecida" — as duas frases mandam
-      // o balcão fazer coisas diferentes.
+      // CARTÃO DO GERENTE (4B): abre a autorização excepcional. No retorno
+      // o motoboy NÃO é escolhido — é o da corrida, que a saída nomeia — e
+      // nada daqui em diante pede o cartão ou o PIN dele.
       if (achada.titular === 'gerente') {
-        const gerente = 'gerenteNome' in achada ? achada.gerenteNome : achada.titularNome
+        const nome = 'gerenteNome' in achada ? achada.gerenteNome : achada.titularNome
+        // Gerente de outra filial não autoriza o retorno DAQUI. O selo
+        // recusaria `gerente_sem_competencia` contra a filial da saída, com
+        // o motoboy esperando; a tela não oferece. Offline este caso nem
+        // chega aqui, porque o cache só guarda os gerentes da própria filial.
+        if (achada.lojaId !== profile.lojaId) {
+          despachar({
+            tipo: 'CARTAO_RECUSADO',
+            mensagem: `${nome} é gerente${achada.lojaNome ? ' da ' + achada.lojaNome : ' de outra filial'}. Só o gerente desta filial autoriza o retorno daqui.`,
+          })
+          return
+        }
+        setGerente({ nome, lojaNome: achada.lojaNome, temPin: achada.temPin })
+        setToken(limpo)
         despachar({
-          tipo: 'CARTAO_RECUSADO',
-          mensagem: `Este é o cartão de ${gerente}, gerente. Ele autoriza, não devolve a corrida: bipa o cartão do motoboy.`,
+          tipo: 'CARTAO_LIDO',
+          publicId: achada.publicId,
+          // O motoboy DO DOCUMENTO. O cartão do gerente nunca vira o
+          // responsável pelos vales.
+          motoboyId: contexto.motoboyId,
+          titular: 'gerente',
         })
         return
       }
@@ -664,21 +657,23 @@ function FluxoDeRetorno({
 
       // O DOCUMENTO JÁ NOMEIA O MOTOBOY — ele saiu do romaneio de saída.
       // Um cartão de outra pessoa não é "trocar de motoboy": é o cartão
-      // errado, e a transação recusaria `outro_motoboy` depois de duas
-      // assinaturas.
+      // errado, e a transação recusaria `outro_motoboy` depois da
+      // confirmação. O retorno por outro motoboy continua recusado.
       if (motoboyIdDoCartao !== contexto.motoboyId) {
         despachar({
           tipo: 'CARTAO_RECUSADO',
-          mensagem: `Este cartão é de ${nomeDoCartao}, e esta corrida saiu com ${contexto.motoboyNome ?? 'outro motoboy'}. Quem devolve a corrida é quem a levou.`,
+          mensagem: `Este cartão é de ${nomeDoCartao}, e esta corrida saiu com ${contexto.motoboyNome ?? 'outro motoboy'}. Quem devolve a corrida é quem a levou — se ${contexto.motoboyNome ?? 'ele'} não tem o cartão, bipe o do gerente.`,
         })
         return
       }
 
+      setGerente(null)
       setToken(limpo)
       despachar({
         tipo: 'CARTAO_LIDO',
         publicId: achada.publicId,
         motoboyId: motoboyIdDoCartao,
+        titular: 'motoboy',
       })
     } catch (e) {
       // ANTES ESTE `catch` NÃO DESPACHAVA NADA. A máquina ficava em
@@ -705,13 +700,18 @@ function FluxoDeRetorno({
     const pin = pinRef.current?.value ?? ''
     const problema = pinAceitavel(pin)
     if (problema) return setErro(problema)
-    if (!congelado) return
+    if (!congelado || !custodia) return
+    const porGerente = custodia.credencial?.valor.titular === 'gerente'
+    const motivo = custodia.motivoExcecao?.valor ?? null
+    // A máquina IGNORA autenticar um cartão de gerente sem motivo. Aqui o
+    // caixa fica sabendo por quê, em vez de o botão parecer quebrado.
+    if (porGerente && !motivo) return setErro('Escolha o motivo antes do PIN do gerente.')
     setErro(null)
 
     // OFFLINE: o PIN é CAPTURADO, não conferido. Ninguém valida aqui —
     // o HMAC e o bcrypt vivem no servidor. Ele fica em memória efêmera
-    // até o envelope existir, o que só acontece depois das duas
-    // assinaturas (é o `offlineEventHash` que amarra os traços).
+    // até o envelope existir, o que só acontece quando a farmácia
+    // confirma (é o relógio desse ato que vai no `offlineEventHash`).
     if (!navigator.onLine) {
       if (!envelopeDisponivel()) {
         return setErro(
@@ -728,19 +728,22 @@ function FluxoDeRetorno({
     // ONLINE: autentica AGORA e recebe a autorização de uso único, já
     // amarrada a este `documentHash`. Feito isso o PIN não precisa mais
     // existir — e por isso ele sai da memória neste mesmo passo.
+    //
+    // Na exceção vão o motoboy DA CORRIDA e o motivo: é o servidor que
+    // descobre de quem é o cartão e recusa a combinação errada.
     setOcupado('conferindo')
     try {
-      const autorizacao = await autorizarSaida(token, pin, congelado.documentHash)
+      const autorizacao = await autorizarSaida(
+        token,
+        pin,
+        congelado.documentHash,
+        porGerente && motivo ? { motoboyId: contexto.motoboyId, motivo } : undefined
+      )
       if (!autorizacao.ok) {
         // RECUSA: o servidor conferiu e disse não.
         despachar({
           tipo: 'PIN_RECUSADO',
-          mensagem:
-            autorizacao.motivo === 'pin_incorreto'
-              ? 'PIN incorreto.'
-              : autorizacao.motivo === 'bloqueado'
-                ? 'Credencial bloqueada por tentativas seguidas de PIN incorreto.'
-                : 'Não consegui autenticar o motoboy.',
+          mensagem: mensagemDaAutorizacao(autorizacao.motivo, { porGerente, operacao: 'retorno' }),
         })
         return
       }
@@ -748,10 +751,10 @@ function FluxoDeRetorno({
       despachar({ tipo: 'PIN_AUTORIZADO', autorizacaoId: autorizacao.autorizacaoId })
     } catch (e) {
       // FALHA, não recusa. `PIN_RECUSADO` apagaria os segredos e diria
-      // ao caixa que o motoboy errou o PIN; a falha na consulta diz que
-      // a tentativa não completou, que é o que de fato aconteceu — e
-      // deixa a máquina onde está, com o próximo passo intacto.
-      console.error('autorizar saída falhou:', e)
+      // ao caixa que o PIN estava errado; a falha na consulta diz que a
+      // tentativa não completou, que é o que de fato aconteceu — e deixa
+      // a máquina onde está, com o próximo passo intacto.
+      console.error('autorizar retorno falhou:', e)
       despachar({
         tipo: 'FALHA_NA_CONSULTA',
         mensagem: 'Não consegui conferir o PIN agora.',
@@ -763,51 +766,42 @@ function FluxoDeRetorno({
     }
   }
 
-  function handleAssinarResponsavel() {
-    if (!responsavelPad.current || responsavelPad.current.isEmpty()) {
-      return setErro('Falta a sua assinatura.')
-    }
-    setErro(null)
-    despachar({ tipo: 'ASSINOU_RESPONSAVEL', strokes: responsavelPad.current.toData() })
-  }
-
-  function handleAssinarMotoboy() {
-    if (!motoboyPad.current || motoboyPad.current.isEmpty()) {
-      return setErro('Falta a assinatura do motoboy.')
-    }
-    setErro(null)
-    despachar({ tipo: 'ASSINOU_MOTOBOY', strokes: motoboyPad.current.toData() })
-  }
-
-  // ---- concluir ----------------------------------------------------
+  // ---- concluir: a confirmação da farmácia ---------------------------
+  //
+  // ESTE CLIQUE É A CONFIRMAÇÃO. Não há traço a colher: quem recebe a
+  // corrida confirma o conteúdo conferido com um ato explícito, e estar
+  // logado não conta como manifestação. O servidor grava isso como
+  // `sessao_confirmacao_explicita`, com o cargo do momento.
   async function handleConcluir() {
     if (!congelado || !custodia) return
-    const responsavelStrokes = custodia.responsavelStrokes?.valor
-    const motoboyStrokes = custodia.motoboyStrokes?.valor
-    if (!responsavelStrokes || !motoboyStrokes) return setErro('Faltam as duas assinaturas.')
+    const validacao = validacaoDaCustodia(custodia)
+    if (!validacao) {
+      return setErro('Falta a validação do cartão — e, com o cartão do gerente, o motivo.')
+    }
     setErro(null)
 
-    const temRede = navigator.onLine
     const ocorridoEmLocal = new Date().toISOString()
 
-    // OFFLINE: sela o envelope AGORA — é aqui, e só aqui, que ele é
-    // construível, porque o `offlineEventHash` amarra os dois traços.
-    if (!temRede) {
+    // A EVIDÊNCIA ESCOLHE A PORTA, e não a rede do instante (regra 3 da
+    // máquina). Um PIN capturado sem rede sobe pela fila mesmo que a
+    // internet tenha voltado antes do clique: ninguém o conferiu, e o
+    // método gravado no documento vai dizer exatamente isso.
+    if (podeGuardarSegredos(custodia)) {
       const segredos = segredosRef.current
       if (!segredos) {
         return setErro(
-          'O PIN não está mais em memória. Autentique o motoboy de novo antes de concluir.'
+          'O PIN não está mais em memória. Apresente o cartão e o PIN de novo antes de confirmar.'
         )
       }
       setOcupado('concluindo')
       try {
-        const offlineEventHash = await calcularOfflineEventHash({
+        const offlineEventHash = await calcularOfflineEventHashRetornoV2({
           documentHash: congelado.documentHash,
           romaneioId: congelado.romaneioId,
-          assinaturaInternaStrokes: responsavelStrokes,
-          assinaturaMotoboyStrokes: motoboyStrokes,
+          validacao: validacao.validacao,
+          motivoExcecao: validacao.motivoExcecao,
+          motoboyId: contexto.motoboyId,
           ocorridoEmLocal,
-          geolocalizacao: null,
         })
         const envelope = await selarSegredos({
           pin: segredos.pin,
@@ -815,10 +809,12 @@ function FluxoDeRetorno({
           operationId: congelado.romaneioId,
           documentHash: congelado.documentHash,
           offlineEventHash,
-          // Explícito, e o retorno o EXIGE: ausência significa saída, e
-          // isso é compatibilidade histórica com fila antiga — que não
-          // existe pra este tipo.
+          // Explícito, e o retorno o EXIGE.
           tipo: 'retorno',
+          // DENTRO do envelope: a Edge Function compara com o corpo, e
+          // trocar o modo no caminho vira `validacao_divergente`.
+          validacao: validacao.validacao,
+          motivoExcecao: validacao.motivoExcecao,
         })
         despachar({ tipo: 'CONCLUIR', online: false, envelope })
 
@@ -827,14 +823,15 @@ function FluxoDeRetorno({
           corridaId: corrida.id,
           saidaRomaneioId: contexto.saidaRomaneioId,
           saidaDocumentHash: contexto.saidaDocumentHash,
+          // O motoboy da saída, também na exceção.
           motoboyId: contexto.motoboyId,
           versaoDocumento: 'DCRR1',
           // JÁ CONVERTIDO. A fila não reconverte nada: o que sobe é o
-          // que foi assinado.
+          // que foi confirmado.
           retornoJsonb: congelado.retornoJsonb,
           documentHash: congelado.documentHash,
-          responsavelStrokes,
-          motoboyStrokes,
+          validacao: validacao.validacao,
+          motivoExcecao: validacao.motivoExcecao,
           ocorridoEmLocal,
           envelope,
           userId: profile.id,
@@ -848,10 +845,6 @@ function FluxoDeRetorno({
         despachar({ tipo: 'ENFILEIRADO' })
         setResultado({ kind: 'offline' })
       } catch (e) {
-        // Também não despachava nada: a máquina ficava em
-        // `enfileirando` pra sempre enquanto uma string vermelha
-        // aparecia. O caixa via "registrando…" travado sem saber que
-        // tinha falhado.
         despachar({ tipo: 'ERRO_REDE', mensagem: mensagemDeErro(e) })
       } finally {
         setOcupado(null)
@@ -862,7 +855,7 @@ function FluxoDeRetorno({
     // ONLINE: não há envelope neste ramo, de propósito — o PIN saiu da
     // memória na autenticação. Ver a regra 4 da máquina.
     const autorizacaoId = custodia.autorizacaoId?.valor
-    if (!autorizacaoId) return setErro('A autenticação do motoboy venceu. Refaça o PIN.')
+    if (!autorizacaoId) return setErro('A autenticação venceu. Apresente o cartão e o PIN de novo.')
 
     setOcupado('concluindo')
     despachar({ tipo: 'CONCLUIR', online: true })
@@ -875,8 +868,6 @@ function FluxoDeRetorno({
         retornoJsonb: congelado.retornoJsonb,
         documentHash: congelado.documentHash,
         autorizacaoId,
-        responsavelStrokes,
-        motoboyStrokes,
         ocorridoEmLocal,
       })
 
@@ -885,7 +876,7 @@ function FluxoDeRetorno({
         setResultado({ kind: 'selado', numero: selo.numero, finalHash: selo.finalHash })
       } else {
         // Conflito NÃO é erro retryable: o servidor preservou a prova de
-        // propósito, com as duas assinaturas. Sugerir "tente de novo"
+        // propósito, com a validação apresentada. Sugerir "tente de novo"
         // aqui seria o oposto do que se deve fazer.
         despachar({ tipo: 'CONFLITO', detalhe: selo.conflitos })
         setResultado({ kind: 'conflito', numero: selo.numero })
@@ -921,15 +912,14 @@ function FluxoDeRetorno({
         setResultado({ kind: 'erro', texto: e.message })
         return
       }
-      // REGRA 4. Falha de REDE depois das duas assinaturas: o documento
-      // fica de pé, a custódia cai inteira, e o caixa refaz cartão, PIN
-      // e as duas assinaturas sobre o MESMO documento. Nada de fabricar
-      // envelope sem PIN, nada de "tentar novamente" com as evidências
-      // antigas.
+      // REGRA 4. Falha de REDE no selo: o documento fica de pé, a custódia
+      // cai inteira, e o caixa apresenta cartão e PIN de novo sobre o
+      // MESMO documento. Nada de fabricar envelope sem PIN, nada de
+      // "tentar novamente" com uma autorização que talvez já tenha sido
+      // usada.
       setExpiraEm(null)
       setToken('')
-      responsavelPad.current?.clear()
-      motoboyPad.current?.clear()
+      setGerente(null)
       despachar({ tipo: 'FALHA_DE_REDE_NO_SELO' })
     } finally {
       setOcupado(null)
@@ -940,6 +930,7 @@ function FluxoDeRetorno({
   const fase = custodia?.nome ?? 'preenchendo'
   const travado = custodia !== null && ctaTravado(custodia)
   const cargo = rotuloDoPapelNoMomento(profile.papel)
+  const validacao = custodia ? validacaoDaCustodia(custodia) : null
 
   if (resultado) {
     return (
@@ -1006,8 +997,7 @@ function FluxoDeRetorno({
                 </Button>
                 {/* Editar não é voltar um passo: é outro documento. */}
                 <span className="text-xs text-foreground/70">
-                  Editar descarta as assinaturas e a identificação já colhidas — o documento passa a
-                  ser outro.
+                  Editar descarta o cartão e o PIN já apresentados — o documento passa a ser outro.
                 </span>
               </div>
             ) : (
@@ -1035,6 +1025,7 @@ function FluxoDeRetorno({
             {custodia && <CustodiaDoMotoboy
               custodia={custodia}
               contexto={contexto}
+              gerente={gerente}
               token={token}
               setToken={setToken}
               pinRef={pinRef}
@@ -1044,68 +1035,53 @@ function FluxoDeRetorno({
               online={online}
               segundosRestantes={segundosRestantes}
               onBipar={(v) => void handleBipar(v)}
+              onMotivo={(motivo) => {
+                setErro(null)
+                despachar({ tipo: 'MOTIVO_ESCOLHIDO', motivo })
+              }}
               onConferirPin={() => void handleConferirPin()}
-              onTrocarMotoboy={() => {
+              onTrocarCartao={() => {
                 setToken('')
                 setExpiraEm(null)
-                despachar({ tipo: 'TROCAR_MOTOBOY' })
+                setGerente(null)
+                despachar({ tipo: 'TROCAR_CARTAO' })
               }}
             />}
           </Secao>
 
           <Secao
             numero={3}
-            titulo="Assinaturas"
-            desabilitada={
-              fase !== 'custodia_autorizada' &&
-              fase !== 'segredos_capturados' &&
-              fase !== 'assinando_motoboy' &&
-              fase !== 'pronto_para_concluir'
-            }
+            titulo="Confirmação"
+            desabilitada={fase !== 'custodia_autorizada' && fase !== 'segredos_capturados'}
           >
-            <div className="grid gap-4 sm:grid-cols-2">
-              <div className="flex flex-col gap-2">
-                <CampoAssinatura
-                  rotulo={`Responsável pela loja · ${profile.nome}${cargo ? ` · ${cargo}` : ''}`}
-                  padRef={responsavelPad}
-                />
-                {custodia?.responsavelStrokes ? (
-                  <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                    ✓ Assinatura registrada
-                  </p>
-                ) : (
-                  <Button type="button" variant="outline" size="sm" onClick={handleAssinarResponsavel}>
-                    Registrar minha assinatura
-                  </Button>
-                )}
-              </div>
-              <div className="flex flex-col gap-2">
-                <CampoAssinatura
-                  rotulo={`Motoboy · ${contexto.motoboyNome ?? '—'}`}
-                  padRef={motoboyPad}
-                />
-                {custodia?.motoboyStrokes ? (
-                  <p className="text-xs font-medium text-emerald-700 dark:text-emerald-400">
-                    ✓ Assinatura registrada
-                  </p>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    disabled={!custodia?.responsavelStrokes}
-                    onClick={handleAssinarMotoboy}
-                  >
-                    Registrar a assinatura do motoboy
-                  </Button>
-                )}
-              </div>
+            {/* SEM ASSINATURA DESENHADA (4B). O que fica é o que a farmácia
+                está confirmando, e quem responde por quê. */}
+            <div className="flex flex-col gap-2 rounded-lg border p-3 text-sm">
+              <p>
+                Motoboy responsável: <strong>{contexto.motoboyNome ?? corrida.mototaxistaNome}</strong>
+                {contexto.agenciaNome ? ` · ${contexto.agenciaNome}` : ''}
+              </p>
+              {validacao?.validacao === 'gerente' && (
+                // A EXCEÇÃO, dita antes de confirmar e não só no documento:
+                // os vales continuam no nome do motoboy, e quem autenticou
+                // foi o gerente.
+                <p className="rounded-md border border-amber-600/40 bg-amber-50 px-2 py-1 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+                  {validacao.motivoExcecao ? `${MOTIVO_EXCECAO_LABEL[validacao.motivoExcecao]}. ` : ''}
+                  Retorno autorizado por <strong>{gerente?.nome ?? 'o gerente'}</strong>, gerente, com
+                  cartão e PIN próprios.
+                </p>
+              )}
+              <p className="text-xs text-foreground/70">
+                Ao tocar em “Confirmar retorno”, <strong>{profile.nome}</strong>
+                {cargo ? ` (${cargo})` : ''} confirma, pela farmácia, o retorno conferido acima. Estar
+                logado não basta: a confirmação é esse toque.
+              </p>
             </div>
           </Secao>
 
           {custodia?.motivoDoRecolhimento && (
             // O recolhimento é EXPLICADO, nunca silencioso: sem o motivo,
-            // as assinaturas sumindo da tela pareceriam defeito.
+            // a identificação sumindo da tela pareceria defeito.
             <p className="rounded-lg border border-amber-500/40 bg-amber-50 p-3 text-sm text-amber-800 dark:bg-amber-950/40 dark:text-amber-200">
               {custodia.motivoDoRecolhimento}
             </p>
@@ -1155,20 +1131,24 @@ function FluxoDeRetorno({
             <Button
               type="button"
               onClick={() => void handleConcluir()}
-              disabled={fase !== 'pronto_para_concluir' || !!ocupado || travado}
+              disabled={
+                (fase !== 'custodia_autorizada' && fase !== 'segredos_capturados') ||
+                !!ocupado ||
+                travado
+              }
             >
               {ocupado === 'concluindo' ? (
                 <EmAndamento>Registrando</EmAndamento>
-              ) : online ? (
-                'Concluir retorno'
+              ) : fase === 'segredos_capturados' || !online ? (
+                'Confirmar retorno offline'
               ) : (
-                'Registrar retorno offline'
+                'Confirmar retorno'
               )}
             </Button>
           </div>
 
           {/* O QUE SOBROU AQUI É VALIDAÇÃO LOCAL, e só ela: formato do
-              PIN, assinatura faltando, chave de ambiente ausente. Nada
+              PIN, motivo da exceção faltando, chave de ambiente ausente. Nada
               disso é resposta de ninguém — são conferências feitas antes
               de qualquer transição, e a máquina nem chega a ser tocada.
               Recusa, indisponibilidade e falha vivem no bloco acima. */}
@@ -1314,7 +1294,7 @@ function ValeEmConferencia({
               </div>
               {/* OS DOIS CAMPOS PRECISAM DE RÓTULO, e isto não é
                   capricho: eles são visualmente idênticos, ficam lado a
-                  lado, e um decide o que o documento assinado vai
+                  lado, e um decide o que o documento selado vai
                   afirmar que o cliente pagou. Sem rótulo, "R$ 1.312,90"
                   e "R$ 20,00" são dois campos iguais e a única defesa
                   contra trocá-los é a memória de quem digita. */}
@@ -1376,7 +1356,7 @@ function ValeEmConferencia({
           {divergeDaCompra && (
             <p className="text-xs text-amber-700 dark:text-amber-400">
               A soma dá {formatBRL(somaRealizada)} e a compra foi {formatBRL(vale.valorCompraCents)}.
-              Confere antes de assinar — o documento vai afirmar o que estiver aqui.
+              Confere antes de confirmar — o documento vai afirmar o que estiver aqui.
             </p>
           )}
         </div>
@@ -1390,7 +1370,7 @@ function ValeEmConferencia({
               <span className="min-w-44">{DOCUMENTO_LABEL[tipo]}</span>
               {/* SEM VALOR INICIAL. `recebido` é presença física, e é uma
                   afirmação que ninguém pode conferir depois — deixá-la
-                  marcada por inércia faria o documento assinado dizer que
+                  marcada por inércia faria o documento selado dizer que
                   o papel voltou porque o caixa não olhou. */}
               {(['recebido', 'faltante'] as const).map((situacao) => (
                 <Button
@@ -1424,6 +1404,7 @@ function ValeEmConferencia({
 function CustodiaDoMotoboy({
   custodia,
   contexto,
+  gerente,
   token,
   setToken,
   pinRef,
@@ -1433,11 +1414,13 @@ function CustodiaDoMotoboy({
   online,
   segundosRestantes,
   onBipar,
+  onMotivo,
   onConferirPin,
-  onTrocarMotoboy,
+  onTrocarCartao,
 }: {
   custodia: EstadoCustodia
   contexto: ContextoRetorno
+  gerente: GerenteDoRetorno | null
   token: string
   setToken: (v: string) => void
   pinRef: React.RefObject<HTMLInputElement | null>
@@ -1447,17 +1430,22 @@ function CustodiaDoMotoboy({
   online: boolean
   segundosRestantes: number | null
   onBipar: (valor: string) => void
+  onMotivo: (motivo: MotivoExcecao) => void
   onConferirPin: () => void
-  onTrocarMotoboy: () => void
+  onTrocarCartao: () => void
 }) {
   const identificado = custodia.credencial !== null
   const autenticado = custodia.autorizacaoId !== null
   const capturado = podeGuardarSegredos(custodia)
+  const porGerente = custodia.credencial?.valor.titular === 'gerente'
+  const reconhecida = custodia.credencial?.valor.validadaPeloServidor === true
+  const motivo = custodia.motivoExcecao?.valor ?? null
+  const motoboy = contexto.motoboyNome ?? '—'
 
   if (!identificado) {
     return (
       <div className="flex flex-col gap-2">
-        <Label htmlFor="cartao-retorno">Bipa a credencial de {contexto.motoboyNome ?? '—'}</Label>
+        <Label htmlFor="cartao-retorno">Bipa a credencial de {motoboy}</Label>
         <Input
           id="cartao-retorno"
           autoFocus
@@ -1472,8 +1460,8 @@ function CustodiaDoMotoboy({
           }}
         />
         <p className="text-xs text-foreground/70">
-          Cartão e PIN de novo, sim: são duas transferências de custódia em sentidos opostos, e a
-          autenticação da saída não prova um ato de agora.
+          Se {motoboy} perdeu o cartão ou esqueceu o PIN, bipe o cartão do gerente da filial: ele
+          autoriza o retorno com cartão e PIN próprios, e os vales continuam no nome de {motoboy}.
         </p>
       </div>
     )
@@ -1481,85 +1469,157 @@ function CustodiaDoMotoboy({
 
   return (
     <div className="flex flex-col gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <div>
-          <p className="font-medium">{contexto.motoboyNome ?? '—'}</p>
-          <p className="text-xs text-foreground/70">{contexto.agenciaNome ?? '—'}</p>
-        </div>
-        <Badge variant={custodia.credencial?.valor.validadaPeloServidor ? 'secondary' : 'outline'}>
-          {custodia.credencial?.valor.validadaPeloServidor
-            ? 'Credencial reconhecida'
-            : 'Credencial informada'}
-        </Badge>
-        <Button variant="ghost" size="sm" onClick={onTrocarMotoboy}>
-          Trocar
-        </Button>
-      </div>
-
-      {!autenticado && !capturado && (
-        <div className="flex flex-col gap-2">
-          <Label htmlFor="pin-retorno">PIN do motoboy</Label>
-          <div className="flex items-center gap-2">
-            <Input
-              id="pin-retorno"
-              ref={pinRef}
-              type="password"
-              inputMode="numeric"
-              maxLength={6}
-              placeholder="••••••"
-              className="max-w-40 tracking-[0.5em]"
-              // NÃO CONTROLADO de propósito: o PIN em claro não entra em
-              // estado do React. O que o componente guarda é este
-              // booleano, e é só o que o botão precisa saber.
-              onChange={(e) => {
-                e.currentTarget.value = e.currentTarget.value.replace(/\D/g, '')
-                setPinCompleto(e.currentTarget.value.length === 6)
-              }}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') onConferirPin()
-              }}
-            />
-            <Button
-              type="button"
-              variant="outline"
-              // Botão explícito, e não verificação automática ao completar
-              // 6 dígitos: cada tentativa errada conta pro bloqueio
-              // progressivo, e quem se atrapalha digitando queimaria o
-              // bloqueio do motoboy sem ter errado o PIN de verdade.
-              disabled={!pinCompleto || ocupado === 'conferindo'}
-              onClick={onConferirPin}
-            >
-              {ocupado === 'conferindo' ? (
-                <EmAndamento>Conferindo</EmAndamento>
-              ) : online ? (
-                'Confirmar identidade'
-              ) : (
-                'Guardar PIN'
-              )}
+      {porGerente ? (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <div>
+              <p className="font-medium">{gerente?.nome ?? 'Gerente'}</p>
+              <p className="text-xs text-foreground/70">
+                Gerente{gerente?.lojaNome ? ` · ${gerente.lojaNome}` : ''}
+              </p>
+            </div>
+            <Badge variant={reconhecida ? 'secondary' : 'outline'}>
+              {reconhecida ? 'Cartão do gerente reconhecido' : 'Cartão do gerente informado'}
+            </Badge>
+            <Button variant="ghost" size="sm" onClick={onTrocarCartao}>
+              Cancelar
             </Button>
           </div>
-          {!online && (
-            <p className="text-xs text-amber-700 dark:text-amber-400">
-              Sem internet o PIN não pode ser conferido — o HMAC e o bcrypt vivem no servidor. Ele
-              fica guardado só na memória desta tela até o retorno ser registrado, e é validado na
-              sincronização.
-            </p>
+          <p className="text-sm">
+            Autorizar o retorno de <strong>{motoboy}</strong> com a credencial do gerente. Informe o
+            PIN do gerente.
+          </p>
+          <p className="text-xs text-foreground/70">
+            Os vales continuam no nome de {motoboy}. O cartão do gerente só autoriza.
+          </p>
+          {/* O MOTIVO TRAVA DEPOIS DE AUTENTICAR: ele entrou na autorização
+              do servidor (ou no envelope), e trocá-lo por cima faria a tela
+              mostrar um motivo que o documento não tem. */}
+          <fieldset className="flex flex-col gap-1" disabled={autenticado || capturado}>
+            <legend className="text-sm font-medium">Motivo</legend>
+            <div className="flex flex-wrap gap-4">
+              {MOTIVOS_EXCECAO.map((m) => (
+                <label key={m} className="flex items-center gap-2 text-sm">
+                  <input
+                    type="radio"
+                    name="motivo-excecao-retorno"
+                    checked={motivo === m}
+                    onChange={() => onMotivo(m)}
+                  />
+                  {MOTIVO_EXCECAO_LABEL[m]}
+                </label>
+              ))}
+            </div>
+          </fieldset>
+        </>
+      ) : (
+        <>
+          <div className="flex flex-wrap items-center gap-2">
+            <div>
+              <p className="font-medium">{motoboy}</p>
+              <p className="text-xs text-foreground/70">{contexto.agenciaNome ?? '—'}</p>
+            </div>
+            <Badge variant={reconhecida ? 'secondary' : 'outline'}>
+              {reconhecida ? 'Credencial reconhecida' : 'Credencial informada'}
+            </Badge>
+            <Button variant="ghost" size="sm" onClick={onTrocarCartao}>
+              Trocar
+            </Button>
+          </div>
+          {/* Secundário, e só enquanto a identidade não está estabelecida.
+              Ler o cartão do motoboy foi atalho: a exceção não depende dele. */}
+          {!autenticado && !capturado && (
+            <button
+              type="button"
+              className="self-start text-xs text-foreground/70 underline underline-offset-2"
+              onClick={onTrocarCartao}
+            >
+              PIN esquecido? Chamar o gerente
+            </button>
           )}
-        </div>
+        </>
+      )}
+
+      {porGerente && gerente && !gerente.temPin ? (
+        // O gerente ativa o PIN em "Meu cartão", e não aqui — é o cartão
+        // DELE, e criar PIN exige internet.
+        <p className="text-sm text-destructive">
+          O cartão do gerente ainda não tem PIN. O gerente ativa em "Meu cartão" antes de autorizar
+          — criar PIN exige internet.
+        </p>
+      ) : (
+        !autenticado &&
+        !capturado && (
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="pin-retorno">{porGerente ? 'PIN do gerente' : 'PIN do motoboy'}</Label>
+            <div className="flex items-center gap-2">
+              <Input
+                id="pin-retorno"
+                ref={pinRef}
+                type="password"
+                inputMode="numeric"
+                maxLength={6}
+                placeholder="••••••"
+                className="max-w-40 tracking-[0.5em]"
+                // NÃO CONTROLADO de propósito: o PIN em claro não entra em
+                // estado do React. O que o componente guarda é este
+                // booleano, e é só o que o botão precisa saber.
+                onChange={(e) => {
+                  e.currentTarget.value = e.currentTarget.value.replace(/\D/g, '')
+                  setPinCompleto(e.currentTarget.value.length === 6)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') onConferirPin()
+                }}
+              />
+              <Button
+                type="button"
+                variant="outline"
+                // Botão explícito, e não verificação automática ao completar
+                // 6 dígitos: cada tentativa errada conta pro bloqueio
+                // progressivo, e quem se atrapalha digitando queimaria o
+                // bloqueio sem ter errado o PIN de verdade.
+                disabled={!pinCompleto || ocupado === 'conferindo' || (porGerente && !motivo)}
+                onClick={onConferirPin}
+              >
+                {ocupado === 'conferindo' ? (
+                  <EmAndamento>Conferindo</EmAndamento>
+                ) : online ? (
+                  porGerente ? 'Autorizar' : 'Confirmar identidade'
+                ) : (
+                  'Guardar PIN'
+                )}
+              </Button>
+            </div>
+            {porGerente && !motivo && (
+              <p className="text-xs text-foreground/70">Escolha o motivo antes do PIN.</p>
+            )}
+            {!online && (
+              <p className="text-xs text-amber-700 dark:text-amber-400">
+                Sem internet o PIN não pode ser conferido — o HMAC e o bcrypt vivem no servidor. Ele
+                fica guardado só na memória desta tela até o retorno ser registrado, e é validado na
+                sincronização.
+              </p>
+            )}
+          </div>
+        )
       )}
 
       {autenticado && (
         <div className="flex flex-col gap-1">
           <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-            ✓ Identidade confirmada — {contexto.motoboyNome}
+            {porGerente
+              ? `✓ Autorizado por ${gerente?.nome ?? 'o gerente'}, gerente — retorno de ${motoboy}`
+              : `✓ Identidade confirmada — ${motoboy}`}
           </p>
           {segundosRestantes !== null && (
-            // O relógio aparece porque ele CORRE durante as assinaturas.
-            // Vencido, a autorização e as duas assinaturas são recolhidas
-            // — e é melhor o caixa ver o tempo do que descobrir depois.
+            // O relógio aparece porque ele CORRE até a confirmação.
+            // Vencido, a autorização é recolhida — e é melhor o caixa ver
+            // o tempo do que descobrir depois.
             <p className="text-xs text-foreground/70">
               A autenticação vale por mais {Math.floor(segundosRestantes / 60)}:
-              {String(segundosRestantes % 60).padStart(2, '0')} — assine dentro desse tempo.
+              {String(segundosRestantes % 60).padStart(2, '0')} — confirme o retorno dentro desse
+              tempo.
             </p>
           )}
         </div>
@@ -1635,8 +1695,8 @@ function ResultadoDoRetorno({
       {resultado.kind === 'conflito' && (
         <p>
           <strong>Conflito ao selar{resultado.numero ? ` (${resultado.numero})` : ''}.</strong> A
-          tentativa ficou registrada no servidor com as duas assinaturas preservadas — a gestão
-          precisa resolver. Não adianta tentar de novo.
+          tentativa ficou registrada no servidor com a validação apresentada — a gestão precisa
+          resolver. Não adianta tentar de novo.
         </p>
       )}
       {resultado.kind === 'erro' && <p className="text-destructive">{resultado.texto}</p>}
