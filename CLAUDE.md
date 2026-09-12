@@ -37,8 +37,8 @@ esperando no balcão. Velocidade de digitação é o requisito número um.
 
 Usuário secundário: mototaxista, que só encosta num tablet para assinar —
 **desde a decisão de 2026-09-11, para passar o cartão e digitar o PIN**: a
-assinatura manuscrita sai do sistema (ainda não construído; ver "Cadeia de
-custódia").
+assinatura manuscrita sai do sistema. **Na SAÍDA isso está construído e
+aceito desde 2026-09-12; no RETORNO ainda não** (ver "Cadeia de custódia").
 
 A farmácia real tem **18 filiais**, espalhadas por mais de uma cidade
 (o banco de desenvolvimento já tem as oito de São Gabriel, medido em
@@ -541,6 +541,9 @@ cargo, nunca `lojaId`.
   para que não pareça descuido quando alguém reler. E ele não se confunde
   com **`redefinir_pin`, que continua exigindo `is_admin()`**: destravar
   um retorno é operação de turno; zerar credencial é ato administrativo.
+  **A exceção é o PRÓPRIO cartão** (2026-09-12): `redefinir_meu_pin()` não
+  recebe parâmetro, resolve o titular por `auth.uid()` e só alcança a
+  credencial de quem chamou — sessão prova quem é, cartão prova posse.
 - **`eventos` é o único que não sai de uma troca de função** — a tabela não
   tem `loja_id`, só `entrega_id`/`corrida_id` (nullable). O escopo do
   gerente passa pela entrega/corrida dona, via `pode_ver_entrega`/
@@ -1243,7 +1246,8 @@ foram assinados.
 Construído em 2026-08-16, em seis etapas. A saída da tele deixou de ser
 "salvar uma assinatura do motoboy" e virou um documento selado.
 
-> **A ASSINATURA MANUSCRITA SAI — decidido em 2026-09-11, NÃO CONSTRUÍDO.**
+> **A ASSINATURA MANUSCRITA SAI — decidido em 2026-09-11. NA SAÍDA:
+> CONSTRUÍDO, APLICADO E ACEITO em 2026-09-12. NO RETORNO: não construído.**
 > Nas palavras do usuário: *"Não é para deixar assinaturas do sistema,
 > apenas cartão e pin."* A evidência do motoboy passa a ser **cartão + PIN**;
 > a da farmácia, a **sessão com um ato explícito de confirmar** o conteúdo.
@@ -1259,13 +1263,23 @@ Construído em 2026-08-16, em seis etapas. A saída da tele deixou de ser
 > continua atribuído ao motoboy que fez a tentativa**: o cartão apresentado
 > nunca vira o responsável pelo serviço. O **mesmo gerente pode** confirmar
 > pela farmácia e autorizar a exceção, com as duas responsabilidades
-> registradas em separado. Redefinir PIN continua sendo ato do admin, online,
-> e o gerente **avisa a necessidade** — a autorização vale só para aquela
-> operação.
+> registradas em separado. Redefinir o PIN **do motoboy** continua sendo ato
+> do admin, online, e o gerente **avisa a necessidade** — a autorização vale
+> só para aquela operação. O PIN **do próprio gerente** ele mesmo redefine, em
+> "Meu cartão" (sessão + cartão; `redefinir_meu_pin`, sem parâmetro): uma
+> exceção que existe para destravar o balcão não pode depender de o admin
+> atender o telefone.
+>
+> **O aceite da saída, medido em 2026-09-12** (item 107 do NOTAS): cartão do
+> motoboy e cartão do gerente, online e offline — `R-000033` a `R-000038` —,
+> com os vales sempre no nome do motoboy escolhido e o verificador em
+> **28 · 28 · 0**, lendo a versão de cada evidência. A assinatura desenhada
+> continua existindo **só no retorno e nos documentos antigos**, que seguem
+> verificando pela fórmula histórica.
 >
 > Tudo o que esta seção descreve sobre traços (`strokes`, canvas, as duas
-> assinaturas, `signature_pad`) **continua sendo o código de hoje** e sai no
-> 4B, com versão nova das fórmulas de `signature_hash` e do hash do evento
+> assinaturas, `signature_pad`) **já saiu da SAÍDA e continua sendo o código
+> do RETORNO**, de onde sai na etapa dele, com versão nova das fórmulas de `signature_hash` e do hash do evento
 > offline, lida da própria linha. **Os bytes de DCR1 e DCRR1 não mudam**: os
 > traços nunca entraram no canônico. Decisões na seção 12 de
 > `docs/levantamento-4a-2026-09-11.md`; **o desenho, já revisado, está em
@@ -1313,6 +1327,12 @@ em duas linguagens.
 Existe um segundo par de gêmeos, bem menos arriscado porque é TypeScript
 dos dois lados: `calcularOfflineEventHash` em `src/lib/envelope.ts` e a
 cópia dentro de `supabase/functions/sync-romaneio/index.ts`.
+
+**Desde 2026-09-12 são DOIS pares, e os dois ficam:** a versão 1 (com traços)
+serve o retorno; `calcularOfflineEventHashSaidaV2` (`OEV2|…|validacao|motivo|
+motoboy|relógio`, sem traço nem geolocalização) serve a saída.
+`scripts/offline-hash-v2.spec.mts` confere as duas gêmeas da v2 contra
+digests congelados **antes** de qualquer implementação existir.
 
 ### O PIN offline, e por que não é criptografia simétrica
 
@@ -3630,7 +3650,10 @@ Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
 2.  "Cargo" · filial obrigatória · admin sem lançamento   ✓ 2026-09-11 (aplicado e aceito)
 3.  snapshot histórico da filial nos documentos   ✓ 2026-09-11 (aplicado)
 4A. mapear ciclo do vale, tentativa e evidências   ✓ 2026-09-11 (decisões respondidas)
-4B. cartão, PIN e confirmação, sem assinatura manuscrita — desenho v2 (revisado) em docs/desenho-4b-2026-09-11.md   ← AQUI
+4B. cartão, PIN e confirmação, sem assinatura manuscrita — desenho v2 em docs/desenho-4b-2026-09-11.md
+      ├ credencial do gerente + "Meu cartão"            ✓ 2026-09-12
+      ├ SAÍDA v2 (online e offline, motoboy e gerente)  ✓ 2026-09-12 (28 · 28 · 0)
+      └ RETORNO v2                                      ← AQUI
 4C. continuidade offline: abrir o app sem rede (Service Worker + Cache API), telas no estado local e E12 — obrigatória antes do piloto
 5.  conferência diária calculada, com exceções e aprovação versionada
 6.  painel da agência e conciliação por vale, por quinzena

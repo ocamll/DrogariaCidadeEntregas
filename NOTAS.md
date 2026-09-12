@@ -10443,6 +10443,74 @@ A recusa que está no ar hoje é ANDAIME da 4B.1, e sai na 4B.4. Ela não é
 o destino — é o que impede, enquanto o servidor não sabe autorizar por
 gerente, que a tela prometa uma validação que o selo recusaria.
 
+## 107. A SAÍDA sem assinatura manuscrita — construída e aceita
+
+**2026-09-12.** A primeira metade do 4B no ar: a saída passou a ser
+confirmada **sem traço nenhum**, com o motoboy validando por cartão e PIN
+ou o **gerente autorizando no lugar dele**. O retorno continua com as
+assinaturas desenhadas até a etapa dele.
+
+**O que foi aplicado, em ordem:**
+
+| migration | o quê |
+|---|---|
+| `20260911150000` | colunas da evidência v2 e a fórmula EV2, com 9 vetores congelados que rodam dentro da migration |
+| `20260911160000` | motivos da exceção são dois (`cartao_perdido`, `pin_esquecido`) |
+| `20260911170000` | o verificador lê a versão de cada linha — ANTES do primeiro documento v2 |
+| `20260911180000` | selo da saída v2, `autorizar_saida` com o gerente, conflito com o que foi apresentado |
+| `20260911190000` | `redefinir_meu_pin()` — o gerente destrava o próprio PIN |
+
+Mais a `sync-romaneio` republicada e o cliente (`4fc40c7`).
+
+**O aceite, medido — não "li o código":**
+
+| romaneio | como | modo | método do motoboy |
+|---|---|---|---|
+| `R-000033` | cartão do gerente, PIN esquecido | online | `gerente_card_pin_server_verified` |
+| `R-000034` | cartão do motoboy | online | `physical_card_pin_server_verified` |
+| `R-000037` | cartão do motoboy | offline | `physical_card_pin_offline_then_verified` |
+| `R-000038` | cartão do gerente, PIN esquecido | offline | `gerente_card_pin_offline_then_verified` |
+
+- **Nenhuma etapa do caminho excepcional pediu cartão ou PIN do motoboy**,
+  que era o aceite essencial;
+- **o V-000064 ficou no nome do João Silva**, o motoboy escolhido — nunca
+  no do gerente que autenticou;
+- a farmácia com `sessao_confirmacao_explicita` em todos;
+- o PDF do `R-000033` diz "PIN esquecido · autorizado por Camilo Gerente,
+  gerente" e "cartão do gerente ••••3588", sem espaço de assinatura;
+- **verificador em 28 · 28 · 0**: as 22 antigas pela fórmula histórica, as
+  seis novas pela EV2.
+
+**Três coisas que deram errado no caminho, e ficam registradas:**
+
+1. **A página do romaneio quebrou** entre a 4B.2a e o conserto (`de83c0a`).
+   `validador_profile_id` criou a segunda FK de `assinaturas` para
+   `profiles`, e `SELECT_ASSINATURAS` passou a dar PGRST201. O desenho
+   avisava; eu apliquei a coluna antes de corrigir a consulta. Regra que
+   sobra: FK nova para tabela que já é alvo de embed obriga a procurar os
+   `select` ANTES da migration.
+2. **O andaime da 4B.1 bloqueou a ativação do PIN do gerente**, porque a
+   ativação só existia na Nova corrida e a Nova corrida recusava o cartão
+   dele. Resolvido levando a ativação para Cadastros e para "Meu cartão".
+3. **O primeiro teste offline não ficou offline**: `R-000035` e `R-000036`
+   foram selados online. Não era defeito — o desligamento não pegou na aba.
+   O sinal confiável é o rodapé ("Sem internet…") e o botão virar
+   "Registrar saída offline" ANTES de bipar. Para ter certeza de que a
+   `sync-romaneio` publicada era a nova, uma sonda mandou um corpo de saída
+   com traços: a função respondeu `vocabulario_invalido` (texto da versão
+   nova) antes de qualquer RPC, sem gravar nada.
+
+**Correções do usuário que mudaram o desenho no meio:** o cartão do gerente
+ABRE a exceção em vez de ser recusado; os motivos são dois (cartão perdido
+é credencial nova do zero, PIN esquecido é reset — "ambos" era sinônimo do
+primeiro); e o gerente redefine o próprio PIN, senão a exceção trava junto
+com quem ela deveria destravar.
+
+**O que falta do 4B:** o RETORNO v2 (mesmo padrão: selo e porta offline sem
+traço, tela com confirmação e o cartão do gerente abrindo a exceção com o
+motoboy vindo da saída), e depois retirar `CampoAssinatura` e
+`signature_pad` quando nada mais os usar.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
@@ -10519,11 +10587,14 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > **O DESENHO DO 4B ESTÁ PRONTO E REVISADO (item 105):**
 > `docs/desenho-4b-2026-09-11.md`, versão 2.
 >
-> **A 4B.1 ESTÁ APLICADA E CONFERIDA (item 106)** — o cartão do gerente
-> existe, emite, identifica e cacheia. **O PRÓXIMO PASSO É A 4B.2**: a
-> autorização com motivo e validador, a evidência versão 2 e o
-> verificador. É ela que faz o cartão do gerente AUTORIZAR de verdade; a
-> recusa que está nas telas hoje é andaime e sai na 4B.4.
+> **A 4B.1 ESTÁ APLICADA E CONFERIDA (item 106).**
+>
+> **A SAÍDA v2 ESTÁ CONSTRUÍDA E ACEITA (item 107)** — motoboy e gerente,
+> online e offline, verificador em 28 · 28 · 0.
+>
+> **O PRÓXIMO PASSO É O RETORNO v2.** Ele ainda sela com as assinaturas
+> desenhadas, e o cartão do gerente continua sendo recusado na tela de
+> retorno até lá.
 >
 > **Depois:** o 4B implementa o contrato de evidências escolhido; o 4C
 > precisa das três partes (Service Worker + Cache API, telas no estado
