@@ -1,9 +1,8 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useState } from 'react'
 import { useQueryClient } from '@tanstack/react-query'
-import SignaturePad from 'signature_pad'
 import type { AuthProfile } from '@/data/auth'
 import { useCidadeDaLoja } from '@/data/lojas'
-import { useAgenciasDaCidade } from '@/data/corridas'
+import { useAgenciasDaCidade, useMototaxistas } from '@/data/corridas'
 import {
   useValesParaSaida,
   prepararRomaneio,
@@ -23,8 +22,9 @@ import {
   pinAceitavel,
   publicIdDoToken,
 } from '@/data/credenciais'
-import { selarSegredos, calcularOfflineEventHash, envelopeDisponivel } from '@/lib/envelope'
+import { selarSegredos, calcularOfflineEventHashSaidaV2, envelopeDisponivel } from '@/lib/envelope'
 import { useOnline } from '@/lib/useOnline'
+import { MOTIVOS_EXCECAO, MOTIVO_EXCECAO_LABEL, type MotivoExcecao } from '@/lib/excecaoDoGerente'
 import {
   enfileirarOperacao,
   donoDaFila,
@@ -50,7 +50,6 @@ import {
   type Veredito,
   type Procedencia,
 } from '@/lib/estadoDeConsulta'
-import { CampoAssinatura } from '@/components/CampoAssinatura'
 
 export function NovaCorrida({ profile, onVoltar }: { profile: AuthProfile; onVoltar: () => void }) {
   if (!profile.lojaId) {
@@ -111,12 +110,13 @@ type MotivoDoCartao =
   /** Existe, mas é de uma agência que não atende esta filial. */
   | 'fora_de_escopo'
   /**
-   * É um cartão nosso, válido — e é do GERENTE. Ele identifica quem
-   * AUTORIZA, não quem leva a corrida, então não substitui o do motoboy.
-   * Recusa explícita, e não "não reconhecida": as duas frases mandam a
-   * pessoa fazer coisas diferentes.
+   * Cartão de gerente — mas de OUTRA filial. A autorização excepcional é
+   * conferida contra a filial do documento, então abrir o caminho seria
+   * oferecer o impossível: o selo recusaria depois, com o motoboy
+   * esperando. Offline este caso nem chega aqui, porque o cache só guarda
+   * os gerentes da própria filial.
    */
-  | 'cartao_de_gerente'
+  | 'gerente_de_outra_filial'
 
 /** Idem para o PIN. `error` continua sendo outra coisa — ver o handler. */
 type MotivoDoPin = 'pin_incorreto' | 'bloqueado' | 'nao_autenticado'
@@ -139,6 +139,39 @@ function prontoCom<T, M extends string>(
   procedencia: Procedencia = 'servidor'
 ): ConsultaComVeredito<T, M> {
   return { estado: 'ready', dados: veredito, procedencia }
+}
+
+// O que o servidor respondeu ao `autorizar_saida`, em frase de balcão. Os
+// motivos novos são do 4B: é o SQL que descobre de quem é o cartão e
+// recusa a combinação errada, e a tela só traduz.
+function mensagemDaAutorizacao(motivo: string, porGerente: boolean): string {
+  switch (motivo) {
+    case 'pin_incorreto':
+      return 'PIN incorreto.'
+    case 'bloqueado':
+      return 'Credencial bloqueada por tentativas seguidas de PIN incorreto.'
+    case 'gerente_invalido':
+      return 'Este cartão não é de um gerente ativo. A autorização excepcional é só do gerente da filial.'
+    case 'motoboy_invalido':
+      return 'O motoboy escolhido não está ativo. Escolha outro.'
+    case 'excecao_exige_motoboy_e_motivo':
+      return 'Falta escolher o motoboy e o motivo.'
+    case 'cartao_de_outro_motoboy':
+      return 'Este cartão é de outro motoboy.'
+    case 'motivo_sem_excecao':
+      return 'Com o cartão do próprio motoboy não há exceção a registrar.'
+    default:
+      return porGerente ? 'Não consegui autenticar o gerente.' : 'Não consegui autenticar o motoboy.'
+  }
+}
+
+type GerenteDaExcecao = {
+  nome: string
+  lojaNome: string | null
+  temPin: boolean
+  // Mesma distinção do cartão do motoboy: online o servidor RECONHECEU o
+  // cartão; offline ele foi só INFORMADO, pelo cache.
+  verificada: boolean
 }
 
 function NovaCorridaFluxo({
@@ -178,7 +211,7 @@ function NovaCorridaFluxo({
   const [pin, setPin] = useState('')
   const [pinConfirmacao, setPinConfirmacao] = useState('')
 
-  // O PIN precisa ser conferido ANTES de a tela liberar as assinaturas.
+  // O PIN precisa ser conferido ANTES de a tela liberar a confirmação.
   //
   // A primeira versão só checava `pinAceitavel(pin)`, que valida FORMATO
   // (6 dígitos, não sequência, não repetido) e nada mais — a verificação
@@ -204,9 +237,40 @@ function NovaCorridaFluxo({
   // pode, é justamente o caminho que o projeto passou dias provando.
   const [pinCapturadoOffline, setPinCapturadoOffline] = useState(false)
 
+  // ---------------------------------------------------------------------
+  // A AUTORIZAÇÃO EXCEPCIONAL DO GERENTE — 4B
+  //
+  // Existe pra quando o motoboy NÃO TEM o que apresentar: perdeu o cartão
+  // ou esqueceu o PIN. Por isso nada aqui pede o cartão nem o PIN dele —
+  // pedir seria exigir justamente o que falta.
+  //
+  //   bipar o cartão do gerente  → abre este caminho
+  //   motoboy                    → ESCOLHIDO pelo nome (identificado, não
+  //                                autenticado); os vales ficam no nome dele
+  //   motivo                     → cartão perdido ou PIN esquecido
+  //   PIN                        → o do GERENTE, conferido no servidor
+  //
+  // Quem decide se o cartão é mesmo de um gerente ativo daquela filial é o
+  // servidor, duas vezes (na autorização e de novo no selo). A tela só
+  // não oferece o caminho pra quem visivelmente não pode usá-lo.
+  // ---------------------------------------------------------------------
+  const [gerente, setGerente] = useState<GerenteDaExcecao | null>(null)
+  const [motoboyEscolhidoId, setMotoboyEscolhidoId] = useState('')
+  const [motivo, setMotivo] = useState<MotivoExcecao | null>(null)
+  const { data: mototaxistas } = useMototaxistas()
+  // Só motoboy de agência que atende esta cidade — a mesma regra que o
+  // cartão do motoboy já aplica em `handleBipar`. Oferecer um de outra
+  // cidade seria oferecer uma saída que ninguém deveria fazer.
+  const motoboysElegiveis = (mototaxistas ?? []).filter((m) =>
+    agenciasDaCidade?.some((a) => a.id === m.agenciaId)
+  )
+  const motoboyEscolhido = motoboysElegiveis.find((m) => m.id === motoboyEscolhidoId) ?? null
+  const nomeDaAgencia = (agenciaId: string | null) =>
+    agenciaId ? (agenciasDaCidade?.find((a) => a.id === agenciaId)?.nome ?? null) : null
+
   const pinConfirmado = estadoPin.estado === 'ready' && estadoPin.dados.veredito === 'aceito'
   /**
-   * As assinaturas liberam por DOIS caminhos, e eles não se confundem:
+   * A confirmação libera por DOIS caminhos, e eles não se confundem:
    * o servidor confirmou (online) ou o PIN foi capturado pra validação
    * posterior (offline). A tela diz qual foi, com todas as letras — o
    * que ela não pode é tratar os dois como a mesma afirmação.
@@ -222,13 +286,36 @@ function NovaCorridaFluxo({
     setPinCapturadoOffline(false)
     setToken('')
     setPin('')
+    // A exceção depende da identidade tanto quanto o cartão do motoboy.
+    setGerente(null)
+    setMotoboyEscolhidoId('')
+    setMotivo(null)
+  }
+
+  // O cartão lido era do gerente: abre o caminho excepcional. O token
+  // FICA (é ele que vai ser autenticado); o motoboy e o motivo também
+  // ficam, se já tinham sido pré-escolhidos por `chamarGerente`.
+  function abrirExcecao(g: GerenteDaExcecao) {
+    setGerente(g)
+    setEstadoCartao({ estado: 'inactive' })
+    setEstadoPin({ estado: 'inactive' })
+    setPinCapturadoOffline(false)
+    setPin('')
+  }
+
+  // O motoboy bipou o próprio cartão e o PIN não saiu. A identificação
+  // dele já é certa, então ela fica PRÉ-ESCOLHIDA pro gerente — ler o
+  // cartão do motoboy é atalho, nunca requisito do caminho excepcional.
+  function chamarGerente() {
+    const preEscolhido = credencial?.motoboyId ?? ''
+    recolherCustodia()
+    setMotoboyEscolhidoId(preEscolhido)
+    setMotivo(preEscolhido ? 'pin_esquecido' : null)
   }
   const [erro, setErro] = useState<string | null>(null)
   const [ocupado, setOcupado] = useState<string | null>(null)
   const [resultado, setResultado] = useState<Resultado | null>(null)
 
-  const caixaPad = useRef<SignaturePad | null>(null)
-  const motoboyPad = useRef<SignaturePad | null>(null)
 
   // O cache de credenciais é o que faz bipar funcionar sem rede. Atualiza
   // quando a tela monta e houver internet; se falhar, o cache anterior
@@ -291,8 +378,10 @@ function NovaCorridaFluxo({
     return {
       tenantId: profile.tenantId,
       lojaId,
-      agenciaId: credencial?.agenciaId ?? null,
-      motoboyId: credencial?.motoboyId ?? '',
+      // Na exceção o motoboy é o ESCOLHIDO, e a agência é a dele — o
+      // canônico afirma quem leva os vales, não quem autenticou.
+      agenciaId: gerente ? (motoboyEscolhido?.agenciaId ?? null) : (credencial?.agenciaId ?? null),
+      motoboyId: gerente ? (motoboyEscolhido?.id ?? '') : (credencial?.motoboyId ?? ''),
       caixaId: profile.id,
       vales: escolhidos,
     }
@@ -318,15 +407,38 @@ function NovaCorridaFluxo({
       if (navigator.onLine) {
         const online = await identificarCredencial(limpo)
         if (online && online.titular === 'gerente') {
-          setEstadoCartao(
-            prontoCom(
-              recusado(
-                'cartao_de_gerente',
-                `Este é o cartão de ${online.gerenteNome}, gerente${online.lojaNome ? ' da ' + online.lojaNome : ''}. Ele autoriza, não retira: bipa o cartão do motoboy.`
+          // Gerente de outra filial não autoriza saída DAQUI. O servidor
+          // recusaria no selo; a tela não oferece.
+          if (online.lojaId !== lojaId) {
+            setEstadoCartao(
+              prontoCom(
+                recusado(
+                  'gerente_de_outra_filial',
+                  `${online.gerenteNome} é gerente${online.lojaNome ? ' da ' + online.lojaNome : ' de outra filial'}. Só o gerente desta filial autoriza a saída daqui.`
+                )
               )
             )
-          )
-          setToken('')
+            setToken('')
+            return
+          }
+          if (online.bloqueadoAte && new Date(online.bloqueadoAte) > new Date()) {
+            setEstadoCartao(
+              prontoCom(
+                recusado(
+                  'bloqueada',
+                  `Cartão do gerente bloqueado até ${new Date(online.bloqueadoAte).toLocaleTimeString('pt-BR')} por tentativas de PIN.`
+                )
+              )
+            )
+            setToken('')
+            return
+          }
+          abrirExcecao({
+            nome: online.gerenteNome,
+            lojaNome: online.lojaNome,
+            temPin: online.temPin,
+            verificada: true,
+          })
           return
         }
         if (online) {
@@ -368,20 +480,18 @@ function NovaCorridaFluxo({
           setToken('')
           return
         }
-        // O cache guarda os dois titulares (o do gerente é da própria
-        // filial, ver lib/credencialNoCache.ts). Aqui vale a mesma recusa
-        // do caminho online — e ela é honesta offline também, porque
-        // saber DE QUEM é o cartão não depende de validar o HMAC.
+        // O cache guarda os dois titulares, e o do gerente é SÓ da própria
+        // filial (lib/credencialNoCache.ts) — por isso não há recusa de
+        // "outra filial" aqui. Saber de quem é o cartão não depende do
+        // HMAC; o PIN do gerente é capturado e conferido na sincronização,
+        // como o do motoboy.
         if (local.titular === 'gerente') {
-          setEstadoCartao(
-            prontoCom(
-              recusado(
-                'cartao_de_gerente',
-                `Este é o cartão de ${local.titularNome}, gerente${local.lojaNome ? ' da ' + local.lojaNome : ''}. Ele autoriza, não retira: bipa o cartão do motoboy.`
-              )
-            )
-          )
-          setToken('')
+          abrirExcecao({
+            nome: local.titularNome,
+            lojaNome: local.lojaNome,
+            temPin: local.temPin,
+            verificada: false,
+          })
           return
         }
         achada = {
@@ -458,14 +568,16 @@ function NovaCorridaFluxo({
     }
   }
 
-  // Confere o PIN contra o servidor ANTES de liberar as assinaturas.
+  // Confere o PIN contra o servidor ANTES de liberar a confirmação — o do
+  // motoboy, ou o do gerente na exceção (a mesma função serve os dois
+  // cartões, e é o servidor que sabe de quem é cada um).
   //
   // Usa `autenticarCredencial` e não `autorizarSaida` de propósito: a
   // autorização vale 2 minutos e está amarrada ao document_hash, então
-  // emiti-la aqui a faria expirar enquanto o motoboy assina. Aqui só se
-  // pergunta "é ele?"; a autorização de uso único nasce no confirmar,
-  // fresca. São duas passadas de bcrypt (~600ms no total), o que é
-  // barato perto de colher duas assinaturas e descobrir o erro depois.
+  // emiti-la aqui a faria expirar enquanto a farmácia confere o resumo.
+  // Aqui só se pergunta "é ele?"; a autorização de uso único nasce no
+  // confirmar, fresca. São duas passadas de bcrypt (~600ms no total), o
+  // que é barato perto de descobrir o PIN errado só na hora do selo.
   async function handleConferirPin() {
     setErro(null)
     const problema = pinAceitavel(pin)
@@ -517,16 +629,23 @@ function NovaCorridaFluxo({
   async function handleConfirmar() {
     setErro(null)
     if (escolhidos.length === 0) return setErro('Marca pelo menos um vale.')
-    if (!credencial) return setErro('Falta bipar o cartão do motoboy.')
-    if (!credencial.temPin) return setErro('Este motoboy ainda precisa criar o PIN dele.')
-    if (pinAceitavel(pin)) return setErro('Falta o PIN do motoboy.')
+    if (gerente) {
+      if (!motoboyEscolhido) return setErro('Escolha o motoboy que vai levar os vales.')
+      if (!motivo) return setErro('Informe o motivo: cartão perdido ou PIN esquecido.')
+      if (!gerente.temPin) {
+        return setErro('O cartão do gerente ainda não tem PIN. O gerente ativa em "Meu cartão".')
+      }
+      if (pinAceitavel(pin)) return setErro('Falta o PIN do gerente.')
+    } else {
+      if (!credencial) return setErro('Falta bipar o cartão do motoboy.')
+      if (!credencial.temPin) return setErro('Este motoboy ainda precisa criar o PIN dele.')
+      if (pinAceitavel(pin)) return setErro('Falta o PIN do motoboy.')
+    }
     // Redundante com `podeConfirmar` (o botão já estaria desabilitado),
-    // e fica de propósito: é a última barreira antes de gastar as
-    // assinaturas, e formato válido nunca substituiu identidade.
-    if (!custodiaPronta) return setErro('Confirma a identidade do motoboy antes.')
-    if (!caixaPad.current || caixaPad.current.isEmpty()) return setErro('Falta a sua assinatura.')
-    if (!motoboyPad.current || motoboyPad.current.isEmpty()) {
-      return setErro('Falta a assinatura do motoboy.')
+    // e fica de propósito: é a última barreira antes do selo, e formato
+    // válido nunca substituiu identidade.
+    if (!custodiaPronta) {
+      return setErro(gerente ? 'Confirma o PIN do gerente antes.' : 'Confirma a identidade do motoboy antes.')
     }
     if (!envelopeDisponivel()) {
       // Sem a chave pública não há como proteger o PIN se isto precisar
@@ -541,8 +660,11 @@ function NovaCorridaFluxo({
     const romaneioId = uuidv7()
     const corridaId = uuidv7()
     const ocorridoEmLocal = new Date().toISOString()
-    const caixaStrokes = caixaPad.current.toData()
-    const motoboyStrokes = motoboyPad.current.toData()
+    // QUEM VALIDOU, e por quê. Entram no hash offline, dentro do envelope e
+    // na autorização — e o servidor confere os três contra o cartão que de
+    // fato autenticou.
+    const validacao = gerente ? ('gerente' as const) : ('motoboy' as const)
+    const motivoExcecao: MotivoExcecao | null = gerente ? motivo : null
 
     try {
       const hashLocal = await documentHashLocal(entrada)
@@ -571,15 +693,14 @@ function NovaCorridaFluxo({
         }
         documentHash = preparado.documentHash
 
-        const autorizacao = await autorizarSaida(token, pin, documentHash)
+        const autorizacao = await autorizarSaida(
+          token,
+          pin,
+          documentHash,
+          gerente && motivo ? { motoboyId: entrada.motoboyId, motivo } : undefined
+        )
         if (!autorizacao.ok) {
-          setErro(
-            autorizacao.motivo === 'pin_incorreto'
-              ? 'PIN incorreto.'
-              : autorizacao.motivo === 'bloqueado'
-                ? 'Credencial bloqueada por tentativas seguidas de PIN incorreto.'
-                : 'Não consegui autenticar o motoboy.'
-          )
+          setErro(mensagemDaAutorizacao(autorizacao.motivo, gerente !== null))
           setOcupado(null)
           return
         }
@@ -589,18 +710,16 @@ function NovaCorridaFluxo({
       // O envelope é selado SEMPRE, mesmo online: se o selo falhar por
       // rede no meio do caminho, a operação cai na fila e lá o PIN já
       // precisa estar protegido. Selar custa milissegundos.
-      const offlineEventHash = await calcularOfflineEventHash({
+      // VERSÃO 2 (4B): sem traço. O hash prende ao envelope o que viaja no
+      // corpo e NÃO está no canônico — o relógio do balcão, quem validou, o
+      // motivo e o motoboy (que, na exceção, foi escolhido na tela).
+      const offlineEventHash = await calcularOfflineEventHashSaidaV2({
         documentHash,
         romaneioId,
-        // O nome do parâmetro é neutro desde a 2C.5; o do FIO continua
-        // `caixaStrokes`, porque corpos já gravados dizem isso. A fórmula
-        // concatena valores, então renomear aqui não move o hash — e
-        // `scripts/envelope.spec.mts` congela três hashes de antes do
-        // refactor pra provar exatamente isso.
-        assinaturaInternaStrokes: caixaStrokes,
-        assinaturaMotoboyStrokes: motoboyStrokes,
+        validacao,
+        motivoExcecao,
+        motoboyId: entrada.motoboyId,
         ocorridoEmLocal,
-        geolocalizacao: null,
       })
       const envelope = await selarSegredos({
         pin,
@@ -608,10 +727,11 @@ function NovaCorridaFluxo({
         operationId: romaneioId,
         documentHash,
         offlineEventHash,
-        // Explícito desde a 2C.5. A ausência continua significando saída,
-        // pra fila antiga seguir drenando — mas o que nasce agora diz o
-        // que é, e o servidor compara em vez de acreditar.
         tipo: 'saida',
+        // Selados junto do PIN: a Edge Function compara com o corpo e
+        // recusa se alguém trocar o modo ou o motivo no caminho.
+        validacao,
+        motivoExcecao,
       })
 
       const paraFila: SaidaOfflineInput = {
@@ -622,8 +742,8 @@ function NovaCorridaFluxo({
         motoboyId: entrada.motoboyId,
         entregaIds: escolhidos.map((v) => v.entregaId),
         documentHash,
-        caixaStrokes,
-        motoboyStrokes,
+        validacao,
+        motivoExcecao,
         ocorridoEmLocal,
         envelope,
         userId: profile.id,
@@ -640,8 +760,6 @@ function NovaCorridaFluxo({
             entregaIds: paraFila.entregaIds,
             documentHash,
             autorizacaoId,
-            caixaStrokes,
-            motoboyStrokes,
             ocorridoEmLocal,
           })
           setResultado(
@@ -690,8 +808,6 @@ function NovaCorridaFluxo({
     setSelecionadas(new Set())
     setPinConfirmacao('')
     recolherCustodia()
-    caixaPad.current?.clear()
-    motoboyPad.current?.clear()
   }
 
   // `custodiaPronta` e não `pinAceitavel(pin)`: formato bem escrito não é
@@ -703,7 +819,18 @@ function NovaCorridaFluxo({
   // que não respondeu nunca vira autorização — se virasse, a tela
   // estaria trocando "não consegui conferir" por "conferi".
   const podeConfirmar =
-    escolhidos.length > 0 && credencial !== null && credencial.temPin && custodiaPronta
+    escolhidos.length > 0 &&
+    custodiaPronta &&
+    (gerente
+      ? gerente.temPin && motoboyEscolhido !== null && motivo !== null
+      : credencial !== null && credencial.temPin)
+
+  // O resumo da conferência fala do MOTOBOY RESPONSÁVEL, venha ele do
+  // cartão (fluxo normal) ou da escolha (exceção).
+  const nomeDoMotoboy = gerente ? (motoboyEscolhido?.nome ?? null) : (credencial?.motoboyNome ?? null)
+  const agenciaDoMotoboy = gerente
+    ? nomeDaAgencia(motoboyEscolhido?.agenciaId ?? null)
+    : (credencial?.agenciaNome ?? null)
 
   return (
     <div className="mx-auto max-w-3xl">
@@ -776,9 +903,17 @@ function NovaCorridaFluxo({
           </Secao>
 
           <Secao numero={2} titulo="Motoboy" desabilitada={escolhidos.length === 0}>
-            {!credencial && (
+            {!credencial && !gerente && (
               <div className="flex flex-col gap-2">
                 <Label htmlFor="cartao">Bipa a credencial</Label>
+                {/* O caminho excepcional começa AQUI, no mesmo campo: o
+                    motoboy sem cartão ou sem PIN não tem o que bipar, e o
+                    gerente bipa o dele. Não é um botão escondido. */}
+                <p className="text-xs text-foreground/70">
+                  {motoboyEscolhidoId
+                    ? 'O motoboy já está identificado. Agora o gerente bipa o cartão dele.'
+                    : 'Motoboy sem cartão ou sem PIN? O gerente da filial bipa o cartão dele aqui.'}
+                </p>
                 <Input
                   id="cartao"
                   autoFocus
@@ -821,26 +956,106 @@ function NovaCorridaFluxo({
               </div>
             )}
 
-            {credencial && (
+            {(credencial || gerente) && (
               <div className="flex flex-col gap-3">
-                <div className="flex items-center gap-2">
-                  <div>
-                    <p className="font-medium">{credencial.motoboyNome}</p>
-                    <p className="text-xs text-foreground/70">{credencial.agenciaNome ?? '—'}</p>
-                  </div>
-                  <Badge variant={credencial.verificada ? 'secondary' : 'outline'}>
-                    {credencial.verificada ? 'Credencial reconhecida' : 'Credencial informada'}
-                  </Badge>
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={recolherCustodia}
-                  >
-                    Trocar
-                  </Button>
-                </div>
+                {credencial ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <div>
+                        <p className="font-medium">{credencial.motoboyNome}</p>
+                        <p className="text-xs text-foreground/70">{credencial.agenciaNome ?? '—'}</p>
+                      </div>
+                      <Badge variant={credencial.verificada ? 'secondary' : 'outline'}>
+                        {credencial.verificada ? 'Credencial reconhecida' : 'Credencial informada'}
+                      </Badge>
+                      <Button variant="ghost" size="sm" onClick={recolherCustodia}>
+                        Trocar
+                      </Button>
+                    </div>
+                    {/* Secundário, e só enquanto a identidade não está
+                        estabelecida: com o PIN confirmado não há exceção a
+                        pedir. */}
+                    {!custodiaPronta && (
+                      <button
+                        type="button"
+                        className="self-start text-xs text-foreground/70 underline underline-offset-2"
+                        onClick={chamarGerente}
+                      >
+                        PIN esquecido? Chamar o gerente
+                      </button>
+                    )}
+                  </>
+                ) : gerente ? (
+                  <>
+                    <div className="flex items-center gap-2">
+                      <div>
+                        <p className="font-medium">{gerente.nome}</p>
+                        <p className="text-xs text-foreground/70">
+                          Gerente{gerente.lojaNome ? ` · ${gerente.lojaNome}` : ''}
+                        </p>
+                      </div>
+                      <Badge variant={gerente.verificada ? 'secondary' : 'outline'}>
+                        {gerente.verificada ? 'Cartão do gerente reconhecido' : 'Cartão do gerente informado'}
+                      </Badge>
+                      <Button variant="ghost" size="sm" onClick={recolherCustodia}>
+                        Cancelar
+                      </Button>
+                    </div>
+                    <p className="text-sm">
+                      Cartão do gerente identificado. Selecione o motoboy responsável e informe o PIN
+                      do gerente para autorizar a saída.
+                    </p>
 
-                {!credencial.temPin ? (
+                    <div className="flex flex-col gap-1">
+                      <Label htmlFor="motoboy-excecao">Motoboy responsável</Label>
+                      <select
+                        id="motoboy-excecao"
+                        className="h-9 rounded-md border bg-background px-2 text-sm"
+                        value={motoboyEscolhidoId}
+                        onChange={(e) => {
+                          // Trocar o motoboy muda o documento (ele entra no
+                          // canônico), então a conferência do PIN recomeça.
+                          setMotoboyEscolhidoId(e.target.value)
+                          setEstadoPin({ estado: 'inactive' })
+                          setPinCapturadoOffline(false)
+                          setPin('')
+                        }}
+                      >
+                        <option value="" disabled>
+                          Selecione o motoboy
+                        </option>
+                        {motoboysElegiveis.map((m) => (
+                          <option key={m.id} value={m.id}>
+                            {m.nome}
+                            {nomeDaAgencia(m.agenciaId) ? ` · ${nomeDaAgencia(m.agenciaId)}` : ''}
+                          </option>
+                        ))}
+                      </select>
+                      <p className="text-xs text-foreground/70">
+                        Os vales ficam no nome dele. O cartão do gerente só autoriza.
+                      </p>
+                    </div>
+
+                    <fieldset className="flex flex-col gap-1">
+                      <legend className="text-sm font-medium">Motivo</legend>
+                      <div className="flex flex-wrap gap-4">
+                        {MOTIVOS_EXCECAO.map((m) => (
+                          <label key={m} className="flex items-center gap-2 text-sm">
+                            <input
+                              type="radio"
+                              name="motivo-excecao"
+                              checked={motivo === m}
+                              onChange={() => setMotivo(m)}
+                            />
+                            {MOTIVO_EXCECAO_LABEL[m]}
+                          </label>
+                        ))}
+                      </div>
+                    </fieldset>
+                  </>
+                ) : null}
+
+                {credencial && !credencial.temPin ? (
                   <div className="flex flex-col gap-2 rounded-lg border border-dashed p-3">
                     <p className="text-sm">
                       Esta credencial ainda não foi ativada. <strong>{credencial.motoboyNome}</strong> cria o PIN
@@ -868,9 +1083,17 @@ function NovaCorridaFluxo({
                       </Button>
                     </div>
                   </div>
+                ) : gerente && !gerente.temPin ? (
+                  // O gerente ativa o PIN em "Meu cartão", e não aqui: é o
+                  // cartão DELE, e o balcão não é lugar pra ele escolher PIN
+                  // com o motoboy do lado. Criar PIN exige internet.
+                  <p className="text-sm text-destructive">
+                    O cartão do gerente ainda não tem PIN. O gerente ativa em "Meu cartão" antes de
+                    autorizar — criar PIN exige internet.
+                  </p>
                 ) : (
                   <div className="flex flex-col gap-2">
-                    <Label htmlFor="pin">PIN do motoboy</Label>
+                    <Label htmlFor="pin">{gerente ? 'PIN do gerente' : 'PIN do motoboy'}</Label>
                     <div className="flex items-center gap-2">
                       <Input
                         id="pin"
@@ -930,7 +1153,9 @@ function NovaCorridaFluxo({
 
                     {pinConfirmado && (
                       <p className="text-sm font-medium text-emerald-700 dark:text-emerald-400">
-                        ✓ Identidade confirmada — {credencial.motoboyNome}
+                        {gerente
+                          ? `✓ PIN do gerente confirmado — ${gerente.nome}`
+                          : `✓ Identidade confirmada — ${credencial?.motoboyNome ?? ''}`}
                       </p>
                     )}
 
@@ -978,13 +1203,27 @@ function NovaCorridaFluxo({
             )}
           </Secao>
 
-          <Secao numero={3} titulo="Custódia" desabilitada={!podeConfirmar}>
-            <div className="grid gap-4 sm:grid-cols-2">
-              <CampoAssinatura rotulo={`Caixa · ${profile.nome}`} padRef={caixaPad} />
-              <CampoAssinatura
-                rotulo={`Motoboy · ${credencial?.motoboyNome ?? '—'}`}
-                padRef={motoboyPad}
-              />
+          {/* SEM ASSINATURA MANUSCRITA desde o 4B. O ato da farmácia é o
+              toque em "Confirmar saída", na sessão de quem está no balcão
+              — e a tela diz isso, pra estar logado não parecer
+              manifestação. O resumo mostra o que vai ficar no documento,
+              ANTES de confirmar. */}
+          <Secao numero={3} titulo="Conferência" desabilitada={!podeConfirmar}>
+            <div className="flex flex-col gap-1 rounded-lg border p-3 text-sm">
+              <p>
+                Motoboy responsável: <strong>{nomeDoMotoboy ?? '—'}</strong>
+                {agenciaDoMotoboy ? ` · ${agenciaDoMotoboy}` : ''}
+              </p>
+              {gerente && (
+                <p className="text-amber-800 dark:text-amber-300">
+                  {motivo ? `${MOTIVO_EXCECAO_LABEL[motivo]}. ` : ''}
+                  Autorizado por <strong>{gerente.nome}</strong>, gerente, com cartão e PIN próprios.
+                </p>
+              )}
+              <p className="text-foreground/70">
+                Ao tocar em “Confirmar saída”, <strong>{profile.nome}</strong> confirma pela farmácia
+                os vales acima.
+              </p>
             </div>
           </Secao>
 
@@ -1075,8 +1314,8 @@ function ResultadoDaSaida({
       {resultado.kind === 'conflito' && (
         <p>
           <strong>Conflito ao selar{resultado.numero ? ` (${resultado.numero})` : ''}.</strong> Algum
-          vale já saiu em outra corrida. A tentativa ficou registrada com as assinaturas — a gestão
-          precisa resolver.
+          vale já saiu em outra corrida. A tentativa ficou registrada com a validação apresentada — a
+          gestão precisa resolver.
         </p>
       )}
       {resultado.kind === 'erro' && <p className="text-destructive">{resultado.texto}</p>}

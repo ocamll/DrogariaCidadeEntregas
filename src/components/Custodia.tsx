@@ -5,6 +5,7 @@ import {
   type CustodiaDoVale,
 } from '@/data/romaneios'
 import { rotuloDoPapelNoMomento } from '@/lib/papeis'
+import { MOTIVO_EXCECAO_LABEL } from '@/lib/excecaoDoGerente'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import {
@@ -121,6 +122,12 @@ function Linha({ rotulo, valor }: { rotulo: string; valor: string | null }) {
 
 export function BlocoAssinatura({ assinatura }: { assinatura: AssinaturaDoRomaneio }) {
   const ehMotoboy = assinatura.tipoSignatario === 'motoboy'
+  // VERSÃO 2 (4B): não há traço, e a tela não pode desenhar uma moldura
+  // vazia onde antes havia assinatura — pareceria assinatura faltando. A
+  // decisão sai de `versaoEvidencia`, nunca de "strokes veio nulo":
+  // ausência de dado não é afirmação sobre a forma do documento.
+  const semTraco = assinatura.versaoEvidencia === 2
+  const porGerente = ehMotoboy && assinatura.validadorNome !== null
   return (
     <div className="flex flex-col gap-2">
       {/* "DA FARMÁCIA", não "do caixa". `tipo_signatario = 'caixa'` é o
@@ -129,9 +136,25 @@ export function BlocoAssinatura({ assinatura }: { assinatura: AssinaturaDoRomane
           uma saída aparecia como "caixa", que é a tela afirmando o que não
           sabe. O cargo real vem de `papelNoMomento`, logo abaixo. */}
       <p className="text-xs font-semibold tracking-wider uppercase text-foreground/70">
-        Assinatura {ehMotoboy ? 'do motoboy' : 'da farmácia'}
+        {semTraco
+          ? ehMotoboy
+            ? 'Validação do motoboy'
+            : 'Confirmação da farmácia'
+          : `Assinatura ${ehMotoboy ? 'do motoboy' : 'da farmácia'}`}
       </p>
-      <AssinaturaDesenhada strokes={assinatura.strokes} />
+      {!semTraco && <AssinaturaDesenhada strokes={assinatura.strokes} />}
+
+      {/* A EXCEÇÃO, dita no rosto do bloco. O motoboy continua sendo o
+          responsável pelos vales (é o nome logo abaixo); quem AUTENTICOU
+          foi o gerente, com cartão e PIN próprios. O documento nunca
+          atribui ao motoboy uma autenticação que não foi dele. */}
+      {porGerente && (
+        <p className="rounded-md border border-amber-600/40 bg-amber-50 px-2 py-1 text-xs text-amber-900 dark:bg-amber-950/40 dark:text-amber-200">
+          {assinatura.motivoExcecao ? `${MOTIVO_EXCECAO_LABEL[assinatura.motivoExcecao]}. ` : ''}
+          Operação autorizada por <strong>{assinatura.validadorNome}</strong>, gerente, com cartão e
+          PIN próprios.
+        </p>
+      )}
       <div className="flex flex-col gap-0.5">
         <p className="text-sm font-medium">{assinatura.nome}</p>
         {/* O cargo, quando ele foi registrado. Nas assinaturas anteriores
@@ -157,8 +180,11 @@ export function BlocoAssinatura({ assinatura }: { assinatura: AssinaturaDoRomane
         />
         {/* Só os 4 últimos: o suficiente pra casar com o cartão físico na
             mão, e nunca o token, que não existe fora do papel. */}
+        {/* Na exceção a credencial registrada é a do GERENTE — foi ela que
+            passou pelo bcrypt. Rotular como "Credencial" sem dizer de quem
+            faria parecer que o motoboy apresentou um cartão. */}
         <Linha
-          rotulo="Credencial"
+          rotulo={porGerente ? 'Cartão do gerente' : 'Credencial'}
           valor={assinatura.credencialPublicId ? `••••${assinatura.credencialPublicId.slice(-4)}` : null}
         />
         <Linha

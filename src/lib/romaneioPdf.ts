@@ -34,6 +34,7 @@ import { formatBRL } from '@/lib/money'
 import { carregarImagemDaMarca, LOGO_DOCUMENTO_URL, LOGO_PROPORCAO, COR_MARCA } from '@/lib/marca'
 import { duracaoDaCorrida } from '@/lib/datas'
 import { rotuloDoPapelNoMomento } from '@/lib/papeis'
+import { MOTIVO_EXCECAO_LABEL } from './excecaoDoGerente'
 
 export type ViaDoRomaneio = 'farmacia' | 'agencia'
 
@@ -290,11 +291,19 @@ export async function montarRomaneioPdf(
     if (!assinatura) continue
     const x = M + i * (larguraBloco + 8)
 
-    desenharAssinatura(doc, assinatura.strokes, x, y, larguraBloco, alturaAssinatura)
+    // VERSÃO 2 (4B): sem traço — e SEM a linha de assinatura também. Uma
+    // linha em branco no papel diria "falta assinar", que é a afirmação
+    // errada sobre um documento que nunca teve assinatura manuscrita.
+    const comTraco = assinatura.versaoEvidencia !== 2
+    if (comTraco) {
+      desenharAssinatura(doc, assinatura.strokes, x, y, larguraBloco, alturaAssinatura)
+    }
 
     let yb = y + alturaAssinatura + 4
-    doc.setDrawColor(180)
-    doc.line(x, yb - 2, x + larguraBloco, yb - 2)
+    if (comTraco) {
+      doc.setDrawColor(180)
+      doc.line(x, yb - 2, x + larguraBloco, yb - 2)
+    }
 
     doc.setFont('helvetica', 'bold')
     doc.setFontSize(9)
@@ -315,9 +324,18 @@ export async function montarRomaneioPdf(
             .filter(Boolean)
             .join(' · ')
         : 'Motoboy',
+      // 4B: na exceção quem AUTENTICOU foi o gerente, com cartão e PIN
+      // próprios — e o papel precisa dizer isso, porque o nome logo acima
+      // continua sendo o do motoboy responsável pelos vales.
+      assinatura.validadorNome
+        ? `${assinatura.motivoExcecao ? MOTIVO_EXCECAO_LABEL[assinatura.motivoExcecao] + ' · ' : ''}autorizado por ${assinatura.validadorNome}, gerente`
+        : null,
+      !comTraco && i === 0 ? 'confirmação na sessão' : null,
       assinatura.agenciaNome,
       dataHora(assinatura.assinadoEm),
-      assinatura.credencialPublicId ? `credencial ••••${assinatura.credencialPublicId.slice(-4)}` : null,
+      assinatura.credencialPublicId
+        ? `${assinatura.validadorNome ? 'cartão do gerente' : 'credencial'} ••••${assinatura.credencialPublicId.slice(-4)}`
+        : null,
     ].filter(Boolean) as string[]
     for (const d of detalhes) {
       doc.text(doc.splitTextToSize(d, larguraBloco), x, yb)

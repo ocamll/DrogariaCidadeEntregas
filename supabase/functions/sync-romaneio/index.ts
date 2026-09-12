@@ -83,6 +83,38 @@ async function calcularOfflineEventHash(entrada: {
   return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
 }
 
+// GÊMEA de `calcularOfflineEventHashSaidaV2` em src/lib/envelope.ts — o
+// hash do evento offline da SAÍDA, versão 2 (4B). Sem traço e sem
+// geolocalização; com o modo de validação, o motivo e o motoboy. Os tipos
+// são primitivos nos dois arquivos de propósito, pra o spec conseguir
+// extrair este texto e compilá-lo sozinho.
+//
+// A v1 logo acima continua servindo o RETORNO, que ainda sela com traços.
+// `scripts/offline-hash-v2.spec.mts` confere as duas gêmeas contra digests
+// congelados antes de qualquer uma existir.
+async function calcularOfflineEventHashSaidaV2(entrada: {
+  documentHash: string
+  romaneioId: string
+  validacao: string
+  motivoExcecao: string | null
+  motoboyId: string
+  ocorridoEmLocal: string
+}): Promise<string> {
+  const partes = [
+    'OEV2',
+    entrada.documentHash,
+    entrada.romaneioId.toLowerCase(),
+    'saida',
+    entrada.validacao,
+    entrada.motivoExcecao ?? '-',
+    entrada.motoboyId.toLowerCase(),
+    entrada.ocorridoEmLocal,
+  ]
+  const bytes = new TextEncoder().encode(partes.join('|'))
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
 type Envelope = { v: number; keyId: string; k: string; iv: string; ct: string }
 
 type Segredos = {
@@ -93,6 +125,11 @@ type Segredos = {
   offlineEventHash: string
   // Entrou na 2C.5, DENTRO do envelope. Ver `resolverTipoDoRomaneio`.
   tipo?: string
+  // Entraram no 4B, também DENTRO do envelope, e só na SAÍDA: quem validou
+  // (o motoboy ou o gerente no lugar dele) e por quê. O corpo declara os
+  // mesmos dois em claro, e a conferência abaixo exige que concordem.
+  validacao?: string
+  motivoExcecao?: string | null
 }
 
 /**
@@ -337,31 +374,25 @@ Deno.serve(async (req) => {
     return responder({ error: 'Envelope não corresponde a este documento.', motivo: 'envelope_trocado' }, 400)
   }
 
-  // 4b. OS TRAÇOS, e o vocabulário é RÍGIDO por tipo.
+  // 4b. O QUE O CORPO TRAZ ALÉM DO DOCUMENTO — e agora depende do tipo.
   //
-  //     saída:   caixaStrokes         (o fio histórico, e assim fica)
-  //     retorno: responsavelStrokes   (nome novo, sem fallback)
+  //     retorno  versão 1: os dois traços, com o vocabulário rígido
+  //              (`responsavelStrokes`, nunca `caixaStrokes`)
+  //     saída    versão 2 (4B): NENHUM traço; quem validou e por quê
   //
-  // Não existe `romaneio_retorno` antigo em fila nenhuma, então aceitar
-  // `caixaStrokes` num retorno seria criar hoje compatibilidade com um
-  // formato que nunca existiu — e perpetuar um nome que mente sobre quem
-  // assinou, que é a armadilha do `tipo_signatario` de novo.
-  //
-  // Os dois convergem em `assinaturaInternaStrokes` antes do hash,
-  // exatamente como no cliente. A fórmula não sabe de vocabulário.
-  const assinaturaInternaStrokes =
-    tipo === 'retorno' ? corpo.responsavelStrokes : corpo.caixaStrokes
+  // A assimetria é o estado real, não descuido: o retorno sai dos traços
+  // na etapa dele, e trocar os dois juntos quebraria a sincronização do
+  // retorno offline sem motivo nenhum.
 
+  // ---- retorno: versão 1 ----------------------------------------------
   if (tipo === 'retorno' && corpo.responsavelStrokes === undefined) {
     return responder(
       { error: 'Retorno exige `responsavelStrokes`.', motivo: 'vocabulario_invalido' },
       400
     )
   }
-  // E RECUSA, não ignora. Ler `responsavelStrokes` e deixar um
-  // `caixaStrokes` perdido passar seria aceitar em silêncio um corpo que
-  // não sabe qual protocolo está falando — e o campo ignorado viraria a
-  // pista falsa de quem for depurar por que o hash não fechou.
+  // E RECUSA, não ignora: um `caixaStrokes` perdido num retorno é corpo que
+  // não sabe qual protocolo está falando.
   if (tipo === 'retorno' && corpo.caixaStrokes !== undefined) {
     return responder(
       { error: '`caixaStrokes` não existe no protocolo do retorno. Use `responsavelStrokes`.',
@@ -369,22 +400,78 @@ Deno.serve(async (req) => {
       400
     )
   }
-  if (tipo === 'saida' && corpo.responsavelStrokes !== undefined) {
+
+  // ---- saída: versão 2 ------------------------------------------------
+  //
+  // Traço numa saída é corpo de um bundle anterior ao 4B. É TERMINAL, e
+  // não retentável: o que falta está dentro de um envelope selado por
+  // aquele bundle, e nenhuma versão nova consegue reabri-lo. O
+  // procedimento de transição do 4B drena as filas antes justamente pra
+  // isto não acontecer com operação de verdade.
+  if (
+    tipo === 'saida' &&
+    (corpo.caixaStrokes !== undefined ||
+      corpo.motoboyStrokes !== undefined ||
+      corpo.responsavelStrokes !== undefined)
+  ) {
     return responder(
-      { error: '`responsavelStrokes` não existe no protocolo da saída. Use `caixaStrokes`.',
+      { error: 'A saída não tem mais assinatura manuscrita. Esta operação é de uma versão anterior do app.',
         motivo: 'vocabulario_invalido' },
       400
     )
   }
 
-  const hashRecalculado = await calcularOfflineEventHash({
-    documentHash,
-    romaneioId,
-    assinaturaInternaStrokes,
-    assinaturaMotoboyStrokes: corpo.motoboyStrokes,
-    ocorridoEmLocal: String(corpo.ocorridoEmLocal ?? ''),
-    geolocalizacao: corpo.geolocalizacao ?? null,
-  })
+  const validacaoDoCorpo = corpo.validacao
+  const motivoDoCorpo = corpo.motivoExcecao ?? null
+
+  if (tipo === 'saida') {
+    // O DOMÍNIO, antes de comparar com o envelope: modo desconhecido, ou
+    // motivo que não combina com o modo, é defeito de forma do corpo.
+    const modoValido = validacaoDoCorpo === 'motoboy' || validacaoDoCorpo === 'gerente'
+    const motivoCombina =
+      validacaoDoCorpo === 'motoboy'
+        ? motivoDoCorpo === null
+        : motivoDoCorpo === 'cartao_perdido' || motivoDoCorpo === 'pin_esquecido'
+    if (!modoValido || !motivoCombina) {
+      return responder(
+        { error: 'Modo de validação ou motivo da exceção inválido.', motivo: 'validacao_invalida' },
+        400
+      )
+    }
+
+    // E O ENVELOPE DECIDE. Trocar "motoboy" por "gerente" (ou um motivo
+    // pelo outro) no caminho seria editar campo em claro; o que foi selado
+    // no balcão não se reescreve.
+    if (
+      segredos.validacao !== validacaoDoCorpo ||
+      (segredos.motivoExcecao ?? null) !== motivoDoCorpo
+    ) {
+      return responder(
+        { error: 'O modo de validação não corresponde ao que foi selado no balcão.',
+          motivo: 'validacao_divergente' },
+        400
+      )
+    }
+  }
+
+  const hashRecalculado =
+    tipo === 'retorno'
+      ? await calcularOfflineEventHash({
+          documentHash,
+          romaneioId,
+          assinaturaInternaStrokes: corpo.responsavelStrokes,
+          assinaturaMotoboyStrokes: corpo.motoboyStrokes,
+          ocorridoEmLocal: String(corpo.ocorridoEmLocal ?? ''),
+          geolocalizacao: corpo.geolocalizacao ?? null,
+        })
+      : await calcularOfflineEventHashSaidaV2({
+          documentHash,
+          romaneioId,
+          validacao: String(validacaoDoCorpo),
+          motivoExcecao: motivoDoCorpo as string | null,
+          motoboyId: String(corpo.motoboyId ?? ''),
+          ocorridoEmLocal: String(corpo.ocorridoEmLocal ?? ''),
+        })
   if (hashRecalculado !== segredos.offlineEventHash) {
     return responder(
       { error: 'O conteúdo do romaneio mudou depois de assinado.', motivo: 'payload_alterado' },
@@ -442,11 +529,13 @@ Deno.serve(async (req) => {
           p_document_hash: documentHash,
           p_token: segredos.credentialToken,
           p_pin: segredos.pin,
-          p_caixa_strokes: corpo.caixaStrokes,
-          p_motoboy_strokes: corpo.motoboyStrokes,
           p_ocorrido_em_local: corpo.ocorridoEmLocal,
           p_ip: ip,
-          p_geolocalizacao: corpo.geolocalizacao ?? null,
+          p_geolocalizacao: null,
+          // Os dois já conferidos contra o envelope, lá em cima. O SQL
+          // confere de novo contra o cartão que de fato autenticou.
+          p_validacao: validacaoDoCorpo,
+          p_motivo: motivoDoCorpo,
         })
 
   if (error) return responder({ error: error.message }, 400)

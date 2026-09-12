@@ -203,7 +203,7 @@ console.log('\n--- o vocabulário dos traços é rígido por tipo ---')
   const handler = fonteCodigo.slice(fonteCodigo.indexOf('Deno.serve('))
   checa(
     'retorno lê responsavelStrokes',
-    handler.includes("tipo === 'retorno' ? corpo.responsavelStrokes : corpo.caixaStrokes")
+    handler.includes('assinaturaInternaStrokes: corpo.responsavelStrokes')
   )
   checa(
     'e recusa retorno sem responsavelStrokes',
@@ -216,13 +216,36 @@ console.log('\n--- o vocabulário dos traços é rígido por tipo ---')
     handler.includes("tipo === 'retorno' && corpo.caixaStrokes !== undefined")
   )
   checa(
-    'recusa saída que traga responsavelStrokes',
-    handler.includes("tipo === 'saida' && corpo.responsavelStrokes !== undefined")
+    'recusa saída que traga qualquer traço (4B)',
+    handler.includes("tipo === 'saida' &&") &&
+      handler.includes('corpo.caixaStrokes !== undefined ||') &&
+      handler.includes('corpo.motoboyStrokes !== undefined ||') &&
+      handler.includes('corpo.responsavelStrokes !== undefined')
   )
   // Sem fallback: o retorno nunca pode cair em caixaStrokes.
   const rpcRetorno = handler.slice(handler.indexOf("'selar_romaneio_retorno_sincronizado'"))
   const ateOFim = rpcRetorno.slice(0, rpcRetorno.indexOf('})'))
   checa('a RPC do retorno não menciona caixaStrokes', !ateOFim.includes('caixaStrokes'))
+
+  // ---- 4B: a saída sem traço, com o modo de validação conferido ----
+  //
+  // `pos` e `primeiraRpc` do bloco da ORDEM não existem aqui — cada bloco
+  // tem o próprio escopo, e usá-los rendia `ReferenceError`. Estas são as
+  // mesmas medidas, sobre o mesmo `handler` deste bloco.
+  const posAqui = (agulha: string) => handler.indexOf(agulha)
+  const primeiraRpcAqui = posAqui('.rpc(')
+  checa('modo × envelope conferido ANTES de qualquer RPC',
+    posAqui("motivo: 'validacao_divergente'") > 0 &&
+      posAqui("motivo: 'validacao_divergente'") < primeiraRpcAqui)
+  checa('domínio do modo conferido ANTES de qualquer RPC',
+    posAqui("motivo: 'validacao_invalida'") > 0 &&
+      posAqui("motivo: 'validacao_invalida'") < primeiraRpcAqui)
+  checa('a saída usa o hash offline v2', handler.includes('calcularOfflineEventHashSaidaV2({'))
+  const rpcSaida = handler.slice(handler.indexOf("'selar_romaneio_sincronizado'"))
+  const ateOFimSaida = rpcSaida.slice(0, rpcSaida.indexOf('})'))
+  checa('a RPC da saída não manda traço nenhum', !/strokes/i.test(ateOFimSaida))
+  checa('a RPC da saída manda modo e motivo',
+    ateOFimSaida.includes('p_validacao:') && ateOFimSaida.includes('p_motivo:'))
 }
 
 console.log(falhas === 0 ? '\ndespacho ok\n' : `\n${falhas} FALHA(S)\n`)

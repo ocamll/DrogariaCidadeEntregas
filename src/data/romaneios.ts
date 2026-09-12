@@ -3,6 +3,7 @@ import { supabase } from '@/lib/supabase'
 import { sha256Hex } from '@/lib/hash'
 import { montarCanonico, type EntradaCanonica, type ValeCanonico } from '@/lib/canonico'
 import type { EnvelopeSelado } from '@/lib/envelope'
+import type { MotivoExcecao, ValidacaoDaSaida } from '@/lib/excecaoDoGerente'
 import { nomeDaFilialDoDocumento } from '@/lib/filialDoDocumento'
 
 // Romaneio de Saída — o documento selado da retirada.
@@ -129,10 +130,12 @@ export async function selarRomaneio(input: {
   entregaIds: string[]
   documentHash: string
   autorizacaoId: string
-  caixaStrokes: unknown
-  motoboyStrokes: unknown
   ocorridoEmLocal: string
 }): Promise<ResultadoSelo> {
+  // SEM TRAÇOS desde o 4B (migration 20260911180000). A farmácia confirma
+  // pelo ato explícito de chamar esta função com a sessão; o motoboy — ou
+  // o gerente, no lugar dele — já está provado pela autorização de uso
+  // único amarrada ao document_hash.
   const { data, error } = await supabase.rpc('selar_romaneio', {
     p_romaneio_id: input.romaneioId,
     p_corrida_id: input.corridaId,
@@ -142,8 +145,6 @@ export async function selarRomaneio(input: {
     p_entrega_ids: input.entregaIds,
     p_document_hash: input.documentHash,
     p_autorizacao_id: input.autorizacaoId,
-    p_caixa_strokes: input.caixaStrokes,
-    p_motoboy_strokes: input.motoboyStrokes,
     p_ocorrido_em_local: input.ocorridoEmLocal,
     p_geolocalizacao: null,
   })
@@ -180,15 +181,25 @@ export type ResultadoAutorizacao =
 // Amarra cartão + PIN a ESTE document_hash. Se os vales mudarem depois, o
 // hash muda e esta autorização deixa de servir — sem precisar de nenhuma
 // lógica que "perceba" a mudança.
+//
+// A EXCEÇÃO DO GERENTE (4B): com o cartão do gerente, o motoboy não sai
+// do cartão — ele é ESCOLHIDO, e o motivo é obrigatório. É o servidor que
+// descobre de quem é o cartão e recusa a combinação errada; passar
+// `excecao` com o cartão do motoboy volta `motivo_sem_excecao`.
+//
+// O retorno continua chamando com três argumentos, e a função SQL aceita
+// porque os dois novos têm default nulo.
 export async function autorizarSaida(
   token: string,
   pin: string,
-  documentHash: string
+  documentHash: string,
+  excecao?: { motoboyId: string; motivo: MotivoExcecao }
 ): Promise<ResultadoAutorizacao> {
   const { data, error } = await supabase.rpc('autorizar_saida', {
     p_token: token,
     p_pin: pin,
     p_document_hash: documentHash,
+    ...(excecao ? { p_motoboy_id: excecao.motoboyId, p_motivo: excecao.motivo } : {}),
   })
   if (error) throw error
 
@@ -301,8 +312,16 @@ export type SaidaOfflineInput = {
   motoboyId: string
   entregaIds: string[]
   documentHash: string
-  caixaStrokes: unknown
-  motoboyStrokes: unknown
+  /**
+   * QUEM VALIDOU, e por quê — no lugar dos traços desde o 4B.
+   *
+   * Vão aqui em claro E dentro do envelope: a Edge Function compara os
+   * dois e recusa `validacao_divergente` se discordarem. Na exceção o
+   * cartão selado é o do GERENTE, e `motoboyId` acima é o motoboy
+   * escolhido na tela — o responsável pelos vales.
+   */
+  validacao: ValidacaoDaSaida
+  motivoExcecao: MotivoExcecao | null
   ocorridoEmLocal: string
   // Guarda PIN e token do cartão. O navegador sela e não reabre — quem
   // abre é a Edge Function, com a chave privada. Ver src/lib/envelope.ts.
@@ -448,6 +467,11 @@ const MOTIVOS_TERMINAIS = [
   // evitar.
   'tipo_ausente',
   'vocabulario_invalido',
+  // 4B: o corpo declara um modo de validação que o envelope não sustenta,
+  // ou um modo/motivo fora do domínio. As duas coisas estão seladas por um
+  // bundle — repetir não muda o resultado.
+  'validacao_invalida',
+  'validacao_divergente',
 ]
 
 export async function sincronizarSaidaOffline(input: SaidaOfflineInput): Promise<void> {
@@ -473,8 +497,8 @@ export async function sincronizarSaidaOffline(input: SaidaOfflineInput): Promise
       motoboyId: input.motoboyId,
       entregaIds: input.entregaIds,
       documentHash: input.documentHash,
-      caixaStrokes: input.caixaStrokes,
-      motoboyStrokes: input.motoboyStrokes,
+      validacao: input.validacao,
+      motivoExcecao: input.motivoExcecao,
       ocorridoEmLocal: input.ocorridoEmLocal,
       envelope: input.envelope,
     },
@@ -726,6 +750,15 @@ export type AssinaturaDoRomaneio = {
    * aconteceu no `R-000013`.
    */
   papelNoMomento: 'caixa' | 'gerente' | 'admin' | null
+  /**
+   * 1 = com traço manuscrito (histórico); 2 = sem traço (4B). A tela e o
+   * PDF escolhem o que desenhar por AQUI, e nunca por "strokes veio nulo":
+   * ausência de dado não é afirmação sobre a forma do documento.
+   */
+  versaoEvidencia: 1 | 2
+  /** Na exceção: o gerente que autenticou no lugar do motoboy. */
+  validadorNome: string | null
+  motivoExcecao: MotivoExcecao | null
 }
 
 export type CustodiaDoVale = {
@@ -753,6 +786,9 @@ type LinhaAssinatura = {
   mototaxistas: { nome: string; agencias: { nome: string } | null } | null
   motoboy_credenciais: { public_id: string } | null
   papel_no_momento: 'caixa' | 'gerente' | 'admin' | null
+  versao_evidencia: 1 | 2
+  motivo_excecao: MotivoExcecao | null
+  validador: { nome: string } | null
 }
 
 // `profiles` VAI COM HINT DESDE 2026-09-12, e isto é conserto de um
@@ -773,8 +809,11 @@ type LinhaAssinatura = {
 // daqui, então seguem sem hint.
 const SELECT_ASSINATURAS =
   'romaneio_id, tipo_signatario, strokes, auth_method, signature_hash, ' +
-  'assinado_em_local, capturado_em, ip, papel_no_momento, ' +
+  'assinado_em_local, capturado_em, ip, papel_no_momento, versao_evidencia, motivo_excecao, ' +
   'profiles!assinaturas_user_id_fkey(nome), mototaxistas(nome, agencias(nome)), ' +
+  // O ALIAS é obrigatório: sem ele o gerente viria de novo como
+  // `profiles` e sobrescreveria o nome de quem confirmou pela farmácia.
+  'validador:profiles!assinaturas_validador_profile_id_fkey(nome), ' +
   'motoboy_credenciais(public_id)'
 
 function mapAssinatura(linha: LinhaAssinatura): AssinaturaDoRomaneio {
@@ -793,6 +832,9 @@ function mapAssinatura(linha: LinhaAssinatura): AssinaturaDoRomaneio {
     ip: linha.ip,
     signatureHash: linha.signature_hash,
     papelNoMomento: linha.papel_no_momento,
+    versaoEvidencia: linha.versao_evidencia,
+    validadorNome: linha.validador?.nome ?? null,
+    motivoExcecao: linha.motivo_excecao,
   }
 }
 
@@ -1108,4 +1150,8 @@ export const AUTH_METHOD_LABEL: Record<string, string> = {
   sessao_autenticada: 'Sessão autenticada',
   physical_card_pin_server_verified: 'Cartão físico + PIN',
   physical_card_pin_offline_then_verified: 'Cartão físico + PIN, validado após sincronizar',
+  // 4B — sem traço
+  sessao_confirmacao_explicita: 'Confirmação na sessão',
+  gerente_card_pin_server_verified: 'Cartão + PIN do gerente',
+  gerente_card_pin_offline_then_verified: 'Cartão + PIN do gerente, validado após sincronizar',
 }

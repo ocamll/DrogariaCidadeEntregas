@@ -31,6 +31,8 @@
 // A chave AES existe por milissegundos na memória e é descartada; o que
 // fica gravado é só a versão envolvida pelo RSA.
 
+import type { MotivoExcecao, ValidacaoDaSaida } from './excecaoDoGerente'
+
 const ALGORITMO_RSA = { name: 'RSA-OAEP', hash: 'SHA-256' } as const
 
 export type EnvelopeSelado = {
@@ -46,7 +48,7 @@ export type EnvelopeSelado = {
  * O que vai selado. Chamava-se `SegredosDaSaida` até a 2C.5; o retorno
  * usa o MESMO envelope, então o nome deixou de dizer a verdade.
  */
-export type SegredosDoRomaneio = {
+type SegredosComuns = {
   // o que é de fato secreto
   pin: string
   credentialToken: string
@@ -87,6 +89,29 @@ export type SegredosDoRomaneio = {
    */
   tipo: 'saida' | 'retorno'
 }
+
+/**
+ * UNIÃO desde o 4B (2026-09-12), e a assimetria é o estado real:
+ *
+ *   saída    versão 2 — sem traço; carrega QUEM validou e POR QUÊ
+ *   retorno  versão 1 — ainda com os traços, até a etapa dele
+ *
+ * `validacao` e `motivoExcecao` vão DENTRO do envelope pelo mesmo motivo
+ * que `tipo` foi: o cliente não consegue reabrir nem reescrever o
+ * envelope, então a Edge Function COMPARA com o corpo em vez de
+ * acreditar. Fora dele, trocar "motoboy" por "gerente" no caminho seria
+ * editar um campo em claro.
+ *
+ * Sendo união, "saída sem modo de validação" não compila — a mesma
+ * escolha do `tipo` obrigatório da 2D.6.
+ */
+export type SegredosDoRomaneio =
+  | (SegredosComuns & {
+      tipo: 'saida'
+      validacao: ValidacaoDaSaida
+      motivoExcecao: MotivoExcecao | null
+    })
+  | (SegredosComuns & { tipo: 'retorno' })
 
 function paraBase64(buffer: ArrayBuffer): string {
   const bytes = new Uint8Array(buffer)
@@ -240,6 +265,55 @@ async function calcularOfflineEventHash(entrada: {
     JSON.stringify(entrada.assinaturaMotoboyStrokes),
     entrada.ocorridoEmLocal,
     entrada.geolocalizacao === null ? '-' : JSON.stringify(entrada.geolocalizacao),
+  ]
+  const bytes = new TextEncoder().encode(partes.join('|'))
+  const digest = await crypto.subtle.digest('SHA-256', bytes)
+  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
+}
+
+// =====================================================================
+// O HASH DO EVENTO OFFLINE DA SAÍDA — versão 2 (4B, 2026-09-12)
+//
+//   OEV2|documentHash|romaneioId|saida|validacao|motivoExcecao ou '-'|
+//        motoboyId|ocorridoEmLocal
+//
+// SAEM os traços, que não existem mais na saída, e a geolocalização, que
+// era vestigial desde 2026-09-04. FICAM o relógio do balcão e a
+// modalidade de autorização: o que viaja no corpo da requisição e NÃO
+// está no canônico, e que por isso precisa estar preso ao envelope.
+//
+// O motoboy entra porque, na exceção, ele é ESCOLHIDO na tela e não sai
+// do cartão — trocá-lo no corpo mantendo o envelope tem que ser recusado
+// como payload alterado.
+//
+// GÊMEA de uma função com o mesmo nome em
+// `supabase/functions/sync-romaneio/index.ts`. Os tipos da assinatura são
+// primitivos DE PROPÓSITO, iguais nos dois arquivos: o spec extrai o
+// texto da Edge Function e o compila sozinho, e um tipo importado não
+// existiria lá. Mexeu numa, mexe na outra — `scripts/offline-hash-v2.spec.mts`
+// confere as duas contra digests congelados antes delas.
+//
+// A versão 1, logo acima, FICA: o retorno ainda sela com traços até a
+// etapa dele, e trocar as duas de uma vez quebraria a sincronização do
+// retorno offline sem motivo.
+// =====================================================================
+export async function calcularOfflineEventHashSaidaV2(entrada: {
+  documentHash: string
+  romaneioId: string
+  validacao: string
+  motivoExcecao: string | null
+  motoboyId: string
+  ocorridoEmLocal: string
+}): Promise<string> {
+  const partes = [
+    'OEV2',
+    entrada.documentHash,
+    entrada.romaneioId.toLowerCase(),
+    'saida',
+    entrada.validacao,
+    entrada.motivoExcecao ?? '-',
+    entrada.motoboyId.toLowerCase(),
+    entrada.ocorridoEmLocal,
   ]
   const bytes = new TextEncoder().encode(partes.join('|'))
   const digest = await crypto.subtle.digest('SHA-256', bytes)
