@@ -725,7 +725,14 @@ export function useValesParaSaida(lojaId: string) {
 // =====================================================================
 
 export type AssinaturaDoRomaneio = {
-  tipoSignatario: 'caixa' | 'motoboy'
+  /**
+   * O SLOT, lido da linha e nunca fixado. A farmácia assina a saída como
+   * `caixa` e o retorno como `responsavel_loja` (decisão de 2026-08-19, e
+   * os dois literais estão dentro do hash). Para saber se é o lado da
+   * farmácia, pergunte "não é motoboy" — `ehDaFarmacia` —, nunca
+   * `=== 'caixa'`: assim o retorno saía com o nome de quem recebeu em "—".
+   */
+  tipoSignatario: 'caixa' | 'responsavel_loja' | 'motoboy'
   strokes: unknown
   nome: string
   agenciaNome: string | null
@@ -770,9 +777,28 @@ export type CustodiaDoVale = {
   assinaturas: AssinaturaDoRomaneio[]
 }
 
+/** Qualquer slot que não seja o do motoboy é o lado da farmácia. */
+export function ehDaFarmacia(assinatura: { tipoSignatario: string }): boolean {
+  return assinatura.tipoSignatario !== 'motoboy'
+}
+
+/** Um pouco do retorno, ao lado da saída, na custódia do vale. */
+export type ResumoDoRetorno = {
+  romaneioId: string
+  numero: string
+  modo: 'online' | 'offline_sincronizada'
+  seladoEm: string | null
+  ocorridoEmLocal: string | null
+}
+
+export type CustodiaDoValeComRetorno = CustodiaDoVale & {
+  /** Nulo enquanto o vale não voltou — ou voltou num retorno em conflito. */
+  retorno: ResumoDoRetorno | null
+}
+
 type LinhaAssinatura = {
   romaneio_id: string
-  tipo_signatario: 'caixa' | 'motoboy'
+  tipo_signatario: 'caixa' | 'responsavel_loja' | 'motoboy'
   strokes: unknown
   auth_method: string | null
   signature_hash: string | null
@@ -818,9 +844,9 @@ function mapAssinatura(linha: LinhaAssinatura): AssinaturaDoRomaneio {
     tipoSignatario: linha.tipo_signatario,
     strokes: linha.strokes,
     nome:
-      linha.tipo_signatario === 'caixa'
-        ? (linha.profiles?.nome ?? '—')
-        : (linha.mototaxistas?.nome ?? '—'),
+      linha.tipo_signatario === 'motoboy'
+        ? (linha.mototaxistas?.nome ?? '—')
+        : (linha.profiles?.nome ?? '—'),
     agenciaNome: linha.mototaxistas?.agencias?.nome ?? null,
     credencialPublicId: linha.motoboy_credenciais?.public_id ?? null,
     authMethod: linha.auth_method,
@@ -835,48 +861,34 @@ function mapAssinatura(linha: LinhaAssinatura): AssinaturaDoRomaneio {
   }
 }
 
-// Caixa antes de motoboy, sempre — é a ordem em que a saída aconteceu.
+// Farmácia antes de motoboy, sempre — nos dois documentos.
 function ordemDeAssinatura(a: AssinaturaDoRomaneio): number {
-  return a.tipoSignatario === 'caixa' ? 0 : 1
+  return ehDaFarmacia(a) ? 0 : 1
 }
 
 // Uma query pra todos os vales da tela, nunca uma por linha: a lista de
 // "Hoje" pagina de 100 em 100, e cem requisições travariam o PC do caixa
 // antes de o dado ser o problema.
-async function buscarCustodias(entregaIds: string[]): Promise<Map<string, CustodiaDoVale>> {
+async function buscarCustodias(
+  entregaIds: string[]
+): Promise<Map<string, CustodiaDoValeComRetorno>> {
   if (entregaIds.length === 0) return new Map()
 
   const { data: vinculos, error: erroVinculo } = await supabase
     .from('romaneio_entregas')
     .select(
-      // `!inner` + filtro por tipo, e isto NÃO é otimização.
-    //
-    // Desde 2026-08-25 existem romaneios de RETORNO, e eles também
-    // ligam as entregas em `romaneio_entregas`. Sem o filtro, cada vale
-    // passou a trazer DUAS linhas — e o `Map` abaixo é chaveado por
-    // `entrega_id`, então a última ganhava: o retorno substituía a
-    // saída, em silêncio.
-    //
-    // O sintoma que apareceu no uso foi `R$ NaN` na página do romaneio
-    // (o payload do retorno não tem `valor_compra_cents` — ele assina só
-    // o que ACRESCENTA), mas o defeito era outro: a custódia do vale
-    // deixou de mostrar quem LEVOU o vale.
-    //
-    // O chevron do vale responde "quem tirou este vale da farmácia", e
-    // isso é a saída. Quando o retorno tiver tela e PDF próprios
-    // (etapa 9), ele entra AO LADO — nunca por cima.
-    'entrega_id, romaneios!inner(id, numero, tipo, status, modo, selado_em, ocorrido_em_local, recebido_em_servidor, final_hash)'
+      'entrega_id, romaneios!inner(id, numero, tipo, status, modo, selado_em, ocorrido_em_local, recebido_em_servidor, final_hash)'
     )
     .in('entrega_id', entregaIds)
-    .eq('romaneios.tipo', 'saida')
 
   if (erroVinculo) throw erroVinculo
 
-  const linhas = vinculos as unknown as Array<{
+  const todas = vinculos as unknown as Array<{
     entrega_id: string
     romaneios: {
       id: string
       numero: string
+      tipo: 'saida' | 'retorno'
       status: 'selado' | 'conflito'
       modo: 'online' | 'offline_sincronizada'
       selado_em: string | null
@@ -885,6 +897,31 @@ async function buscarCustodias(entregaIds: string[]): Promise<Map<string, Custod
       final_hash: string | null
     } | null
   }>
+
+  // SAÍDA E RETORNO EM MAPAS SEPARADOS, e isto NÃO é detalhe.
+  //
+  // Desde 2026-08-25 os dois documentos ligam as entregas em
+  // `romaneio_entregas`. Até 2026-09-13 esta consulta filtrava só a saída,
+  // porque num `Map` só, chaveado por `entrega_id`, a última linha ganhava:
+  // o retorno substituía a saída em silêncio, e a custódia deixava de
+  // mostrar quem LEVOU o vale (o sintoma foi `R$ NaN` na página).
+  //
+  // O chevron continua respondendo "quem tirou este vale da farmácia" — a
+  // saída. O retorno, que agora tem página e PDF, entra AO LADO dela, num
+  // campo próprio, nunca por cima.
+  const linhas = todas.filter((l) => l.romaneios?.tipo === 'saida')
+  const retornoPorEntrega = new Map<string, ResumoDoRetorno>()
+  for (const l of todas) {
+    const r = l.romaneios
+    if (!r || r.tipo !== 'retorno' || r.status !== 'selado') continue
+    retornoPorEntrega.set(l.entrega_id, {
+      romaneioId: r.id,
+      numero: r.numero,
+      modo: r.modo,
+      seladoEm: r.selado_em,
+      ocorridoEmLocal: r.ocorrido_em_local,
+    })
+  }
 
   const romaneioIds = [...new Set(linhas.map((l) => l.romaneios?.id).filter(Boolean))] as string[]
   if (romaneioIds.length === 0) return new Map()
@@ -903,7 +940,7 @@ async function buscarCustodias(entregaIds: string[]): Promise<Map<string, Custod
     porRomaneio.set(linha.romaneio_id, lista)
   }
 
-  const resultado = new Map<string, CustodiaDoVale>()
+  const resultado = new Map<string, CustodiaDoValeComRetorno>()
   for (const linha of linhas) {
     const r = linha.romaneios
     if (!r) continue
@@ -919,6 +956,7 @@ async function buscarCustodias(entregaIds: string[]): Promise<Map<string, Custod
       assinaturas: (porRomaneio.get(r.id) ?? []).sort(
         (a, b) => ordemDeAssinatura(a) - ordemDeAssinatura(b)
       ),
+      retorno: retornoPorEntrega.get(linha.entrega_id) ?? null,
     })
   }
   return resultado
@@ -937,8 +975,15 @@ export function useCustodiaDosVales(entregaIds: string[]) {
 }
 
 export type RomaneioCompleto = CustodiaDoVale & {
-  /** `saida` | `retorno`. A página só sabe desenhar o primeiro. */
+  /** `saida` | `retorno`. Página e PDF desenham cada um com o seu layout. */
   tipo: string
+  /**
+   * Só no retorno: a saída que ele fecha. O número é buscado à parte e é
+   * rótulo ("referente à Saída R-000039") — quem amarra os dois documentos
+   * é o `saida_hash` dentro do DCRR1, não este campo.
+   */
+  saidaRomaneioId: string | null
+  saidaNumero: string | null
   lojaNome: string | null
   documentHash: string
   canonico: string | null
@@ -966,7 +1011,7 @@ const SELECT_ROMANEIO =
   // que estava desenhando um retorno com o layout da saída, e o
   // resultado era `R$ NaN` em vez de uma recusa.
   'id, numero, tipo, status, modo, selado_em, ocorrido_em_local, recebido_em_servidor, ' +
-  'final_hash, document_hash, canonico, payload, conflito, ip, ' +
+  'final_hash, document_hash, canonico, payload, conflito, ip, romaneio_saida_id, ' +
   // Os quatro relógios da corrida. Existem desde 2026-08-10 e nunca
   // tiveram tela: são eles que dão retirada, retorno e, mais pra frente,
   // tempo médio de entrega. O do SERVIDOR é o que vale como fato
@@ -976,12 +1021,38 @@ const SELECT_ROMANEIO =
   'corridas(saida_em, saida_em_local, retorno_em, retorno_em_local, status), ' +
   'lojas(nome), profiles(nome)'
 
+// O número da saída de cada retorno, numa consulta só.
+//
+// Consulta À PARTE, e não um embed `romaneios!…(numero)` na mesma query: a
+// FK é da tabela para ela mesma, e esta seleção é a da página e da sangria
+// — um embed ambíguo (PGRST201) já derrubou as duas uma vez (item 107).
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
-function mapRomaneio(r: any, assinaturas: AssinaturaDoRomaneio[]): RomaneioCompleto {
+async function buscarNumerosDasSaidas(linhas: any[]): Promise<Map<string, string>> {
+  const ids = [
+    ...new Set(
+      linhas
+        .filter((r) => r.tipo === 'retorno' && r.romaneio_saida_id)
+        .map((r) => r.romaneio_saida_id as string)
+    ),
+  ]
+  if (ids.length === 0) return new Map()
+  const { data, error } = await supabase.from('romaneios').select('id, numero').in('id', ids)
+  if (error) throw error
+  return new Map((data as Array<{ id: string; numero: string }>).map((s) => [s.id, s.numero]))
+}
+
+function mapRomaneio(
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  r: any,
+  assinaturas: AssinaturaDoRomaneio[],
+  numerosDasSaidas: Map<string, string>
+): RomaneioCompleto {
   return {
     romaneioId: r.id,
     numero: r.numero,
     tipo: r.tipo,
+    saidaRomaneioId: r.romaneio_saida_id ?? null,
+    saidaNumero: r.romaneio_saida_id ? (numerosDasSaidas.get(r.romaneio_saida_id) ?? null) : null,
     status: r.status,
     modo: r.modo,
     seladoEm: r.selado_em,
@@ -1027,7 +1098,11 @@ async function buscarRomaneio(romaneioId: string): Promise<RomaneioCompleto | nu
     .eq('romaneio_id', romaneioId)
   if (erroAssinatura) throw erroAssinatura
 
-  return mapRomaneio(data, (assinaturas as unknown as LinhaAssinatura[]).map(mapAssinatura))
+  return mapRomaneio(
+    data,
+    (assinaturas as unknown as LinhaAssinatura[]).map(mapAssinatura),
+    await buscarNumerosDasSaidas([data])
+  )
 }
 
 export function useRomaneio(romaneioId: string | null) {
@@ -1076,17 +1151,18 @@ async function buscarRomaneiosRecebidosEm(filtro: {
   let q = supabase
     .from('romaneios')
     .select(SELECT_ROMANEIO)
-    // SÓ SAÍDAS, e esta linha impede o pior dos três defeitos irmãos.
+    // SAÍDA E RETORNO, desde 2026-09-13.
     //
-    // A sangria GERA PDF e MANDA PRO DRIVE. Sem o filtro, um romaneio de
-    // retorno seria desenhado com o layout da saída — valores vindo de
-    // campos que o payload do retorno não tem — e arquivado nas duas
-    // vias, na pasta de custódia, como se fosse o documento da retirada.
-    // Errado na tela é feio; errado no Drive é um documento de custódia
-    // falso, e ninguém revisa pasta de arquivo morto.
+    // Até aqui havia `.eq('tipo', 'saida')`, e ele impedia o pior dos três
+    // defeitos irmãos: a sangria GERA PDF e MANDA PRO DRIVE, e um retorno
+    // desenhado com o layout da saída — valores vindo de campos que o
+    // payload dele não tem — iria para a pasta de custódia como se fosse o
+    // documento da retirada.
     //
-    // O retorno volta a entrar aqui quando tiver PDF próprio (etapa 9).
-    .eq('tipo', 'saida')
+    // O filtro saiu porque o retorno ganhou PDF próprio: `montarRomaneioPdf`
+    // escolhe o layout por `tipo`, e `romaneio-retorno-pdf.spec.mts` prova
+    // que o retorno nunca imprime `R$ NaN`. Os dois documentos têm números
+    // da mesma sequência, então os nomes de arquivo não colidem na pasta.
     .gte('recebido_em_servidor', inicio.toISOString())
     .lt('recebido_em_servidor', fim.toISOString())
     .order('recebido_em_servidor', { ascending: true })
@@ -1122,7 +1198,8 @@ async function buscarRomaneiosRecebidosEm(filtro: {
     porRomaneio.set(linha.romaneio_id, lista)
   }
 
-  return linhas.map((r) => mapRomaneio(r, porRomaneio.get(r.id) ?? []))
+  const numerosDasSaidas = await buscarNumerosDasSaidas(linhas)
+  return linhas.map((r) => mapRomaneio(r, porRomaneio.get(r.id) ?? [], numerosDasSaidas))
 }
 
 export function useRomaneiosRecebidosEm(filtro: { data: string; lojaId: string }) {

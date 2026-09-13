@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import {
   AUTH_METHOD_LABEL,
+  ehDaFarmacia,
   type AssinaturaDoRomaneio,
-  type CustodiaDoVale,
+  type CustodiaDoValeComRetorno,
 } from '@/data/romaneios'
 import { rotuloDoPapelNoMomento } from '@/lib/papeis'
 import { MOTIVO_EXCECAO_LABEL } from '@/lib/excecaoDoGerente'
@@ -210,11 +211,13 @@ export function BlocoAssinatura({ assinatura }: { assinatura: AssinaturaDoRomane
 }
 
 // O bloco que aparece dentro do vale quando o chevron abre.
-export function CustodiaDoValeDetalhe({ custodia }: { custodia: CustodiaDoVale }) {
+export function CustodiaDoValeDetalhe({ custodia }: { custodia: CustodiaDoValeComRetorno }) {
   const [verDocumento, setVerDocumento] = useState(false)
+  const [verRetorno, setVerRetorno] = useState(false)
 
-  const caixa = custodia.assinaturas.find((a) => a.tipoSignatario === 'caixa')
-  const motoboy = custodia.assinaturas.find((a) => a.tipoSignatario === 'motoboy')
+  const caixa = custodia.assinaturas.find(ehDaFarmacia)
+  const motoboy = custodia.assinaturas.find((a) => !ehDaFarmacia(a))
+  const retorno = custodia.retorno
 
   return (
     <div className="flex flex-col gap-4 rounded-lg border bg-muted/30 p-4">
@@ -269,6 +272,38 @@ export function CustodiaDoValeDetalhe({ custodia }: { custodia: CustodiaDoVale }
           {caixa && <BlocoAssinatura assinatura={caixa} />}
           {motoboy && <BlocoAssinatura assinatura={motoboy} />}
         </div>
+      )}
+
+      {/* O RETORNO, AO LADO da saída e nunca por cima: o chevron continua
+          respondendo "quem tirou este vale da farmácia". Vale que ainda não
+          voltou não mostra nada — não há documento a apontar. */}
+      {retorno && (
+        <div className="flex flex-wrap items-center gap-2 border-t pt-3">
+          <span className="font-medium">Retorno {retorno.numero}</span>
+          <Badge variant="secondary">Selado</Badge>
+          {retorno.modo === 'offline_sincronizada' && (
+            <Badge variant="outline">Registrado offline</Badge>
+          )}
+          {retorno.ocorridoEmLocal && (
+            <span className="text-xs text-foreground/70">
+              {new Date(retorno.ocorridoEmLocal).toLocaleString('pt-BR')}
+            </span>
+          )}
+          <Button variant="ghost" size="sm" onClick={() => setVerRetorno(true)}>
+            Ver retorno
+          </Button>
+        </div>
+      )}
+
+      {retorno && (
+        <Dialog open={verRetorno} onOpenChange={setVerRetorno}>
+          <DialogContent className="max-h-[85vh] overflow-y-auto sm:max-w-4xl">
+            <DialogHeader>
+              <DialogTitle className="sr-only">Romaneio de retorno {retorno.numero}</DialogTitle>
+            </DialogHeader>
+            <Romaneio romaneioId={retorno.romaneioId} onVoltar={() => setVerRetorno(false)} />
+          </DialogContent>
+        </Dialog>
       )}
 
       {/* Dialog e não navegação: `EntregasTable` aparece em três telas

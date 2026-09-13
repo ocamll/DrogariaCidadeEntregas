@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { INSUCESSO_MOTIVO_LABEL as INSUCESSO_MOTIVO_LABEL_LIB } from '@/lib/documentoDoRetorno'
 
 // Tetos explícitos (nossos, não o `max-rows` do servidor). Dropdown de
 // cadastro é limitado pela realidade; as duas listas operacionais
@@ -141,12 +142,10 @@ export function useEntregasPendentesSemCorrida() {
 
 export type InsucessoMotivo = 'ausente' | 'endereco_errado' | 'recusou' | 'outro'
 
-export const INSUCESSO_MOTIVO_LABEL: Record<InsucessoMotivo, string> = {
-  ausente: 'Cliente ausente',
-  endereco_errado: 'Endereço errado',
-  recusou: 'Cliente recusou',
-  outro: 'Outro',
-}
+// O mapa mora em `lib/documentoDoRetorno.ts` desde 2026-09-13: o PDF do
+// retorno precisa dele e não pode importar desta camada, que carrega o
+// cliente Supabase. Reexportado aqui para continuar havendo um só.
+export const INSUCESSO_MOTIVO_LABEL: Record<InsucessoMotivo, string> = INSUCESSO_MOTIVO_LABEL_LIB
 
 export const INSUCESSO_MOTIVO_OPTIONS = Object.entries(INSUCESSO_MOTIVO_LABEL) as Array<
   [InsucessoMotivo, string]

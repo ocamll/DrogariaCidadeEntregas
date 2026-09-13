@@ -2082,7 +2082,12 @@ código enfileira `fechamento_corrida`.**
    Leia a regra do CONGELAMENTO antes de mexer no componente: ela é a
    invariante de UI mais importante da etapa, e é ela que impede a tela
    de assinar um documento e mandar outro.
-9. Fluxo excepcional (online), depois PDF do retorno + Drive
+9. Fluxo excepcional, depois PDF do retorno + Drive. **O fluxo excepcional
+   virou o caminho do gerente no 4B** (cartão e PIN do gerente, online e
+   offline — item 108 do NOTAS). **Página, PDF e sangria do retorno
+   CONSTRUÍDOS em 2026-09-13** (item 110): leitura comum em
+   `lib/documentoDoRetorno.ts`, documentos lidos das linhas `d` do canônico
+   assinado, e a via da agência sem como o cliente pagou.
 
 **A ordem não é burocracia.** A tela é a parte fácil; o contrato canônico
 entre navegador e Postgres é o que precisa estar fechado primeiro. E o
@@ -3698,8 +3703,9 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
     25/08. O caminho feliz rodou nos dois modos (`R-000023` e `R-000025`
     online, `R-000026` `offline_sincronizada`) e o placar de integridade
     do retorno saiu de `0 · 0 · 0` para `3 · 3 · 0`. As decisões estão na
-    seção "O Romaneio de Retorno" acima. Falta a etapa 9 daquela frente: o
-    fluxo excepcional (online) e o PDF do retorno + Drive.
+    seção "O Romaneio de Retorno" acima. A etapa 9 daquela frente fechou
+    em 2026-09-13: o fluxo excepcional é o caminho do gerente do 4B, e o
+    retorno tem página, PDF e sangria próprios (item 110 do NOTAS).
 
 ### A sequência pré-V1 revisada — decidida em 2026-09-08
 
@@ -3718,8 +3724,13 @@ Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
       ├ credencial do gerente + "Meu cartão"            ✓ 2026-09-12
       ├ SAÍDA v2 (online e offline, motoboy e gerente)  ✓ 2026-09-12 (28 · 28 · 0)
       ├ RETORNO v2 (online e offline, motoboy e gerente) ✓ 2026-09-12 (32 · 32 · 0)
-      └ limpeza: CampoAssinatura, signature_pad, hash v1 ✓ 2026-09-12
-4C. continuidade offline: abrir o app sem rede (Service Worker + Cache API), telas no estado local e E12 — obrigatória antes do piloto   ← AQUI
+      ├ limpeza: CampoAssinatura, signature_pad, hash v1 ✓ 2026-09-12
+      └ fechamento contra o desenho (item 110 do NOTAS)   ← AQUI
+          ├ página, PDF e sangria do Romaneio de Retorno   ✓ 2026-09-13
+          ├ pendência "Redefinir PIN" (§5)                 SQL proposto, esperando confirmação
+          ├ aceite complementar: cartão perdido e recusas  roteiro pronto, não rodado
+          └ republicar a sync-romaneio                     pendente (sem mudança de comportamento)
+4C. continuidade offline: abrir o app sem rede (Service Worker + Cache API), telas no estado local e E12 — obrigatória antes do piloto — desenho v1 em docs/desenho-4c-2026-09-13.md, começa depois do fechamento do 4B
 5.  conferência diária calculada, com exceções e aprovação versionada
 6.  painel da agência e conciliação por vale, por quinzena
 7A. staging e ensaio do corte

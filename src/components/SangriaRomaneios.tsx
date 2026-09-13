@@ -9,7 +9,8 @@ import { Consulta } from '@/components/Consulta'
 import { derivarEstado } from '@/lib/estadoDeConsulta'
 
 // A sangria dos romaneios: no fim do dia, uma passada que arquiva no
-// Drive tudo que saiu.
+// Drive os documentos de custódia do dia — saídas e, desde 2026-09-13,
+// retornos, cada um com o seu PDF.
 //
 // POR QUE ELA EXISTE, se já há o botão na página do romaneio
 //
@@ -113,11 +114,11 @@ export function SangriaRomaneios({ data, lojaId }: { data: string; lojaId: strin
       }
 
       // "Subiu pra pasta de ontem" parece erro pra quem não sabe por quê.
-      // Acontece com saída offline: ela é varrida no dia em que o servidor
-      // soube dela, e arquivada no dia em que aconteceu no balcão.
+      // Acontece com romaneio offline: ele é varrido no dia em que o
+      // servidor soube dele, e arquivado no dia em que aconteceu no balcão.
       const nota =
         emOutroDia > 0
-          ? ` ${emOutroDia} deles foi arquivado na pasta de outro dia — é uma saída registrada offline, que pertence ao dia em que aconteceu no balcão.`
+          ? ` ${emOutroDia} deles foi arquivado na pasta de outro dia — é um romaneio registrado offline, que pertence ao dia em que aconteceu no balcão.`
           : ''
       setResultado(
         `${romaneios.length} romaneio(s), ${arquivos} arquivos em ${NOME_DA_PASTA_ROMANEIOS}.${nota}`
@@ -147,7 +148,7 @@ export function SangriaRomaneios({ data, lojaId }: { data: string; lojaId: strin
 
         <Consulta
           estado={estado}
-          // Sem `vazio`: "Nenhuma saída registrada nesta data" já é dita
+          // Sem `vazio`: "Nenhum romaneio registrado nesta data" já é dita
           // ao lado do botão, e ali ela convive com a contagem. Duplicar
           // aqui daria duas frases pro mesmo fato.
           aoRecarregar={() => void consulta.refetch()}
@@ -173,7 +174,7 @@ export function SangriaRomaneios({ data, lojaId }: { data: string; lojaId: strin
             </Button>
             <span className="text-sm text-foreground/70">
               {lista.length === 0
-                ? 'Nenhuma saída registrada nesta data.'
+                ? 'Nenhum romaneio registrado nesta data.'
                 : `${lista.length} romaneio(s) — ${lista.length * 2} arquivos.`}
             </span>
           </div>

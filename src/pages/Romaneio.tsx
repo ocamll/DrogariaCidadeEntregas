@@ -1,12 +1,18 @@
 import { useEffect, useState } from 'react'
-import { useRomaneio, quandoAconteceu } from '@/data/romaneios'
-import type { RomaneioCompleto } from '@/data/romaneios'
+import { useRomaneio, quandoAconteceu, ehDaFarmacia } from '@/data/romaneios'
+import type { AssinaturaDoRomaneio, RomaneioCompleto } from '@/data/romaneios'
 import { BlocoAssinatura } from '@/components/Custodia'
 import { baixarArquivo } from '@/lib/credencialDownload'
 import { driveConfigurado, prepararDrive } from '@/lib/googleDrive'
 import { duracaoDaCorrida } from '@/lib/datas'
 import type { ViaDoRomaneio } from '@/lib/romaneioPdf'
 import { formatBRL } from '@/lib/money'
+import {
+  lerRetorno,
+  textoDoDesfecho,
+  textoDoDocumento,
+  textoDoPagamentoRealizado,
+} from '@/lib/documentoDoRetorno'
 import { Badge } from '@/components/ui/badge'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
@@ -15,13 +21,19 @@ import { EmAndamento } from '@/components/EmAndamento'
 import { Consulta } from '@/components/Consulta'
 import { derivarEstado } from '@/lib/estadoDeConsulta'
 
-// O documento em si. Ele é a fonte da verdade da saída — o PDF, quando
-// existir, sai daqui e não o contrário.
+// O documento em si. Ele é a fonte da verdade — o PDF sai daqui e não o
+// contrário.
 //
 // Tudo que aparece nesta tela vem do SNAPSHOT gravado no romaneio, nunca
 // de uma consulta nova a `entregas`. Se um vale mudar depois (correção
 // cadastral, por exemplo), esta tela continua mostrando o que foi
 // assinado — que é o ponto inteiro de existir um documento selado.
+//
+// DOIS DOCUMENTOS, UM LAYOUT CADA. Até 2026-09-13 a página só sabia desenhar
+// a saída e recusava o retorno. O payload do retorno não tem valores nem
+// endereço — o DCRR1 assina só o que ACRESCENTA —, e desenhá-lo com o layout
+// da saída imprimia `R$ NaN`. Agora cada um tem o seu corpo, e o que é comum
+// (botões, custódia, integridade) fica de fora dos dois.
 
 type ValeDoPayload = {
   entrega_id: string
@@ -191,45 +203,65 @@ function RomaneioCarregado({
     }
   }
 
-  // ESTA PÁGINA SÓ SABE DESENHAR A SAÍDA, e desde 2026-08-25 existem
-  // romaneios de RETORNO.
-  //
-  // O payload do retorno não tem `valor_compra_cents` nem
-  // `valor_entrega_cents` — de propósito: o DCRR1 assina só o que
-  // ACRESCENTA, e os valores já foram selados na saída. Desenhá-lo aqui
-  // somava `undefined` e imprimia **R$ NaN**, que é a tela afirmando um
-  // número que ninguém calculou.
-  //
-  // As consultas já não trazem retorno pra cá (custódia do vale e
-  // sangria filtram `tipo = 'saida'`), então isto é a segunda barreira —
-  // a página recebe um id, e id vem de qualquer lugar. Recusar é a única
-  // resposta honesta enquanto o retorno não tiver tela própria (etapa 9).
-  if (romaneio.tipo === 'retorno') {
-    return (
-      <div className="mx-auto max-w-2xl p-4">
-        <Button variant="ghost" className="mb-3" onClick={onVoltar}>
+  // O slot da farmácia é `caixa` na saída e `responsavel_loja` no retorno —
+  // os dois literais estão dentro do hash e nunca mudam. "Não é motoboy" é
+  // a pergunta certa; `=== 'caixa'` deixava o retorno sem quem recebeu.
+  const farmacia = romaneio.assinaturas.find(ehDaFarmacia)
+  const motoboy = romaneio.assinaturas.find((a) => !ehDaFarmacia(a))
+
+  return (
+    // Sem `mx-auto max-w-3xl` aqui: quem dá o container é a casca da
+    // consulta, pra a mensagem de indisponível cair na mesma coluna que
+    // o documento cairia.
+    <div>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+        <Button variant="ghost" onClick={onVoltar}>
           ← Voltar
         </Button>
-        <p className="text-sm text-muted-foreground">
-          <strong>{romaneio.numero}</strong> é um Romaneio de <strong>Retorno</strong>, e a tela dele
-          ainda não existe — esta aqui desenha o documento da saída, que tem outros campos. O
-          retorno está selado e íntegro no servidor; o que falta é a página.
-        </p>
+        {/* Duas vias porque os destinatários são dois: a da agência omite
+            o que é dado comercial da farmácia — o valor da compra na saída,
+            e como o cliente pagou no retorno. */}
+        <div className="flex flex-wrap gap-2">
+          <Button variant="outline" disabled={!!ocupado} onClick={() => void baixar('farmacia')}>
+            {ocupado === 'farmacia' ? <EmAndamento>Gerando</EmAndamento> : 'PDF — via da farmácia'}
+          </Button>
+          <Button variant="outline" disabled={!!ocupado} onClick={() => void baixar('agencia')}>
+            {ocupado === 'agencia' ? <EmAndamento>Gerando</EmAndamento> : 'PDF — via da agência'}
+          </Button>
+          {/* Sem VITE_GOOGLE_CLIENT_ID o botão não aparece: prometer envio
+              num ambiente que não tem como autorizar seria a tela
+              afirmando o que não sabe. */}
+          {driveConfigurado() && (
+            <Button variant="outline" disabled={!!ocupado} onClick={() => void enviarParaDrive()}>
+              {ocupado === 'drive' ? <EmAndamento>Enviando</EmAndamento> : 'Enviar ao Drive'}
+            </Button>
+          )}
+        </div>
       </div>
-    )
-  }
+      {erroPdf && <p className="mb-3 text-sm text-destructive">{erroPdf}</p>}
+      {enviadoAoDrive && <p className="mb-3 text-sm text-foreground/70">{enviadoAoDrive}</p>}
 
+      {romaneio.tipo === 'retorno' ? (
+        <DocumentoRetorno romaneio={romaneio} farmacia={farmacia} motoboy={motoboy} />
+      ) : (
+        <DocumentoSaida romaneio={romaneio} farmacia={farmacia} motoboy={motoboy} />
+      )}
+    </div>
+  )
+}
+
+type PropsDoDocumento = {
+  romaneio: RomaneioCompleto
+  farmacia: AssinaturaDoRomaneio | undefined
+  motoboy: AssinaturaDoRomaneio | undefined
+}
+
+function DocumentoSaida({ romaneio, farmacia, motoboy }: PropsDoDocumento) {
   const payload = romaneio.payload as { vales?: ValeDoPayload[] } | null
   const vales = payload?.vales ?? []
   const totalEntrega = vales.reduce((s, v) => s + v.valor_entrega_cents, 0)
   const totalCompra = vales.reduce((s, v) => s + v.valor_compra_cents, 0)
   const totalVales = vales.reduce((s, v) => s + v.quantidade_vales, 0)
-
-  // `'caixa'` é o nome do SLOT — o lado da farmácia —, e está dentro do
-  // hash da assinatura, então nunca muda. O que a TELA diz é outra coisa:
-  // ver os rótulos abaixo.
-  const caixa = romaneio.assinaturas.find((a) => a.tipoSignatario === 'caixa')
-  const motoboy = romaneio.assinaturas.find((a) => a.tipoSignatario === 'motoboy')
 
   // Os relógios do retorno têm TRÊS estados que não podem se parecer, e
   // um campo vazio diria a mesma coisa nos três:
@@ -254,229 +286,366 @@ function RomaneioCarregado({
         : 'não registrado'
 
   return (
-    // Sem `mx-auto max-w-3xl` aqui: quem dá o container é a casca da
-    // consulta, pra a mensagem de indisponível cair na mesma coluna que
-    // o documento cairia.
-    <div>
-      <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
-        <Button variant="ghost" onClick={onVoltar}>
-          ← Voltar
-        </Button>
-        {/* Duas vias porque os destinatários são dois: a da agência omite
-            o valor da compra, que é dado comercial da farmácia e não
-            entra no acerto. */}
-        <div className="flex flex-wrap gap-2">
-          <Button variant="outline" disabled={!!ocupado} onClick={() => void baixar('farmacia')}>
-            {ocupado === 'farmacia' ? <EmAndamento>Gerando</EmAndamento> : 'PDF — via da farmácia'}
-          </Button>
-          <Button variant="outline" disabled={!!ocupado} onClick={() => void baixar('agencia')}>
-            {ocupado === 'agencia' ? <EmAndamento>Gerando</EmAndamento> : 'PDF — via da agência'}
-          </Button>
-          {/* Sem VITE_GOOGLE_CLIENT_ID o botão não aparece: prometer envio
-              num ambiente que não tem como autorizar seria a tela
-              afirmando o que não sabe. */}
-          {driveConfigurado() && (
-            <Button variant="outline" disabled={!!ocupado} onClick={() => void enviarParaDrive()}>
-              {ocupado === 'drive' ? <EmAndamento>Enviando</EmAndamento> : 'Enviar ao Drive'}
-            </Button>
-          )}
-        </div>
-      </div>
-      {erroPdf && <p className="mb-3 text-sm text-destructive">{erroPdf}</p>}
-      {enviadoAoDrive && <p className="mb-3 text-sm text-foreground/70">{enviadoAoDrive}</p>}
+    <Card>
+      <CardHeader>
+        <Cabecalho titulo={`Romaneio ${romaneio.numero}`} romaneio={romaneio} />
+      </CardHeader>
 
-      <Card>
-        <CardHeader>
-          <div className="flex flex-wrap items-center gap-2">
-            <CardTitle>Romaneio {romaneio.numero}</CardTitle>
-            {romaneio.status === 'conflito' ? (
-              <Badge variant="destructive">Conflito — não selado</Badge>
-            ) : (
-              <Badge variant="secondary">Selado</Badge>
-            )}
-            {romaneio.modo === 'offline_sincronizada' && (
-              <Badge variant="outline">Registrada offline</Badge>
-            )}
+      <CardContent className="flex flex-col gap-6">
+        <section className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+          <Campo rotulo="Filial" valor={romaneio.lojaNome} />
+          <Campo rotulo="Agência" valor={motoboy?.agenciaNome ?? null} />
+          <Campo rotulo="Motoboy" valor={motoboy?.nome ?? null} />
+          {/* "Pela farmácia", não "Caixa": quem sela pode ser caixa,
+              gerente ou admin, e o sistema não impõe papel na saída. O
+              cargo real de quem assinou aparece na Custódia, vindo de
+              `papel_no_momento`. */}
+          <Campo rotulo="Pela farmácia" valor={romaneio.criadoPorNome} />
+          <Campo rotulo="IP" valor={romaneio.ip} />
+        </section>
+
+        {/* OS RELÓGIOS, em duas colunas FIXAS: balcão à esquerda,
+            servidor à direita. Antes eram um grid de fluxo automático
+            com dois campos condicionais no meio, então "Retorno
+            (balcão)" caía do lado do servidor e vice-versa conforme o
+            romaneio. A regra 8 só serve pra alguma coisa se der pra
+            comparar os dois relógios de bater o olho, e coluna que troca
+            de lado desfaz isso. Colunas explícitas — e não ordem de
+            fluxo — é o que garante o pareamento mesmo com campo opcional
+            entre eles. */}
+        <section className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+          <div className="flex flex-col gap-1">
+            <Campo rotulo="Saída (balcão)" valor={dataHora(romaneio.ocorridoEmLocal)} />
+            {/* Corrida ainda aberta é DITA, nunca omitida: campo ausente
+                e "o motoboy não voltou" não podem se parecer, e a
+                diferença é o que alguém procura ao abrir este
+                documento. */}
+            <Campo rotulo="Retorno (balcão)" valor={retornoBalcao} />
           </div>
-        </CardHeader>
+          <div className="flex flex-col gap-1">
+            <Campo rotulo="Selado (servidor)" valor={dataHora(romaneio.seladoEm)} />
+            {/* Só faz diferença quando os dois horários divergem, que é
+                exatamente o caso da saída offline. */}
+            {romaneio.modo === 'offline_sincronizada' && (
+              <Campo rotulo="Recebido (servidor)" valor={dataHora(romaneio.recebidoEmServidor)} />
+            )}
+            <Campo rotulo="Retorno (servidor)" valor={retornoServidor} />
+          </div>
+          {/* A duração usa o relógio do SERVIDOR nos dois lados —
+              misturar com o do dispositivo daria um intervalo que não
+              aconteceu. Por ser derivada dos dois, fica embaixo das duas
+              colunas, não dentro de uma delas. */}
+          <div className="sm:col-span-2">
+            <Campo
+              rotulo="Duração"
+              valor={duracaoDaCorrida(corrida?.saidaEm ?? null, corrida?.retornoEm ?? null)}
+            />
+          </div>
+        </section>
 
-        <CardContent className="flex flex-col gap-6">
-          <section className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
-            <Campo rotulo="Filial" valor={romaneio.lojaNome} />
-            <Campo rotulo="Agência" valor={motoboy?.agenciaNome ?? null} />
-            <Campo rotulo="Motoboy" valor={motoboy?.nome ?? null} />
-            {/* "Pela farmácia", não "Caixa": quem sela pode ser caixa,
-                gerente ou admin, e o sistema não impõe papel na saída. O
-                cargo real de quem assinou aparece na Custódia, vindo de
-                `papel_no_momento`. */}
-            <Campo rotulo="Pela farmácia" valor={romaneio.criadoPorNome} />
-            <Campo rotulo="IP" valor={romaneio.ip} />
-          </section>
-
-          {/* OS RELÓGIOS, em duas colunas FIXAS: balcão à esquerda,
-              servidor à direita. Antes eram um grid de fluxo automático
-              com dois campos condicionais no meio, então "Retorno
-              (balcão)" caía do lado do servidor e vice-versa conforme o
-              romaneio. A regra 8 só serve pra alguma coisa se der pra
-              comparar os dois relógios de bater o olho, e coluna que troca
-              de lado desfaz isso. Colunas explícitas — e não ordem de
-              fluxo — é o que garante o pareamento mesmo com campo opcional
-              entre eles. */}
-          <section className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
-            <div className="flex flex-col gap-1">
-              <Campo
-                rotulo="Saída (balcão)"
-                valor={
-                  romaneio.ocorridoEmLocal
-                    ? new Date(romaneio.ocorridoEmLocal).toLocaleString('pt-BR')
-                    : null
-                }
-              />
-              {/* Corrida ainda aberta é DITA, nunca omitida: campo ausente
-                  e "o motoboy não voltou" não podem se parecer, e a
-                  diferença é o que alguém procura ao abrir este
-                  documento. */}
-              <Campo rotulo="Retorno (balcão)" valor={retornoBalcao} />
-            </div>
-            <div className="flex flex-col gap-1">
-              <Campo
-                rotulo="Selado (servidor)"
-                valor={romaneio.seladoEm ? new Date(romaneio.seladoEm).toLocaleString('pt-BR') : null}
-              />
-              {/* Só faz diferença quando os dois horários divergem, que é
-                  exatamente o caso da saída offline. */}
-              {romaneio.modo === 'offline_sincronizada' && (
-                <Campo
-                  rotulo="Recebido (servidor)"
-                  valor={new Date(romaneio.recebidoEmServidor).toLocaleString('pt-BR')}
-                />
-              )}
-              <Campo rotulo="Retorno (servidor)" valor={retornoServidor} />
-            </div>
-            {/* A duração usa o relógio do SERVIDOR nos dois lados —
-                misturar com o do dispositivo daria um intervalo que não
-                aconteceu. Por ser derivada dos dois, fica embaixo das duas
-                colunas, não dentro de uma delas. */}
-            <div className="sm:col-span-2">
-              <Campo
-                rotulo="Duração"
-                valor={duracaoDaCorrida(corrida?.saidaEm ?? null, corrida?.retornoEm ?? null)}
-              />
-            </div>
-          </section>
-
-          <section>
-            <h3 className="mb-2 text-xs font-semibold tracking-wider uppercase text-foreground/70">
-              O que saiu
-            </h3>
-            <Table>
-              <TableHeader>
-                <TableRow>
-                  <TableHead>Vale</TableHead>
-                  <TableHead>Cliente</TableHead>
-                  <TableHead className="text-center">Vales</TableHead>
-                  <TableHead className="text-center">Compra</TableHead>
-                  <TableHead className="text-center">Entrega</TableHead>
-                  <TableHead className="text-center">Pagamento</TableHead>
+        <section>
+          <Subtitulo>O que saiu</Subtitulo>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Vale</TableHead>
+                <TableHead>Cliente</TableHead>
+                <TableHead className="text-center">Vales</TableHead>
+                <TableHead className="text-center">Compra</TableHead>
+                <TableHead className="text-center">Entrega</TableHead>
+                <TableHead className="text-center">Pagamento</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {vales.map((vale) => (
+                <TableRow key={vale.entrega_id}>
+                  <TableCell className="font-medium tabular-nums">{vale.numero_vale}</TableCell>
+                  <TableCell className="whitespace-normal break-words">
+                    <p className="text-sm font-medium">{vale.cliente_nome}</p>
+                    <p className="text-xs text-foreground/70">{vale.cliente_endereco}</p>
+                  </TableCell>
+                  <TableCell className="text-center tabular-nums">{vale.quantidade_vales}</TableCell>
+                  <TableCell className="text-center tabular-nums">
+                    {vale.tipo === 'transferencia' ? '—' : formatBRL(vale.valor_compra_cents)}
+                  </TableCell>
+                  <TableCell className="text-center tabular-nums">
+                    {formatBRL(vale.valor_entrega_cents)}
+                  </TableCell>
+                  <TableCell className="whitespace-normal text-center text-xs">
+                    {(vale.pagamentos_previstos ?? []).map((p) => p.forma).join(' + ') || '—'}
+                  </TableCell>
                 </TableRow>
-              </TableHeader>
-              <TableBody>
-                {vales.map((vale) => (
-                  <TableRow key={vale.entrega_id}>
-                    <TableCell className="font-medium tabular-nums">{vale.numero_vale}</TableCell>
-                    <TableCell className="whitespace-normal break-words">
-                      <p className="text-sm font-medium">{vale.cliente_nome}</p>
-                      <p className="text-xs text-foreground/70">{vale.cliente_endereco}</p>
-                    </TableCell>
-                    <TableCell className="text-center tabular-nums">
-                      {vale.quantidade_vales}
-                    </TableCell>
-                    <TableCell className="text-center tabular-nums">
-                      {vale.tipo === 'transferencia' ? '—' : formatBRL(vale.valor_compra_cents)}
-                    </TableCell>
-                    <TableCell className="text-center tabular-nums">
-                      {formatBRL(vale.valor_entrega_cents)}
-                    </TableCell>
-                    <TableCell className="whitespace-normal text-center text-xs">
-                      {(vale.pagamentos_previstos ?? []).map((p) => p.forma).join(' + ') || '—'}
-                    </TableCell>
-                  </TableRow>
-                ))}
-              </TableBody>
-            </Table>
-            <p className="mt-2 text-sm">
-              <strong>{vales.length}</strong> entrega(s) · <strong>{totalVales}</strong> vale(s) ·{' '}
-              <strong>{formatBRL(totalCompra)}</strong> em compras ·{' '}
-              <strong>{formatBRL(totalEntrega)}</strong> em teles
-            </p>
-          </section>
+              ))}
+            </TableBody>
+          </Table>
+          <p className="mt-2 text-sm">
+            <strong>{vales.length}</strong> entrega(s) · <strong>{totalVales}</strong> vale(s) ·{' '}
+            <strong>{formatBRL(totalCompra)}</strong> em compras ·{' '}
+            <strong>{formatBRL(totalEntrega)}</strong> em teles
+          </p>
+        </section>
 
-          {romaneio.status === 'conflito' ? (
-            <section className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
-              <p className="mb-2 font-medium text-destructive">
-                Esta saída não pôde ser selada.
-              </p>
-              <p>
-                Os vales já pertenciam a outra corrida quando a sincronização chegou. A retirada
-                física aconteceu, então as assinaturas ficaram guardadas neste registro — mas os
-                vales continuam com a corrida que selou primeiro. Resolver isso é decisão de gestão.
-              </p>
-              <pre className="mt-2 overflow-x-auto rounded bg-background/60 p-2 text-xs">
-                {JSON.stringify(
-                  (romaneio.conflito as { motivos?: unknown })?.motivos ?? romaneio.conflito,
-                  null,
-                  2
-                )}
-              </pre>
-            </section>
-          ) : (
-            <section>
-              <h3 className="mb-3 text-xs font-semibold tracking-wider uppercase text-foreground/70">
-                Custódia
-              </h3>
-              <div className="grid gap-6 sm:grid-cols-2">
-                {caixa && <BlocoAssinatura assinatura={caixa} />}
-                {motoboy && <BlocoAssinatura assinatura={motoboy} />}
-              </div>
-            </section>
-          )}
+        {romaneio.status === 'conflito' ? (
+          <SecaoConflito
+            romaneio={romaneio}
+            titulo="Esta saída não pôde ser selada."
+            texto="Os vales já pertenciam a outra corrida quando a sincronização chegou. A retirada física aconteceu, então a validação apresentada ficou guardada neste registro — mas os vales continuam com a corrida que selou primeiro. Resolver isso é decisão de gestão."
+          />
+        ) : (
+          <SecaoCustodia farmacia={farmacia} motoboy={motoboy} />
+        )}
 
-          <section className="border-t pt-4">
-            <h3 className="mb-2 text-xs font-semibold tracking-wider uppercase text-foreground/70">
-              Integridade
-            </h3>
-            {/* Os hashes por extenso, não abreviados: esta é a tela onde
-                alguém confere um contra o outro documento. Abreviar aqui
-                tiraria justamente a utilidade. */}
-            <div className="flex flex-col gap-1 font-mono text-[11px] break-all">
-              <p>
-                <span className="text-foreground/60">documento </span>
-                {romaneio.documentHash}
-              </p>
-              {caixa?.signatureHash && (
-                <p>
-                  <span className="text-foreground/60">assin. farmácia </span>
-                  {caixa.signatureHash}
-                </p>
-              )}
-              {motoboy?.signatureHash && (
-                <p>
-                  <span className="text-foreground/60">assin. motoboy </span>
-                  {motoboy.signatureHash}
-                </p>
-              )}
-              {romaneio.finalHash && (
-                <p className="font-semibold">
-                  <span className="font-normal text-foreground/60">envelope </span>
-                  {romaneio.finalHash}
-                </p>
-              )}
-            </div>
-          </section>
-        </CardContent>
-      </Card>
+        <SecaoIntegridade romaneio={romaneio} farmacia={farmacia} motoboy={motoboy} />
+      </CardContent>
+    </Card>
+  )
+}
+
+// O RETORNO: o que voltou, e só o que ele ACRESCENTA à saída.
+//
+// Nada de endereço nem de valor de compra/entrega: estão selados na saída, e
+// o DCRR1 os referencia pelo `saida_hash` em vez de copiá-los. A leitura sai
+// de `lerRetorno` — a mesma do PDF —, com os documentos vindos das linhas `d`
+// do canônico assinado.
+function DocumentoRetorno({ romaneio, farmacia, motoboy }: PropsDoDocumento) {
+  const leitura = lerRetorno(romaneio.payload, romaneio.canonico)
+  const corrida = romaneio.corrida
+
+  return (
+    <Card>
+      <CardHeader>
+        <Cabecalho titulo={`Romaneio de retorno ${romaneio.numero}`} romaneio={romaneio} />
+        {/* O número é rótulo para quem procura o papel. Quem amarra os dois
+            documentos é o `saida_hash` dentro do DCRR1. */}
+        <p className="text-sm text-foreground/70">
+          Referente à saída{' '}
+          <strong className="text-foreground">{romaneio.saidaNumero ?? '(número não disponível)'}</strong>
+        </p>
+      </CardHeader>
+
+      <CardContent className="flex flex-col gap-6">
+        <section className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+          <Campo rotulo="Filial" valor={romaneio.lojaNome} />
+          <Campo rotulo="Agência" valor={motoboy?.agenciaNome ?? null} />
+          <Campo rotulo="Motoboy" valor={motoboy?.nome ?? null} />
+          {/* Quem RECEBEU pela farmácia — caixa, gerente ou admin. O cargo
+              no instante vem na Custódia, de `papel_no_momento`. */}
+          <Campo rotulo="Recebido por" valor={farmacia?.nome ?? romaneio.criadoPorNome} />
+          <Campo rotulo="IP" valor={romaneio.ip} />
+        </section>
+
+        {/* Mesmo pareamento da saída: balcão à esquerda, servidor à direita. */}
+        <section className="grid gap-x-6 gap-y-1 text-sm sm:grid-cols-2">
+          <div className="flex flex-col gap-1">
+            <Campo rotulo="Retorno (balcão)" valor={dataHora(romaneio.ocorridoEmLocal)} />
+          </div>
+          <div className="flex flex-col gap-1">
+            <Campo rotulo="Selado (servidor)" valor={dataHora(romaneio.seladoEm)} />
+            {romaneio.modo === 'offline_sincronizada' && (
+              <Campo rotulo="Recebido (servidor)" valor={dataHora(romaneio.recebidoEmServidor)} />
+            )}
+            <Campo rotulo="Saída (servidor)" valor={dataHora(corrida?.saidaEm ?? null)} />
+          </div>
+          <div className="sm:col-span-2">
+            <Campo
+              rotulo="Duração"
+              valor={duracaoDaCorrida(corrida?.saidaEm ?? null, corrida?.retornoEm ?? null)}
+            />
+          </div>
+        </section>
+
+        <section>
+          <Subtitulo>{leitura.declarado ? 'O que foi declarado' : 'O que voltou'}</Subtitulo>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Vale</TableHead>
+                <TableHead>Cliente</TableHead>
+                <TableHead className="text-center">Desfecho</TableHead>
+                <TableHead className="text-center">Pagamento</TableHead>
+                <TableHead className="text-center">Documentos</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {leitura.vales.map((vale) => (
+                <TableRow key={vale.entregaId}>
+                  <TableCell className="font-medium tabular-nums">
+                    {vale.numeroVale ?? `${vale.entregaId.slice(0, 8)}…`}
+                  </TableCell>
+                  <TableCell className="whitespace-normal break-words">
+                    <p className="text-sm font-medium">{vale.clienteNome ?? '—'}</p>
+                    {vale.tipo === 'transferencia' && (
+                      <p className="text-xs text-foreground/70">Transferência</p>
+                    )}
+                  </TableCell>
+                  <TableCell className="whitespace-normal text-center text-sm">
+                    <p>{textoDoDesfecho(vale)}</p>
+                    {vale.detalhe && <p className="text-xs text-foreground/70">{vale.detalhe}</p>}
+                  </TableCell>
+                  <TableCell className="whitespace-normal text-center text-xs tabular-nums">
+                    {vale.realizados.length === 0
+                      ? '—'
+                      : vale.realizados.map((p, i) => <p key={i}>{textoDoPagamentoRealizado(p)}</p>)}
+                    {vale.situacaoPagamento === 'divergiu' && (
+                      <p className="font-medium text-amber-700 dark:text-amber-400">
+                        diverge do previsto
+                      </p>
+                    )}
+                  </TableCell>
+                  <TableCell className="whitespace-normal text-center text-xs">
+                    {vale.documentos.length === 0
+                      ? '—'
+                      : vale.documentos.map((d) => (
+                          <p
+                            key={d.tipo}
+                            className={d.situacao === 'faltante' ? 'font-medium text-destructive' : ''}
+                          >
+                            {textoDoDocumento(d)}
+                          </p>
+                        ))}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <p className="mt-2 text-sm">
+            <strong>{leitura.vales.length}</strong> vale(s) · <strong>{leitura.entregues}</strong>{' '}
+            entregue(s) · <strong>{leitura.insucessos}</strong> insucesso(s)
+            {leitura.documentosRecebidos + leitura.documentosFaltantes > 0 && (
+              <>
+                {' '}
+                · documentos: <strong>{leitura.documentosRecebidos}</strong> recebido(s),{' '}
+                <strong>{leitura.documentosFaltantes}</strong> faltante(s)
+              </>
+            )}
+            {leitura.pagamentosDivergentes > 0 && (
+              <>
+                {' '}
+                · <strong>{leitura.pagamentosDivergentes}</strong> pagamento(s) divergente(s)
+              </>
+            )}
+          </p>
+        </section>
+
+        {romaneio.status === 'conflito' ? (
+          <SecaoConflito
+            romaneio={romaneio}
+            titulo="Este retorno não pôde ser selado."
+            texto="O que foi declarado no balcão e a validação apresentada ficaram guardados neste registro, e a corrida continua aberta. Nada do que está acima foi aplicado aos vales. Resolver isso é decisão de gestão."
+          />
+        ) : (
+          <SecaoCustodia farmacia={farmacia} motoboy={motoboy} />
+        )}
+
+        <SecaoIntegridade romaneio={romaneio} farmacia={farmacia} motoboy={motoboy} />
+      </CardContent>
+    </Card>
+  )
+}
+
+function Cabecalho({ titulo, romaneio }: { titulo: string; romaneio: RomaneioCompleto }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <CardTitle>{titulo}</CardTitle>
+      {romaneio.status === 'conflito' ? (
+        <Badge variant="destructive">Conflito — não selado</Badge>
+      ) : (
+        <Badge variant="secondary">Selado</Badge>
+      )}
+      {romaneio.modo === 'offline_sincronizada' && <Badge variant="outline">Registrado offline</Badge>}
     </div>
   )
+}
+
+function Subtitulo({ children }: { children: React.ReactNode }) {
+  return (
+    <h3 className="mb-2 text-xs font-semibold tracking-wider uppercase text-foreground/70">
+      {children}
+    </h3>
+  )
+}
+
+function SecaoConflito({
+  romaneio,
+  titulo,
+  texto,
+}: {
+  romaneio: RomaneioCompleto
+  titulo: string
+  texto: string
+}) {
+  return (
+    <section className="rounded-lg border border-destructive/40 bg-destructive/5 p-3 text-sm">
+      <p className="mb-2 font-medium text-destructive">{titulo}</p>
+      <p>{texto}</p>
+      <pre className="mt-2 overflow-x-auto rounded bg-background/60 p-2 text-xs">
+        {JSON.stringify(
+          (romaneio.conflito as { motivos?: unknown })?.motivos ?? romaneio.conflito,
+          null,
+          2
+        )}
+      </pre>
+    </section>
+  )
+}
+
+function SecaoCustodia({
+  farmacia,
+  motoboy,
+}: {
+  farmacia: AssinaturaDoRomaneio | undefined
+  motoboy: AssinaturaDoRomaneio | undefined
+}) {
+  return (
+    <section>
+      <h3 className="mb-3 text-xs font-semibold tracking-wider uppercase text-foreground/70">
+        Custódia
+      </h3>
+      <div className="grid gap-6 sm:grid-cols-2">
+        {farmacia && <BlocoAssinatura assinatura={farmacia} />}
+        {motoboy && <BlocoAssinatura assinatura={motoboy} />}
+      </div>
+    </section>
+  )
+}
+
+function SecaoIntegridade({ romaneio, farmacia, motoboy }: PropsDoDocumento) {
+  return (
+    <section className="border-t pt-4">
+      <Subtitulo>Integridade</Subtitulo>
+      {/* Os hashes por extenso, não abreviados: esta é a tela onde
+          alguém confere um contra o outro documento. Abreviar aqui
+          tiraria justamente a utilidade. */}
+      <div className="flex flex-col gap-1 font-mono text-[11px] break-all">
+        <p>
+          <span className="text-foreground/60">documento </span>
+          {romaneio.documentHash}
+        </p>
+        {farmacia?.signatureHash && (
+          <p>
+            <span className="text-foreground/60">assin. farmácia </span>
+            {farmacia.signatureHash}
+          </p>
+        )}
+        {motoboy?.signatureHash && (
+          <p>
+            <span className="text-foreground/60">assin. motoboy </span>
+            {motoboy.signatureHash}
+          </p>
+        )}
+        {romaneio.finalHash && (
+          <p className="font-semibold">
+            <span className="font-normal text-foreground/60">envelope </span>
+            {romaneio.finalHash}
+          </p>
+        )}
+      </div>
+    </section>
+  )
+}
+
+function dataHora(iso: string | null): string | null {
+  return iso ? new Date(iso).toLocaleString('pt-BR') : null
 }
 
 function Campo({ rotulo, valor }: { rotulo: string; valor: string | null }) {

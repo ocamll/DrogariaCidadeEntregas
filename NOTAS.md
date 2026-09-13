@@ -10690,6 +10690,81 @@ dinheiro.** O cronômetro dos 25 s não foi refeito.
 **Pendente de teste com cartão:** saída e retorno de V-000070 e V-000071,
 online e offline — os dois ficaram pendentes para isso.
 
+## 110. O fechamento do 4B — o que faltava contra o próprio desenho
+
+**2026-09-13.** Perguntado se o 4A e o 4B tinham fechado 100%, a resposta
+medida foi: **o 4A sim; o 4B fechou o essencial, não tudo.** O usuário mandou
+fechar o 4B antes de pensar no 4C. Seis pontos, contra o §5 e o §11 do
+desenho do 4B:
+
+| # | ponto | situação |
+|---|---|---|
+| 1 | aviso ao admin quando o gerente autoriza por PIN esquecido (§5) | **proposta com SQL**, esperando confirmação — `docs/pendencia-pin-4b-2026-09-13.md` |
+| 2 | "cartão perdido" nunca rodou em documento real | **roteiro pronto**, cenário A abaixo |
+| 3 | recusas do §11.3 sem medição registrada | **roteiro pronto**, cenários B a G |
+| 4 | vales do retorno no motoboy certo era dedução (item 108) | **consulta pronta**, (1) do SQL |
+| 5 | Romaneio de Retorno sem página nem PDF | **construído** |
+| 6 | `sync-romaneio` publicada ≠ repositório (v1 removida em `b109005`) | **republicar** — sem mudança de comportamento |
+
+### O que foi construído: página, PDF, custódia e sangria do retorno
+
+- **`lib/documentoDoRetorno.ts`** é a leitura comum de página e PDF: desfecho
+  e pagamentos do payload do selo, **documentos das linhas `d` do canônico
+  assinado** (o payload não os guarda, e o estado atual do vale mostraria papel
+  que voltou depois como se tivesse voltado no retorno). Retorno em conflito é
+  lido como o que foi DECLARADO, sem número de vale inventado.
+- **O slot da farmácia deixou de ser `=== 'caixa'`.** No retorno ele é
+  `responsavel_loja`, e o `mapAssinatura` buscava o nome em `mototaxistas`:
+  quem recebeu sairia "—". A pergunta agora é `ehDaFarmacia` ("não é
+  motoboy"), nos três lugares que escolhiam o bloco.
+- **Página:** cada documento com o seu corpo; botões, custódia e integridade
+  comuns. O retorno mostra "Referente à saída R-…" (número buscado à parte: a
+  FK é da tabela para ela mesma, e um embed ambíguo já derrubou a página no
+  item 107), o que voltou por vale, e a divergência de pagamento e o
+  documento faltante destacados.
+- **PDF:** `montarRomaneioPdf` escolhe o layout pelo `tipo`; faixa da marca,
+  evidências e rodapé viraram funções comuns. **A via da agência do retorno
+  omite como o cliente pagou** — a mesma razão do valor da compra na saída.
+- **Custódia do vale:** o retorno aparece AO LADO da saída, com "Ver
+  retorno"; o chevron continua respondendo quem levou o vale.
+- **Sangria:** o filtro `tipo = 'saida'` saiu, porque o retorno tem PDF
+  próprio. Os números vêm da mesma sequência, e os nomes de arquivo não
+  colidem.
+- **Medido:** `romaneio-retorno-pdf.spec.mts` novo, verde (layout próprio,
+  nenhum `NaN`/`undefined`, documentos do canônico, quem recebeu pelo nome,
+  exceção do gerente, via da agência sem pagamento); `romaneio-pdf.spec.mts`
+  da saída inalterado e verde; build e lint sem aviso novo; **a bateria
+  inteira de specs verde**.
+- **Não visto na tela:** o navegador desta sessão estava sem login. Abrir um
+  retorno pela custódia de um vale (V-000064, por exemplo), gerar as duas vias
+  e ver a sangria de 12/09 é conferência do usuário.
+
+**Um spec vermelho que já estava assim:** `fiacao-estado-de-consulta` exigia
+"Falta a sua assinatura" em `RetornoCorrida.tsx`, frase que saiu com a
+assinatura manuscrita em `b109005`. A âncora passou para a validação local que
+ocupou o lugar dela ("Falta a validação do cartão"), com o motivo escrito no
+spec — a asserção continua provando a mesma coisa.
+
+### O roteiro do aceite complementar
+
+Consultas em `scripts/aceite-complementar-4b.sql`, só leitura, uma por vez.
+
+| cenário | como | prova |
+|---|---|---|
+| **A** cartão perdido | saída ONLINE com o cartão do gerente e motivo "Cartão perdido", **logado como o próprio gerente**; retorno OFFLINE da mesma corrida, também por cartão perdido. Nenhum cartão do motoboy | (2) e (3) |
+| **B** gerente de outra filial | bipar, na saída e no retorno, o cartão de um gerente de outra filial | recusa na tela; nada selado |
+| **C** gerente inativo | admin bloqueia a conta do gerente; tentar autorizar; desbloquear depois | recusa na tela |
+| **D** cartão de caixa ou admin | tentar emitir cartão de autorização para caixa e para admin | a emissão recusa — esse cartão não pode existir |
+| **E** mudança entre captura e selo | offline, autorizar com o gerente; antes de religar, bloquear o gerente (ou mudar a filial) por outro PC; religar | (4): conflito com o que foi apresentado |
+| **F** motivo trocado só no corpo | offline, autorizar com o gerente; rodar `scripts/conferir-troca-de-motivo-no-console.js`; religar | item terminal `validacao_divergente`; (4) sem linha nova |
+| **G** PIN errado do gerente | errar o PIN do gerente uma ou duas vezes, sem acertar depois | (5): o contador é o dele |
+
+Por último, (1) e o placar em (6).
+
+**Pendente, então:** confirmar o SQL da pendência de PIN (e se cartão perdido
+também abre pedido), republicar a `sync-romaneio`, rodar o roteiro acima e
+conferir a página e o PDF do retorno na tela.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta

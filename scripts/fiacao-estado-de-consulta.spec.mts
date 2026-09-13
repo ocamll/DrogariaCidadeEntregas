@@ -331,9 +331,17 @@ console.log('\n--- (3) o inventário: todo alvo existe e está classificado ---'
     checa('e NÃO do nome do estado', !/custodia\.nome === 'erro_rede'/.test(retorno))
 
     // O `erro` paralelo SOBREVIVE, servindo validação local (formato do
-    // PIN, assinatura faltando). Isso é decisão: são conferências
+    // PIN, validação faltando). Isso é decisão: são conferências
     // anteriores a qualquer transição, e a máquina nem é tocada.
-    checa('o `erro` restante é só validação local', /Falta a sua assinatura/.test(retorno))
+    //
+    // A âncora mudou em 2026-09-13, e o motivo não é fazer passar: a frase
+    // antiga ("Falta a sua assinatura") saiu da tela com a assinatura
+    // manuscrita, no 4B (`b109005`). A validação local que ocupou o lugar
+    // dela é a da validação do cartão — a mesma natureza de conferência,
+    // anterior a qualquer transição da máquina. Sem esta troca a asserção
+    // ficou vermelha por um texto que o desenho mandou apagar.
+    checa('o `erro` restante é só validação local',
+      /setErro\('Falta a validação do cartão/.test(retorno))
     // O que ele NÃO pode mais fazer é descrever recusa ou falha de rede.
     checa('e ele não descreve mais recusa de cartão',
       !/setErro\(\s*'Credencial não reconhecida/.test(retorno))
