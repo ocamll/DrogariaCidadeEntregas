@@ -541,6 +541,31 @@ export function realizadoDaLinha(linha: LinhaRealizadaDigitada): ResultadoDaLinh
 }
 
 /**
+ * O CLIENTE ENTREGOU MENOS DINHEIRO QUE O APLICADO? Devolve quanto entrou e
+ * quanto faltou — ou `null`.
+ *
+ * Existe por um defeito relatado e reproduzido em 2026-09-13: registrar falta
+ * em dinheiro exigia mexer em DOIS campos (o recebido e o aplicado, que vem
+ * pré-preenchido com o previsto), e a tela só recusava. Com pix bastava um.
+ *
+ * Esta função NÃO muda nada: ela só diz o que a tela pode OFERECER. Quem
+ * aceita é o caixa, com um clique, e aí a linha vira `aplicado = recebido` —
+ * que diverge do previsto e fica registrada no selo. A falta nunca some.
+ *
+ * `null` quando não é dinheiro, quando o recebido está vazio (valor exato) ou
+ * quando ele cobre o aplicado (há troco, ou é exato).
+ */
+export function faltaEmDinheiro(
+  linha: LinhaRealizadaDigitada
+): { recebidoCents: number; faltaCents: number } | null {
+  if (linha.forma !== 'dinheiro' || linha.recebidoDigitos === '') return null
+  const aplicadoCents = linha.aplicadoDigitos === '' ? 0 : centsFromDigits(linha.aplicadoDigitos)
+  const recebidoCents = centsFromDigits(linha.recebidoDigitos)
+  if (recebidoCents <= 0 || recebidoCents >= aplicadoCents) return null
+  return { recebidoCents, faltaCents: aplicadoCents - recebidoCents }
+}
+
+/**
  * O recebido sugerido no retorno, a partir do previsto: o "troco para" do
  * cadastro. Sem troco previsto, o campo nasce vazio — valor exato.
  */

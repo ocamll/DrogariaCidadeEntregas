@@ -54,6 +54,7 @@ import { rotuloDoPapelNoMomento } from '@/lib/papeis'
 import {
   FORMA_PAGAMENTO_LABEL,
   realizadoDaLinha,
+  faltaEmDinheiro,
   digitosDoRecebidoPrevisto,
   type LinhaRealizadaDigitada,
 } from '@/data/pagamentos'
@@ -1334,6 +1335,8 @@ function ValeEmConferencia({
           <Label className="text-xs">Como o cliente pagou</Label>
           {preenchimento.pagamentos.map((linha, i) => {
             const realizado = realizadoDaLinha(linha)
+            // Só OFERECE registrar a falta; o aplicado não muda sem o clique.
+            const falta = faltaEmDinheiro(linha)
             const dinheiro = linha.forma === 'dinheiro'
             return (
               <div key={i} className="flex flex-col gap-1">
@@ -1361,6 +1364,10 @@ function ValeEmConferencia({
                     <CampoMoeda
                       digitos={linha.aplicadoDigitos}
                       onDigitos={(d) => alterarLinha(i, { aplicadoDigitos: d })}
+                      // O valor veio do PREVISTO: digitar tem que trocá-lo, não
+                      // somar. Sem isto, 90 por cima de 100,00 virava
+                      // R$ 1.000.090,00 (reproduzido em 2026-09-13).
+                      selecionaAoFocar
                       aria-label="Aplicado à compra"
                     />
                   </div>
@@ -1373,6 +1380,7 @@ function ValeEmConferencia({
                         <CampoMoeda
                           digitos={linha.recebidoDigitos}
                           onDigitos={(d) => alterarLinha(i, { recebidoDigitos: d })}
+                          selecionaAoFocar
                           aria-label="Recebido em dinheiro"
                         />
                       </div>
@@ -1403,6 +1411,23 @@ function ValeEmConferencia({
                 )}
                 {!realizado.ok && (linha.aplicadoDigitos !== '' || linha.recebidoDigitos !== '') && (
                   <p className="text-xs text-destructive">{realizado.erro}</p>
+                )}
+                {/* FALTA EM DINHEIRO EM UM PASSO. Antes o caixa tinha que
+                    descobrir que precisava mudar também o aplicado, e com pix
+                    bastava um campo. O botão aplica o recebido pelo mesmo
+                    `alterarLinha`, que desmarca a confirmação — e o selo
+                    registra a divergência. */}
+                {falta && (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="self-start"
+                    onClick={() => alterarLinha(i, { aplicadoDigitos: String(falta.recebidoCents) })}
+                  >
+                    Registrar {formatBRL(falta.recebidoCents)} como aplicado à compra (falta de{' '}
+                    {formatBRL(falta.faltaCents)})
+                  </Button>
                 )}
               </div>
             )

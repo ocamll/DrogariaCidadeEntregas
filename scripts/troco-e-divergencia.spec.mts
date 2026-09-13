@@ -213,6 +213,53 @@ if (existe('realizadoDaLinha') && existe('digitosDoRecebidoPrevisto')) {
 }
 
 // ---------------------------------------------------------------------
+console.log('\n--- (3b) FALTA EM DINHEIRO: registrável em um passo, e nunca em silêncio ---')
+// ---------------------------------------------------------------------
+// Reproduzido em 2026-09-13 no V-000065, depois do relato do usuário ("não
+// consegui registrar um valor menor no dinheiro no retorno, apenas no PIX"):
+//
+//   - recebido 90 com o aplicado pré-preenchido em 100 → recusa, e o caixa
+//     precisava descobrir que também tinha de mudar o outro campo;
+//   - digitar 90 por cima do aplicado pré-preenchido → R$ 1.000.090,00, porque
+//     o campo não selecionava ao focar;
+//   - só selecionando e digitando no aplicado a linha ficava válida.
+//
+// A falta continua sendo DIVERGÊNCIA, e o aplicado não muda sozinho: a tela
+// oferece, e o caixa decide.
+if (existe('faltaEmDinheiro')) {
+  igual('recebido 90 com aplicado 100: a falta sugere aplicar 90',
+    L.faltaEmDinheiro(linha('dinheiro', '10000', '9000')), { recebidoCents: 9000, faltaCents: 1000 })
+  igual('misto: recebido 50 na parcela de 60 sugere aplicar 50',
+    L.faltaEmDinheiro(linha('dinheiro', '6000', '5000')), { recebidoCents: 5000, faltaCents: 1000 })
+  igual('recebido igual ao aplicado: não há falta', L.faltaEmDinheiro(linha('dinheiro', '10000', '10000')), null)
+  igual('recebido maior (há troco): não há falta', L.faltaEmDinheiro(linha('dinheiro', '10000', '20000')), null)
+  igual('recebido vazio (valor exato): não há falta', L.faltaEmDinheiro(linha('dinheiro', '10000', '')), null)
+  igual('pix não tem recebido, nem falta a sugerir', L.faltaEmDinheiro(linha('pix', '10000', '9000')), null)
+
+  // Aceitar a sugestão tem que dar uma linha VÁLIDA e DIVERGENTE do previsto.
+  const aceita = L.realizadoDaLinha(linha('dinheiro', '9000', '9000'))
+  igual('aceitar a sugestão dá aplicado 90 sem troco', aceita, { ok: true, valorCents: 9000, trocoCents: 0 })
+  igual('e isso diverge do previsto de 100 — a falta fica registrada',
+    L.situacaoDoPagamento([p('dinheiro', 10000)], [p('dinheiro', aceita.valorCents, aceita.trocoCents)]),
+    'divergiu')
+}
+{
+  const retorno = semComentarios(ler('src/pages/RetornoCorrida.tsx'))
+  const campo = (rotulo: string) => {
+    const pos = retorno.indexOf(`aria-label="${rotulo}"`)
+    return retorno.slice(Math.max(0, pos - 400), pos)
+  }
+  checa('"Aplicado à compra" seleciona ao focar (digitar troca, não soma)',
+    /selecionaAoFocar/.test(campo('Aplicado à compra')))
+  checa('"Recebido em dinheiro" seleciona ao focar',
+    /selecionaAoFocar/.test(campo('Recebido em dinheiro')))
+  checa('a tela usa `faltaEmDinheiro` para oferecer o registro da falta',
+    /faltaEmDinheiro\(/.test(retorno))
+  checa('e o botão aplica o recebido pelo mesmo caminho que desfaz a confirmação',
+    /alterarLinha\(i,\s*\{\s*aplicadoDigitos:\s*String\(falta\.recebidoCents\)\s*\}\)/.test(retorno))
+}
+
+// ---------------------------------------------------------------------
 console.log('\n--- (4) fiação: ninguém decide divergência por existência ---')
 // ---------------------------------------------------------------------
 {

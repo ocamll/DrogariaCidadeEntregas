@@ -39,6 +39,7 @@ export {
   trocoDoPrevisto,
   trocoDoRecebido,
   realizadoDaLinha,
+  faltaEmDinheiro,
   digitosDoRecebidoPrevisto,
 } from '@/lib/formasDePagamento'
 export type {

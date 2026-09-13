@@ -10656,6 +10656,25 @@ troco para 100 → troco 40.
 - no retorno do V-000064: a confirmação nasce desmarcada, corrigir o recebido
   a desmarca, e conferir sem ela é recusado sem congelar nada.
 
+**Falta em dinheiro não registrável — relatado e corrigido em 2026-09-13.**
+Depois da saída e do retorno de V-000070 a V-000072, o usuário conseguiu
+registrar valor menor no pix (V-000072 ficou `divergente` com `pix 3900`),
+mas não no dinheiro. Reproduzido no V-000065, sem confirmar nada:
+
+| tentativa | resultado |
+|---|---|
+| recebido 90 com o aplicado pré-preenchido em 100 | recusa — era preciso mudar também o aplicado |
+| digitar 90 por cima do aplicado pré-preenchido | **R$ 1.000.090,00**: o campo não selecionava ao focar |
+| selecionar o aplicado e digitar 90 | válido, troco 0 |
+
+Com pix havia um campo só; no dinheiro, dois. A correção não mexe no
+contrato nem esconde a falta: os dois campos do retorno passaram a
+selecionar ao focar, e quando o recebido é menor que o aplicado a tela
+oferece "Registrar R$ X como aplicado à compra (falta de R$ Y)" —
+`faltaEmDinheiro` só aponta, o clique aplica pelo mesmo `alterarLinha` que
+desmarca a confirmação, e o selo registra a divergência. Spec com o caso
+(misto incluído) escrito antes: 5 falhas, depois 109 verificações verdes.
+
 **Pendente de teste com cartão:** saída e retorno de V-000070 e V-000071,
 online e offline — os dois ficaram pendentes para isso.
 
