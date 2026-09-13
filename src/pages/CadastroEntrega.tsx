@@ -10,6 +10,7 @@ import {
   validarFormasPrevistas,
   resolverValoresDasFormas,
   digitosDoValor,
+  indiceDaParcelaEmDinheiro,
   trocoParaAplicavel,
   trocoDoPrevisto,
   type FormaPagamento,
@@ -85,9 +86,10 @@ function CadastroEntregaForm({
   // nunca dentro de `criarEntrega`, senão o reenvio da fila criaria um
   // previsto novo a cada oscilação de rede (E3.C).
   const [formas, setFormas] = useState<LinhaForma[]>(() => [linhaNova()])
-  // "Troco para", em dígitos crus. Vazio = não há troco a preparar. Só vale
-  // com uma forma, e ela dinheiro (`trocoParaAplicavel`); quando deixa de
-  // valer, `mudarFormas` o limpa — nada de valor escondido reaparecendo.
+  // "Troco para", em dígitos crus. Vazio = não há troco a preparar. Vale
+  // quando há UMA parcela em dinheiro, sozinha ou no misto
+  // (`trocoParaAplicavel`); quando deixa de valer, `mudarFormas` o limpa —
+  // nada de valor escondido reaparecendo.
   const [trocoPara, setTrocoPara] = useState('')
   const [temReceita, setTemReceita] = useState(false)
   const [erroValidacao, setErroValidacao] = useState<string | null>(null)
@@ -116,22 +118,28 @@ function CadastroEntregaForm({
   )
 
   /**
-   * O TROCO A LEVAR, recalculado a cada render a partir da compra e do
-   * "troco para" — o caixa não faz a subtração. `null` quando o campo não se
-   * aplica (outra forma, ou pagamento misto, cuja regra está pendente).
+   * O TROCO A LEVAR, recalculado a cada render a partir da PARCELA EM
+   * DINHEIRO e do "troco para" — o caixa não faz a subtração. `null` quando o
+   * campo não se aplica (nenhuma forma em dinheiro).
    *
-   * Com uma forma só, o valor em dinheiro É a compra (`valoresCents[0]`).
+   * No misto a parcela é o valor da linha de dinheiro — digitado ou derivado
+   * (`valoresCents` já traz o resto calculado). Decisão de 2026-09-13: pix 40
+   * + dinheiro 60 com troco para 100 → troco 40. Com uma forma só, a parcela
+   * é a compra.
    */
+  const indiceDinheiro = indiceDaParcelaEmDinheiro(formas)
   const trocoAplicavel = trocoParaAplicavel(formas)
-  const resultadoTroco = trocoAplicavel ? trocoDoPrevisto(valoresCents[0], trocoPara) : null
+  const resultadoTroco =
+    indiceDinheiro !== null ? trocoDoPrevisto(valoresCents[indiceDinheiro], trocoPara) : null
 
   const previstos: FormaPrevistaDoCadastro[] = formas.map((linha, i) => ({
     pagamentoId: linha.pagamentoId,
     forma: linha.forma,
     valorCents: valoresCents[i],
     // O "troco para" NÃO vira valor: o valor continua sendo a parte da
-    // compra, e o troco vai para `troco_cents`. Sem troco aplicável, 0.
-    trocoCents: resultadoTroco?.ok && i === 0 ? resultadoTroco.trocoCents : 0,
+    // compra, e o troco vai para `troco_cents` DA LINHA DE DINHEIRO — nunca
+    // para o pix do misto. Sem troco aplicável, 0.
+    trocoCents: resultadoTroco?.ok && i === indiceDinheiro ? resultadoTroco.trocoCents : 0,
   }))
 
   const totalPrevistoCents = previstos.reduce((soma, p) => soma + p.valorCents, 0)
@@ -514,6 +522,14 @@ function CadastroEntregaForm({
                   onDigitos={setTrocoPara}
                   onKeyDown={handleFormaKeyDown}
                 />
+                {/* No misto a tela diz SOBRE O QUÊ o troco é calculado: sem
+                    isso, "troco para 100" numa compra de 100 parece troco
+                    zero, e é troco de 40. */}
+                {!umaFormaSo && indiceDinheiro !== null && (
+                  <p className="text-xs text-foreground/70">
+                    Sobre a parcela em dinheiro: {formatBRL(valoresCents[indiceDinheiro])}.
+                  </p>
+                )}
                 {trocoPara !== '' &&
                   resultadoTroco &&
                   (resultadoTroco.ok ? (

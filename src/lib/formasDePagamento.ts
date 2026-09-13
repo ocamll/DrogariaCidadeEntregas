@@ -358,13 +358,17 @@ export function divergiuDoPrevisto(
 //     compra 100, dinheiro, "troco para" vazio   valor 10000  troco     0
 //     compra 100, dinheiro, "troco para" 200     valor 10000  troco 10000
 //     compra 100, pix 40 + dinheiro 60           pix 4000/0 · dinheiro 6000/0
-//                                                (troco no misto: pendente)
+//     o mesmo, "troco para" 100                  pix 4000/0 · dinheiro 6000/4000
+//                                                (o "troco para" considera SÓ a
+//                                                parcela em dinheiro — decidido
+//                                                pelo usuário em 2026-09-13)
 //
 // REALIZADO (retorno)
 //
 //     pagou o valor exato                        valor 10000  troco     0
 //     entregou 200, levou 100 de troco           valor 10000  troco 10000
 //     entregou só 90                             valor  9000  troco     0
+//     misto: pix 40, entregou 100 em espécie     pix 4000/0 · dinheiro 6000/4000
 //
 // COMPARAÇÃO: multiconjunto de `forma|valor_cents`. Troco certo, ou outra
 // nota com a mesma forma e o mesmo líquido, NÃO é divergência; 90 contra
@@ -413,14 +417,23 @@ export function situacaoDoPagamento(
 }
 
 /**
- * "Troco para" aparece no cadastro?
+ * A linha da PARCELA EM DINHEIRO — o índice dela, ou `null`.
  *
- * Só com UMA forma, e ela dinheiro. O pagamento misto (pix 40 + dinheiro 60,
- * troco sobre a parcela em espécie) tem regra PENDENTE de decisão do
- * usuário; até lá o campo não aparece e o misto segue como antes.
+ * Decidido pelo usuário em 2026-09-13: no pagamento misto o "troco para"
+ * considera SÓ a parcela em dinheiro. Compra 100, pix 40, dinheiro 60, troco
+ * para 100 → troco 40. Com uma forma só, a parcela é a compra inteira.
+ *
+ * `null` sem dinheiro, ou com dinheiro repetido — que a validação recusa, e
+ * onde não existe "a" parcela sobre a qual calcular.
  */
+export function indiceDaParcelaEmDinheiro(formas: ReadonlyArray<{ forma: string }>): number | null {
+  const indices = formas.flatMap((f, i) => (f.forma === 'dinheiro' ? [i] : []))
+  return indices.length === 1 ? indices[0] : null
+}
+
+/** "Troco para" aparece no cadastro? Quando há UMA parcela em dinheiro. */
 export function trocoParaAplicavel(formas: ReadonlyArray<{ forma: string }>): boolean {
-  return formas.length === 1 && formas[0].forma === 'dinheiro'
+  return indiceDaParcelaEmDinheiro(formas) !== null
 }
 
 export type ResultadoDoTroco = { ok: true; trocoCents: number } | { ok: false; erro: string }
@@ -428,8 +441,11 @@ export type ResultadoDoTroco = { ok: true; trocoCents: number } | { ok: false; e
 /**
  * O troco a levar, a partir do "Troco para" digitado no cadastro.
  *
+ * `valorEmDinheiroCents` é a PARCELA em dinheiro — a compra inteira com uma
+ * forma só, a linha de dinheiro no misto (`indiceDaParcelaEmDinheiro`).
+ *
  * Vazio é resposta legítima — não há troco a preparar. Preenchido, tem que
- * ser ESTRITAMENTE maior que o valor em dinheiro: igual seria "troco zero",
+ * ser ESTRITAMENTE maior que a parcela em dinheiro: igual seria "troco zero",
  * que é o campo vazio dito de um jeito que confunde.
  *
  * O "troco para" NÃO é gravado: vira `troco_cents` do previsto, e o valor da
@@ -448,12 +464,12 @@ export function trocoDoPrevisto(
     }
   }
   if (valorEmDinheiroCents <= 0) {
-    return { ok: false, erro: 'Informe o valor da compra antes do “Troco para”.' }
+    return { ok: false, erro: 'Informe o valor em dinheiro antes do “Troco para”.' }
   }
   if (trocoParaCents <= valorEmDinheiroCents) {
     return {
       ok: false,
-      erro: `“Troco para” precisa ser maior que a compra (${formatBRL(valorEmDinheiroCents)}). Se o cliente vai pagar o valor exato, deixe o campo vazio.`,
+      erro: `“Troco para” precisa ser maior que a parcela em dinheiro (${formatBRL(valorEmDinheiroCents)}). Se o cliente vai pagar o valor exato, deixe o campo vazio.`,
     }
   }
   return { ok: true, trocoCents: trocoParaCents - valorEmDinheiroCents }
@@ -490,10 +506,11 @@ export type LinhaRealizadaDigitada = {
   forma: string
   /** Parte da compra paga por esta forma — vira `valor_cents`. */
   aplicadoDigitos: string
-  /** Só dinheiro, só com uma linha: o que o cliente entregou. */
+  /**
+   * Só dinheiro: o que o cliente entregou em espécie PARA ESTA PARCELA. No
+   * misto, é o dinheiro da parcela, não a compra. Vazio = valor exato.
+   */
   recebidoDigitos: string
-  /** Só dinheiro no pagamento MISTO, enquanto a regra dele está pendente. */
-  trocoDigitos: string
 }
 
 export type ResultadoDaLinha =
@@ -508,24 +525,17 @@ export type ResultadoDaLinha =
  *
  *   - forma que não é dinheiro: troco sempre 0, mesmo que sobre dígito no
  *     estado — nada de valor escondido indo pro documento;
- *   - dinheiro numa linha só (`trocoCalculado`): troco = recebido − aplicado;
- *   - dinheiro no misto: troco informado, como antes, até a regra do misto
- *     ser decidida.
+ *   - dinheiro: troco = recebido − aplicado, com uma forma ou no misto. No
+ *     misto o aplicado é a PARCELA em dinheiro (decisão de 2026-09-13), então
+ *     pix 40 + dinheiro 60 recebendo 100 em espécie dá 60 líquidos e 40 de
+ *     troco — e a comparação reconhece `dinheiro|6000` + `pix|4000`.
+ *
+ * Não há mais troco digitado à mão: era o tratamento provisório do misto.
  */
-export function realizadoDaLinha(
-  linha: LinhaRealizadaDigitada,
-  trocoCalculado: boolean
-): ResultadoDaLinha {
+export function realizadoDaLinha(linha: LinhaRealizadaDigitada): ResultadoDaLinha {
   const valorCents = linha.aplicadoDigitos === '' ? 0 : centsFromDigits(linha.aplicadoDigitos)
   if (valorCents <= 0) return { ok: false, erro: 'falta o valor aplicado à compra.' }
   if (linha.forma !== 'dinheiro') return { ok: true, valorCents, trocoCents: 0 }
-  if (!trocoCalculado) {
-    return {
-      ok: true,
-      valorCents,
-      trocoCents: linha.trocoDigitos === '' ? 0 : centsFromDigits(linha.trocoDigitos),
-    }
-  }
   const troco = trocoDoRecebido(valorCents, linha.recebidoDigitos)
   return troco.ok ? { ok: true, valorCents, trocoCents: troco.trocoCents } : troco
 }

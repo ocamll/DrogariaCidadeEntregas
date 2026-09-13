@@ -34,6 +34,7 @@ export {
   textoDaReferenciaInformada,
   // O contrato dos valores (2026-09-12): situação do pagamento e troco.
   situacaoDoPagamento,
+  indiceDaParcelaEmDinheiro,
   trocoParaAplicavel,
   trocoDoPrevisto,
   trocoDoRecebido,

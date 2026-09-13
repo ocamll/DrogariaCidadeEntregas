@@ -10631,9 +10631,30 @@ o aplicado recusado; e o rótulo do dialog de ocorrência dizendo que o valor
   "Nenhuma divergência"; no de 11/09, o V-000063 continua listado, como foi
   gravado.
 
-**Pendente de decisão do usuário:** o troco no pagamento MISTO (pix 40 +
-dinheiro 60, recebendo 100 em espécie → troco 40). Até lá o misto segue
-como antes.
+**O misto, decidido em 2026-09-13** (substitui a pendência): o "troco
+para" considera SÓ a parcela em dinheiro. Compra 100, pix 40, dinheiro 60,
+troco para 100 → troco 40.
+
+- cadastro: `indiceDaParcelaEmDinheiro` acha a linha; o campo aparece com
+  qualquer parcela única em dinheiro, a validação é contra a parcela, e o
+  troco é gravado NA LINHA de dinheiro (`pix 4000/0` + `dinheiro 6000/4000`);
+- retorno: toda linha de dinheiro calcula o troco do recebido em espécie; o
+  troco digitado à mão do misto, que era o provisório, saiu da tela e da lib;
+- **a previsão deixou de valer como comprovação**: o retorno pré-preenche,
+  mas só congela com "Conferi: o cliente pagou assim." marcado, e corrigir
+  qualquer linha ou o desfecho desmarca;
+- servidor intacto: a chave continua `forma|valor_cents`, e a parcela líquida
+  `dinheiro|6000` é a mesma nos dois gêmeos;
+- spec atualizado ANTES da implementação (quebrou nela), com o cenário misto
+  completo — reconhecido sem divergência, e diferenças reais no misto (parcela
+  menor, tudo em pix, recebido menor que a parcela) ainda acusadas: 96
+  verificações verdes depois; vizinhos, build e lint verdes;
+- **V-000072** ("Teste Misto Troco": compra 100, pix 40, troco para 100) lido
+  do banco com `pix 4000/0` + `dinheiro 6000/4000`; na tela, o dinheiro derivou
+  60, troco para 60 foi recusado citando a parcela, e troco para 100 mostrou
+  "Troco a levar: R$ 40,00";
+- no retorno do V-000064: a confirmação nasce desmarcada, corrigir o recebido
+  a desmarca, e conferir sem ela é recusado sem congelar nada.
 
 **Pendente de teste com cartão:** saída e retorno de V-000070 e V-000071,
 online e offline — os dois ficaram pendentes para isso.

@@ -960,16 +960,24 @@ comparação               multiconjunto forma|valor_cents — troco FORA
   `situacaoDoPagamento` (`sem_realizado` · `confere` · `divergiu`); lista
   vazia não é comparada. É apresentação: não escreve `status_financeiro`, e
   as contagens de pendência continuam pelo status.
-- **"Troco para" (cadastro)** só aparece com UMA forma, dinheiro, e fica
-  **fora da cadeia de Enter** — custo zero pra quem não usa. Vazio = sem
-  troco; preenchido tem que ser maior que a compra. Vira `troco_cents` do
-  previsto e entra no DCR1 pela linha `p`, que sempre teve o campo; a compra
-  não muda. Trocar a forma limpa o campo.
-- **No retorno**, com uma linha em dinheiro: "Aplicado à compra",
-  "Recebido em dinheiro" (vazio = exato) e "Troco devolvido" CALCULADO.
-  Recebido menor que o aplicado é recusado — o cálculo não esconde falta.
-- **Pagamento misto: regra do troco PENDENTE.** O campo não aparece no
-  cadastro, e no retorno o troco da linha de dinheiro continua informado.
+- **"Troco para" (cadastro)** aparece quando há UMA parcela em dinheiro,
+  sozinha ou no misto, e fica **fora da cadeia de Enter** — custo zero pra
+  quem não usa. Vazio = sem troco; preenchido tem que ser maior que a
+  **parcela em dinheiro**. Vira `troco_cents` da linha de dinheiro e entra no
+  DCR1 pela linha `p`, que sempre teve o campo; a compra não muda. Trocar a
+  forma limpa o campo.
+- **Pagamento misto — decidido pelo usuário em 2026-09-13:** o "troco para"
+  considera SÓ a parcela em dinheiro. Compra 100, pix 40, dinheiro 60, troco
+  para 100 → troco 40, gravado como `pix 4000/0` + `dinheiro 6000/4000`. A
+  conferência reconhece `dinheiro|6000` + `pix|4000` sem divergência. Substitui
+  o tratamento provisório (troco digitado à mão no misto), que saiu.
+- **No retorno**, em toda linha de dinheiro: "Aplicado à compra",
+  "Recebido em dinheiro" (vazio = exato; no misto, o espécie da parcela) e
+  "Troco devolvido" CALCULADO. Recebido menor que o aplicado é recusado — o
+  cálculo não esconde falta.
+- **A previsão não é comprovação.** As linhas do retorno nascem do previsto,
+  mas o vale só congela com "Conferi: o cliente pagou assim." marcado, e
+  qualquer correção de linha ou de desfecho desmarca.
 - **O servidor não mudou**: a comparação já era a do contrato. O V-000063
   (200 no valor, 100 no troco, entrado pelo "Valor" sem rótulo) continua
   divergente, como foi gravado — nada de UPDATE.

@@ -342,8 +342,8 @@ function RetornoDaCorrida({
 /**
  * Uma linha de pagamento realizado, em dígitos — o contrato de
  * `lib/formasDePagamento.ts`: `aplicadoDigitos` vira `valor_cents` (a parte
- * da compra), e o troco sai do recebido (uma linha) ou é informado (misto).
- * Nunca o recebido no lugar do aplicado.
+ * da compra), e o troco sai do recebido em espécie da linha de dinheiro,
+ * com uma forma ou no misto. Nunca o recebido no lugar do aplicado.
  */
 type LinhaDePagamento = LinhaRealizadaDigitada & { forma: FormaPagamento }
 
@@ -355,13 +355,13 @@ type LinhaDePagamento = LinhaRealizadaDigitada & { forma: FormaPagamento }
  * recebido e o troco vira zero.
  */
 function linhasDoPrevisto(previstos: ValeDoContexto['pagamentosPrevistos']): LinhaDePagamento[] {
-  const umaSo = previstos.length === 1
   return previstos.map((p) => ({
     forma: p.forma as FormaPagamento,
     aplicadoDigitos: String(p.valorCents),
+    // No misto também: o "troco para" previsto é sobre a parcela em dinheiro
+    // (decisão de 2026-09-13), então a sugestão é parcela + troco.
     recebidoDigitos:
-      umaSo && p.forma === 'dinheiro' ? digitosDoRecebidoPrevisto(p.valorCents, p.trocoCents) : '',
-    trocoDigitos: !umaSo && p.forma === 'dinheiro' && p.trocoCents > 0 ? String(p.trocoCents) : '',
+      p.forma === 'dinheiro' ? digitosDoRecebidoPrevisto(p.valorCents, p.trocoCents) : '',
   }))
 }
 
@@ -370,6 +370,13 @@ type Preenchimento = {
   motivo: MotivoInsucesso | null
   detalhe: string
   pagamentos: LinhaDePagamento[]
+  /**
+   * A PREVISÃO NÃO É COMPROVAÇÃO. As linhas nascem do previsto pra poupar
+   * digitação, e só viram documento depois de alguém afirmar que o cliente
+   * pagou assim. Nasce `false`, e qualquer correção nas linhas volta a
+   * `false` — a confirmação vale para os valores que estão na tela.
+   */
+  pagamentoConfirmado: boolean
   /** Sem valor inicial DE PROPÓSITO — ver `documentoPendente`. */
   documentos: Partial<Record<TipoDocumentoFisico, SituacaoDocumento>>
 }
@@ -381,6 +388,7 @@ function preenchimentoInicial(vale: ValeDoContexto): Preenchimento {
     detalhe: '',
     // Pré-preenche forma, aplicado e recebido sugerido. NUNCA o `pagamentoId`.
     pagamentos: linhasDoPrevisto(vale.pagamentosPrevistos),
+    pagamentoConfirmado: false,
     documentos: {},
   }
 }
@@ -527,7 +535,7 @@ function FluxoDeRetorno({
             ? p.pagamentos.map((linha) => {
                 // A CONVERSÃO É UMA SÓ, e a validação (`problemaDoPreenchimento`)
                 // chamou a mesma: o que foi aceito é o que vai pro documento.
-                const realizado = realizadoDaLinha(linha, p.pagamentos.length === 1)
+                const realizado = realizadoDaLinha(linha)
                 if (!realizado.ok) throw new Error(`Vale ${vale.numeroVale}: ${realizado.erro}`)
                 return {
                   // uuidv7 NOVO, aqui, a cada congelamento. É o que separa
@@ -563,8 +571,13 @@ function FluxoDeRetorno({
       }
       if (p.desfecho === 'entregue') {
         for (const linha of p.pagamentos) {
-          const realizado = realizadoDaLinha(linha, p.pagamentos.length === 1)
+          const realizado = realizadoDaLinha(linha)
           if (!realizado.ok) return `Vale ${vale.numeroVale}: ${realizado.erro}`
+        }
+        // O pré-preenchimento veio do PREVISTO. Sem a confirmação, o documento
+        // afirmaria como comprovado o que só estava previsto.
+        if (p.pagamentos.length > 0 && !p.pagamentoConfirmado) {
+          return `Vale ${vale.numeroVale}: confirme como o cliente pagou (ou corrija e confirme).`
         }
       }
       // Ausência NÃO vira `faltante`: normalizar inventaria um fato que
@@ -1212,36 +1225,29 @@ function ValeEmConferencia({
     (soma, l) => soma + (l.aplicadoDigitos ? centsFromDigits(l.aplicadoDigitos) : 0),
     0
   )
-  // Uma linha só: o troco sai do recebido. Várias: a regra do misto está
-  // pendente, e o troco da linha de dinheiro continua informado.
-  const trocoCalculado = preenchimento.pagamentos.length === 1
   const divergeDaCompra =
     entregue &&
     preenchimento.pagamentos.length > 0 &&
     vale.valorCompraCents > 0 &&
     somaRealizada !== vale.valorCompraCents
 
+  // TODA correção de linha desfaz a confirmação: ela vale para os valores
+  // que estavam na tela quando foi dada, não para os de depois.
   function alterarLinha(indice: number, mudanca: Partial<LinhaDePagamento>) {
     onAlterar({
+      pagamentoConfirmado: false,
       pagamentos: preenchimento.pagamentos.map((l, i) => {
         if (i !== indice) return l
-        // Trocar a forma limpa recebido e troco: dígito de dinheiro não pode
-        // ficar escondido numa linha de pix e reaparecer ao voltar.
+        // Trocar a forma limpa o recebido: dígito de dinheiro não pode ficar
+        // escondido numa linha de pix e reaparecer ao voltar.
         const trocouForma = mudanca.forma !== undefined && mudanca.forma !== l.forma
-        return { ...l, ...mudanca, ...(trocouForma ? { recebidoDigitos: '', trocoDigitos: '' } : {}) }
+        return { ...l, ...mudanca, ...(trocouForma ? { recebidoDigitos: '' } : {}) }
       }),
     })
   }
 
-  // Adicionar ou remover linha pode mudar o MODO do troco (uma linha ↔ misto).
-  // Mudando, o que foi digitado no outro modo não vale mais, e sai.
   function trocarLinhas(novas: LinhaDePagamento[]) {
-    const mudouModo = (novas.length === 1) !== trocoCalculado
-    onAlterar({
-      pagamentos: mudouModo
-        ? novas.map((l) => ({ ...l, recebidoDigitos: '', trocoDigitos: '' }))
-        : novas,
-    })
+    onAlterar({ pagamentoConfirmado: false, pagamentos: novas })
   }
 
   return (
@@ -1277,6 +1283,8 @@ function ValeEmConferencia({
             const desfecho = e.target.value as 'entregue' | 'insucesso'
             onAlterar({
               desfecho,
+              // Mudar o desfecho muda o que há para confirmar.
+              pagamentoConfirmado: false,
               motivo: desfecho === 'entregue' ? null : preenchimento.motivo,
               detalhe: desfecho === 'entregue' ? '' : preenchimento.detalhe,
               // Pagamento em vale com insucesso é recusado pelo contrato.
@@ -1325,7 +1333,7 @@ function ValeEmConferencia({
         <div className="flex flex-col gap-2">
           <Label className="text-xs">Como o cliente pagou</Label>
           {preenchimento.pagamentos.map((linha, i) => {
-            const realizado = realizadoDaLinha(linha, trocoCalculado)
+            const realizado = realizadoDaLinha(linha)
             const dinheiro = linha.forma === 'dinheiro'
             return (
               <div key={i} className="flex flex-col gap-1">
@@ -1356,7 +1364,7 @@ function ValeEmConferencia({
                       aria-label="Aplicado à compra"
                     />
                   </div>
-                  {dinheiro && trocoCalculado && (
+                  {dinheiro && (
                     <>
                       <div className="flex w-36 flex-col gap-0.5">
                         <Label className="text-[0.65rem] text-foreground/70">
@@ -1377,16 +1385,6 @@ function ValeEmConferencia({
                       </div>
                     </>
                   )}
-                  {dinheiro && !trocoCalculado && (
-                    <div className="flex w-32 flex-col gap-0.5">
-                      <Label className="text-[0.65rem] text-foreground/70">Troco devolvido</Label>
-                      <CampoMoeda
-                        digitos={linha.trocoDigitos}
-                        onDigitos={(d) => alterarLinha(i, { trocoDigitos: d })}
-                        aria-label="Troco devolvido"
-                      />
-                    </div>
-                  )}
                   {preenchimento.pagamentos.length > 1 && (
                     <Button
                       type="button"
@@ -1398,7 +1396,7 @@ function ValeEmConferencia({
                     </Button>
                   )}
                 </div>
-                {dinheiro && trocoCalculado && linha.recebidoDigitos === '' && (
+                {dinheiro && linha.recebidoDigitos === '' && (
                   <p className="text-xs text-foreground/70">
                     Recebido vazio: o cliente pagou o valor exato, sem troco.
                   </p>
@@ -1418,7 +1416,7 @@ function ValeEmConferencia({
               onClick={() =>
                 trocarLinhas([
                   ...preenchimento.pagamentos,
-                  { forma: 'dinheiro', aplicadoDigitos: '', recebidoDigitos: '', trocoDigitos: '' },
+                  { forma: 'dinheiro', aplicadoDigitos: '', recebidoDigitos: '' },
                 ])
               }
             >
@@ -1436,6 +1434,17 @@ function ValeEmConferencia({
               Confere antes de confirmar — o documento vai afirmar o que estiver aqui.
             </p>
           )}
+          {/* A CONFIRMAÇÃO DO PAGAMENTO. As linhas acima vieram do previsto; o
+              que o documento afirma é o que alguém confirma aqui. Corrigir
+              qualquer linha desmarca. */}
+          <label className="flex items-center gap-2 text-sm">
+            <input
+              type="checkbox"
+              checked={preenchimento.pagamentoConfirmado}
+              onChange={(e) => onAlterar({ pagamentoConfirmado: e.target.checked })}
+            />
+            Conferi: o cliente pagou assim.
+          </label>
         </div>
       )}
 

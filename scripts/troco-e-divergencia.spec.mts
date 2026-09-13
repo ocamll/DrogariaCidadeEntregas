@@ -1,8 +1,8 @@
 // npx tsx scripts/troco-e-divergencia.spec.mts
 //
-// FALSAS DIVERGÊNCIAS E "TROCO PARA" — 2026-09-12.
+// FALSAS DIVERGÊNCIAS E "TROCO PARA" — 2026-09-12, com o misto em 2026-09-13.
 //
-// Escrito ANTES da correção, para demonstrar os defeitos:
+// Escrito ANTES da primeira correção, para demonstrar os defeitos:
 //
 //   1. a lista de vales e o fechamento chamavam de divergência a mera
 //      EXISTÊNCIA de pagamento realizado. O selo do retorno grava o
@@ -13,6 +13,12 @@
 //      à compra — o V-000063 (200 com troco de 100) é esse caso;
 //   3. o cadastro não tinha onde dizer o troco a levar.
 //
+// E ATUALIZADO em 2026-09-13, pela decisão do usuário sobre o pagamento
+// misto: o "troco para" considera SÓ a parcela em dinheiro. As asserções que
+// diziam "misto não aplica" e "misto mantém o troco informado" mudaram porque
+// a regra mudou — foram escritas antes da implementação nova, e falharam nela
+// até a regra existir.
+//
 // O CONTRATO que o spec trava (e que o servidor já pressupunha):
 //
 //   pagamentos.valor_cents   parte da COMPRA paga por aquela forma — líquido
@@ -21,8 +27,8 @@
 //   comparação               multiconjunto forma|valor_cents — troco FORA
 //
 // O módulo é importado dinamicamente e cada função é conferida antes de ser
-// chamada: sem isso, a primeira execução (antes da correção) morreria na
-// importação e esconderia QUAIS defeitos existem.
+// chamada: sem isso, uma execução antes da correção morreria na importação e
+// esconderia QUAIS defeitos existem.
 
 import { readFileSync } from 'node:fs'
 import { formatBRL } from '../src/lib/money.ts'
@@ -46,6 +52,9 @@ function existe(nome: string): boolean {
 }
 
 const p = (forma: string, valor: number, troco = 0) => ({ forma, valor_cents: valor, troco_cents: troco })
+// Uma linha do retorno em dígitos: forma, aplicado à compra e recebido.
+const linha = (forma: string, aplicado: string, recebido = '') =>
+  ({ forma, aplicadoDigitos: aplicado, recebidoDigitos: recebido })
 
 const ler = (caminho: string) => readFileSync(new URL(`../${caminho}`, import.meta.url), 'utf8')
 // Fiação lê CÓDIGO, nunca prosa (a lição do E4): o comentário que explica a
@@ -63,20 +72,14 @@ if (existe('situacaoDoPagamento') && existe('realizadoDaLinha')) {
     situacao([p('dinheiro', 10000)], [p('dinheiro', 10000)]), 'confere')
 
   // Compra de R$ 100, cliente entrega R$ 200, recebe R$ 100 de troco.
-  const nota200 = L.realizadoDaLinha(
-    { forma: 'dinheiro', aplicadoDigitos: '10000', recebidoDigitos: '20000', trocoDigitos: '' },
-    true
-  )
+  const nota200 = L.realizadoDaLinha(linha('dinheiro', '10000', '20000'))
   igual('recebido 200 com compra 100 vira aplicado 100 e troco 100', nota200,
     { ok: true, valorCents: 10000, trocoCents: 10000 })
   igual('e isso NÃO diverge do previsto de R$ 100',
     situacao([p('dinheiro', 10000)], [p('dinheiro', nota200.valorCents, nota200.trocoCents)]), 'confere')
 
   // O cadastro previa troco para R$ 200; o cliente pagou o valor exato.
-  const exato = L.realizadoDaLinha(
-    { forma: 'dinheiro', aplicadoDigitos: '10000', recebidoDigitos: '', trocoDigitos: '' },
-    true
-  )
+  const exato = L.realizadoDaLinha(linha('dinheiro', '10000', ''))
   igual('troco previsto, pagamento exato: recebido vazio é troco zero', exato,
     { ok: true, valorCents: 10000, trocoCents: 0 })
   igual('e confere com o previsto que tinha troco',
@@ -92,9 +95,6 @@ if (existe('situacaoDoPagamento') && existe('realizadoDaLinha')) {
     situacao([p('dinheiro', 10000)], []), 'sem_realizado')
   igual('nem quando também não há previsto', situacao([], []), 'sem_realizado')
 
-  igual('pagamento misto conferido igual ao previsto → confere',
-    situacao([p('pix', 4000), p('dinheiro', 6000)], [p('dinheiro', 6000), p('pix', 4000)]), 'confere')
-
   // O HISTÓRICO NÃO É REESCRITO: o V-000063 foi registrado com 200 no valor
   // e 100 no troco. Sob o contrato, isso afirma 200 aplicados — e é a
   // divergência que o servidor gravou. A tela não esconde nem reabre nada.
@@ -106,36 +106,80 @@ if (existe('situacaoDoPagamento') && existe('realizadoDaLinha')) {
 }
 
 // ---------------------------------------------------------------------
+console.log('\n--- (1b) O MISTO: R$ 60 líquidos em dinheiro + R$ 40 em pix ---')
+// ---------------------------------------------------------------------
+if (existe('situacaoDoPagamento') && existe('realizadoDaLinha') && existe('trocoDoPrevisto')) {
+  // O exemplo da decisão de 2026-09-13: compra 100, pix 40, dinheiro 60,
+  // "troco para" 100 → troco 40.
+  igual('cadastro: troco para 100 sobre a parcela de 60 → troco 40',
+    L.trocoDoPrevisto(6000, '10000'), { ok: true, trocoCents: 4000 })
+
+  const pixDoRetorno = L.realizadoDaLinha(linha('pix', '4000'))
+  const dinheiroDoRetorno = L.realizadoDaLinha(linha('dinheiro', '6000', '10000'))
+  igual('retorno: pix 40 aplicado, sem troco', pixDoRetorno, { ok: true, valorCents: 4000, trocoCents: 0 })
+  igual('retorno: dinheiro recebido 100 sobre parcela 60 → 60 líquidos e troco 40',
+    dinheiroDoRetorno, { ok: true, valorCents: 6000, trocoCents: 4000 })
+
+  const previsto = [p('pix', 4000), p('dinheiro', 6000, 4000)]
+  const realizado = [
+    p('dinheiro', dinheiroDoRetorno.valorCents, dinheiroDoRetorno.trocoCents),
+    p('pix', pixDoRetorno.valorCents, pixDoRetorno.trocoCents),
+  ]
+  igual('a conferência reconhece 60 em dinheiro + 40 em pix, sem divergência',
+    L.situacaoDoPagamento(previsto, realizado), 'confere')
+
+  // E as diferenças REAIS continuam aparecendo no misto.
+  igual('misto com parcela em dinheiro menor (50) → divergiu',
+    L.situacaoDoPagamento(previsto, [p('dinheiro', 5000), p('pix', 4000)]), 'divergiu')
+  igual('misto que virou tudo pix → divergiu',
+    L.situacaoDoPagamento(previsto, [p('pix', 10000)]), 'divergiu')
+  checa('misto: recebido menor que a parcela é recusado',
+    L.realizadoDaLinha(linha('dinheiro', '6000', '5000')).ok === false)
+  igual('misto: parcela paga exata, sem troco',
+    L.realizadoDaLinha(linha('dinheiro', '6000', '')), { ok: true, valorCents: 6000, trocoCents: 0 })
+}
+
+// ---------------------------------------------------------------------
 console.log('\n--- (2) "Troco para" no cadastro ---')
 // ---------------------------------------------------------------------
-if (existe('trocoDoPrevisto') && existe('trocoParaAplicavel')) {
+if (existe('trocoDoPrevisto') && existe('trocoParaAplicavel') && existe('indiceDaParcelaEmDinheiro')) {
   const troco = L.trocoDoPrevisto
 
   igual('campo vazio: não há troco a preparar', troco(10000, ''), { ok: true, trocoCents: 0 })
   igual('compra 100, troco para 200 → troco a levar 100', troco(10000, '20000'),
     { ok: true, trocoCents: 10000 })
 
-  const igualCompra = troco(10000, '10000')
-  checa('troco para IGUAL à compra é recusado', igualCompra.ok === false)
-  checa('e a mensagem cita o valor da compra', !!igualCompra.erro?.includes(formatBRL(10000)),
-    JSON.stringify(igualCompra))
-  checa('troco para INFERIOR à compra é recusado', troco(10000, '5000').ok === false)
+  const igualParcela = troco(10000, '10000')
+  checa('troco para IGUAL à parcela em dinheiro é recusado', igualParcela.ok === false)
+  checa('e a mensagem cita o valor da parcela', !!igualParcela.erro?.includes(formatBRL(10000)),
+    JSON.stringify(igualParcela))
+  checa('e diz que é a parcela em dinheiro', !!igualParcela.erro?.includes('parcela em dinheiro'),
+    JSON.stringify(igualParcela))
+  checa('troco para INFERIOR à parcela é recusado', troco(10000, '5000').ok === false)
+  checa('misto: troco para igual à parcela de 60 é recusado', troco(6000, '6000').ok === false)
+  checa('misto: troco para inferior à parcela de 60 é recusado', troco(6000, '5000').ok === false)
   checa('troco para ZERO é inválido (use o campo vazio)', troco(10000, '0').ok === false)
-  checa('sem valor de compra ainda, não calcula troco', troco(0, '20000').ok === false)
+  checa('sem valor em dinheiro ainda, não calcula troco', troco(0, '20000').ok === false)
 
-  // Alterar a compra recalcula a partir do mesmo "troco para".
-  igual('compra muda para 150: troco para 200 dá 50', troco(15000, '20000'),
+  // Alterar a parcela recalcula a partir do mesmo "troco para".
+  igual('parcela muda para 150: troco para 200 dá 50', troco(15000, '20000'),
     { ok: true, trocoCents: 5000 })
-  checa('compra muda para 250: o mesmo troco para passa a ser inválido',
+  checa('parcela muda para 250: o mesmo troco para passa a ser inválido',
     troco(25000, '20000').ok === false)
+
+  const indice = L.indiceDaParcelaEmDinheiro
+  igual('só dinheiro: a parcela é a linha 0', indice([{ forma: 'dinheiro' }]), 0)
+  igual('pix + dinheiro: a parcela é a linha 1', indice([{ forma: 'pix' }, { forma: 'dinheiro' }]), 1)
+  igual('só pix: não há parcela', indice([{ forma: 'pix' }]), null)
+  // Dinheiro repetido é recusado pela validação — não existe "a" parcela.
+  igual('dinheiro duas vezes: não há uma parcela', indice([{ forma: 'dinheiro' }, { forma: 'dinheiro' }]), null)
 
   const aplicavel = L.trocoParaAplicavel
   checa('só dinheiro: aplica', aplicavel([{ forma: 'dinheiro' }]) === true)
   checa('só pix: não aplica', aplicavel([{ forma: 'pix' }]) === false)
-  // PAGAMENTO MISTO: a regra está pendente de decisão do usuário. Até lá o
-  // campo não aparece e nada muda nesse caso.
-  checa('misto (pix + dinheiro): não aplica até a regra ser decidida',
-    aplicavel([{ forma: 'pix' }, { forma: 'dinheiro' }]) === false)
+  checa('misto com dinheiro: APLICA, sobre a parcela (decisão de 2026-09-13)',
+    aplicavel([{ forma: 'pix' }, { forma: 'dinheiro' }]) === true)
+  checa('misto sem dinheiro: não aplica', aplicavel([{ forma: 'pix' }, { forma: 'debito' }]) === false)
   checa('sem forma: não aplica', aplicavel([]) === false)
 }
 
@@ -143,34 +187,27 @@ if (existe('trocoDoPrevisto') && existe('trocoParaAplicavel')) {
 console.log('\n--- (3) o retorno: recebido, aplicado e troco ---')
 // ---------------------------------------------------------------------
 if (existe('realizadoDaLinha') && existe('digitosDoRecebidoPrevisto')) {
-  const linha = (forma: string, aplicado: string, recebido = '', troco = '') =>
-    ({ forma, aplicadoDigitos: aplicado, recebidoDigitos: recebido, trocoDigitos: troco })
-
-  const faltou = L.realizadoDaLinha(linha('dinheiro', '10000', '9000'), true)
+  const faltou = L.realizadoDaLinha(linha('dinheiro', '10000', '9000'))
   checa('recebido MENOR que o aplicado é recusado — o cálculo não esconde falta',
     faltou.ok === false)
   checa('e a mensagem manda registrar o que entrou', !!faltou.erro?.includes(formatBRL(9000)),
     JSON.stringify(faltou))
 
   igual('recebido igual ao aplicado → troco zero',
-    L.realizadoDaLinha(linha('dinheiro', '10000', '10000'), true),
+    L.realizadoDaLinha(linha('dinheiro', '10000', '10000')),
     { ok: true, valorCents: 10000, trocoCents: 0 })
 
   igual('pix não carrega troco, mesmo com dígitos sobrando no estado',
-    L.realizadoDaLinha(linha('pix', '10000', '20000', '500'), true),
+    L.realizadoDaLinha(linha('pix', '10000', '20000')),
     { ok: true, valorCents: 10000, trocoCents: 0 })
 
   checa('aplicado vazio é recusado',
-    L.realizadoDaLinha(linha('dinheiro', '', '20000'), true).ok === false)
-
-  // Misto: a regra do troco sobre a parcela está pendente; o troco da linha
-  // de dinheiro continua informado, como antes.
-  igual('misto: a linha de dinheiro mantém o troco informado',
-    L.realizadoDaLinha(linha('dinheiro', '6000', '', '4000'), false),
-    { ok: true, valorCents: 6000, trocoCents: 4000 })
+    L.realizadoDaLinha(linha('dinheiro', '', '20000')).ok === false)
 
   igual('pré-preenchimento: previsto 100 com troco 100 sugere recebido 200',
     L.digitosDoRecebidoPrevisto(10000, 10000), '20000')
+  igual('pré-preenchimento misto: parcela 60 com troco 40 sugere recebido 100',
+    L.digitosDoRecebidoPrevisto(6000, 4000), '10000')
   igual('sem troco previsto, o recebido nasce vazio (valor exato)',
     L.digitosDoRecebidoPrevisto(10000, 0), '')
 }
@@ -218,11 +255,16 @@ console.log('\n--- (5) fiação: o troco atravessa cadastro, fila e retorno ---'
   const entregas = semComentarios(ler('src/data/entregas.ts'))
   const pagamentos = semComentarios(ler('src/data/pagamentos.ts'))
   const retorno = semComentarios(ler('src/pages/RetornoCorrida.tsx'))
+  const lib = semComentarios(ler('src/lib/formasDePagamento.ts'))
 
   checa('o cadastro calcula pelo `trocoDoPrevisto`', /trocoDoPrevisto\(/.test(cadastro))
   checa('o cadastro manda `trocoCents` em cada forma prevista', /trocoCents:/.test(cadastro))
   checa('o cadastro mostra "Troco para"', /Troco para/.test(cadastro))
   checa('e "Troco a levar"', /Troco a levar/.test(cadastro))
+  checa('o cadastro acha a parcela em dinheiro pela lib',
+    /indiceDaParcelaEmDinheiro\(/.test(cadastro))
+  checa('e grava o troco NA LINHA da parcela, não na primeira',
+    !/i === 0 \? resultadoTroco/.test(cadastro) && /i === indiceDinheiro/.test(cadastro))
   // Sem valor escondido: toda mudança de formas passa por um lugar que
   // limpa o troco quando ele deixa de se aplicar.
   checa('as formas mudam por um único caminho que limpa o troco',
@@ -237,9 +279,20 @@ console.log('\n--- (5) fiação: o troco atravessa cadastro, fila e retorno ---'
   checa('o retorno pré-preenche o recebido pelo previsto', /digitosDoRecebidoPrevisto\(/.test(retorno))
   checa('o retorno não lê mais o troco cru no payload',
     !/trocoCents:\s*linha\.trocoDigitos\s*\?\s*centsFromDigits/.test(retorno))
+  // O PROVISÓRIO SAIU: não existe mais troco digitado à mão nem modo "misto".
+  checa('o retorno não tem mais troco digitado à mão', !/trocoDigitos/.test(retorno))
+  checa('nem a lib', !/trocoDigitos|trocoCalculado/.test(lib))
   checa('rótulo "Aplicado à compra"', /Aplicado à compra/.test(retorno))
   checa('rótulo "Recebido em dinheiro"', /Recebido em dinheiro/.test(retorno))
   checa('rótulo "Troco devolvido"', /Troco devolvido/.test(retorno))
+
+  // A PREVISÃO NÃO É COMPROVAÇÃO: o pagamento pré-preenchido só vira
+  // documento depois de alguém confirmar, e corrigir desfaz a confirmação.
+  checa('o retorno exige confirmar o pagamento', /pagamentoConfirmado/.test(retorno))
+  checa('e recusa congelar sem a confirmação',
+    /!p\.pagamentoConfirmado/.test(retorno))
+  checa('e corrigir uma linha desfaz a confirmação',
+    (retorno.match(/pagamentoConfirmado:\s*false/g) ?? []).length >= 3)
 }
 
 // ---------------------------------------------------------------------
@@ -249,7 +302,8 @@ console.log('\n--- (6) o gêmeo do servidor compara sem troco ---')
   // A definição VIGENTE de `selar_romaneio_retorno_interno` é a da migration
   // mais recente que a redefine. A comparação tem que continuar sendo
   // forma|valor_cents dos dois lados — troco somado ou subtraído ali
-  // misturaria bruto com líquido.
+  // misturaria bruto com líquido. O misto não muda isto: a parcela líquida
+  // em dinheiro é a chave `dinheiro|6000` nos dois gêmeos.
   const sql = ler('supabase/migrations/20260912120000_selo_do_retorno_versao_2.sql')
   const inicio = sql.indexOf("if v_desfecho = 'entregue' then")
   const fim = sql.indexOf('v_divergiu := v_previsto is distinct from v_realizado;')
