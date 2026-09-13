@@ -10765,6 +10765,51 @@ Por último, (1) e o placar em (6).
 também abre pedido), republicar a `sync-romaneio`, rodar o roteiro acima e
 conferir a página e o PDF do retorno na tela.
 
+### A revisão da pendência de PIN, e a versão 2 — mesmo dia
+
+O usuário revisou a proposta contra o documento e as migrations e achou seis
+falhas, **todas procedentes**. Três eram afirmações minhas sem medir:
+
+- **"só `log_credencial` escreve os eventos de PIN" era falso.** A policy
+  `eventos_insert` aceita qualquer `tipo` do tenant, e `assinaturas_insert`
+  continua permitindo inserção direta. Nome de evento e existência de
+  assinatura não provam fato nenhum;
+- **o relógio do balcão decidia "chegou depois"**, e há um caso que falha com
+  os relógios certos (reset às 10h, operação offline das 8h sincronizando às
+  11h → pedido novo para problema resolvido);
+- **gatilho na transação do selo**: concorrência mal tratada viraria exceção
+  e desfaria a saída ou o retorno;
+- mais: sem vínculo com a credencial, sem encerramento manual, policy que
+  incluía o caixa por acidente, e "o admin foi avisado" sem nada que o prove.
+
+**E um fato novo, medido pelo usuário no banco:** as duas tabelas da versão 1
+**já existiam, vazias e fora de qualquer migration** — muito provavelmente o
+bloco de SQL da mensagem foi executado. O erro de origem é meu: mostrei as
+`create table` num bloco próprio, sem o `enable row level security` e os
+`revoke`, que ficaram só no documento. **Regra que sobra: um bloco de SQL
+copiável sai sempre com a proteção da tabela junto.** Existem também 5
+assinaturas `pin_esquecido` sem acompanhamento.
+
+**A versão 2** (`docs/pendencia-pin-4b-2026-09-13.md`, sobrescrito):
+
+- fatos só de onde o cliente não escreve: `motoboy_autorizacoes` (sem grant),
+  `romaneios` (só select) e uma tabela nova `credencial_fatos`, preenchida
+  por gatilho em `motoboy_credenciais` (sem grant de escrita). Conferido: só
+  `definir_pin`, `redefinir_pin` e `redefinir_meu_pin` mudam `pin_hash`;
+- **nenhum gatilho no selo**: o pedido é DERIVADO na leitura, o que elimina a
+  concorrência no selo e cobre as 5 exceções antigas sem backfill;
+- **o relógio do servidor pode encerrar; o do balcão só rebaixa para
+  "Verificar"**. O caso das 8h/10h/11h cai em Verificar;
+- cartão perdido como pedido próprio, sem revogação automática; encerramento
+  pelo admin com motivo, sem zerar PIN; cargos explícitos (caixa não vê o
+  painel); "Pedido registrado no painel do administrador", com atualização a
+  cada 60 s declarada; e o pedido não retém vale.
+
+**Primeiro passo, do usuário:** conferir e remover as duas tabelas criadas
+fora de migration (§1 do documento). Depois, confirmar o SQL da versão 2
+(§11). O endurecimento de `eventos_insert` e `assinaturas_insert` (§12) é
+decisão à parte.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
