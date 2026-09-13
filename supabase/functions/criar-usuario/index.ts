@@ -22,7 +22,7 @@ const SENHA_MINIMA = 6
 // GÊMEO DE `src/lib/username.ts` — E5
 //
 // Esta função roda em Deno, fora do bundle do app, então ela é uma
-// CÓPIA. Mesmo arranjo de `calcularOfflineEventHash`, que também tem
+// CÓPIA. Mesmo arranjo de `calcularOfflineEventHashSaidaV2`, que também tem
 // cópia na `sync-romaneio`.
 //
 // **AS DUAS TÊM QUE PRODUZIR OS MESMOS BYTES.** Divergindo, a conta

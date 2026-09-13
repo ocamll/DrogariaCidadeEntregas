@@ -9,7 +9,7 @@
 //     supabase/functions/criar-usuario       monta o e-mail na CRIAÇÃO
 //
 // A Edge Function roda em Deno, fora deste bundle, então ela carrega uma
-// CÓPIA da normalização — mesmo arranjo de `calcularOfflineEventHash`,
+// CÓPIA da normalização — mesmo arranjo de `calcularOfflineEventHashSaidaV2`,
 // que também tem cópia na `sync-romaneio`.
 //
 // Divergindo em um byte, a conta nasce com um endereço e o login tenta

@@ -37,8 +37,8 @@ esperando no balcão. Velocidade de digitação é o requisito número um.
 
 Usuário secundário: mototaxista, que só encosta num tablet para assinar —
 **desde a decisão de 2026-09-11, para passar o cartão e digitar o PIN**: a
-assinatura manuscrita sai do sistema. **Na SAÍDA isso está construído e
-aceito desde 2026-09-12; no RETORNO ainda não** (ver "Cadeia de custódia").
+assinatura manuscrita saiu do sistema. **Construído e aceito em 2026-09-12,
+na saída e no retorno** (ver "Cadeia de custódia").
 
 A farmácia real tem **18 filiais**, espalhadas por mais de uma cidade
 (o banco de desenvolvimento já tem as oito de São Gabriel, medido em
@@ -77,7 +77,10 @@ Lista fechada. Não instalar dependência nova sem perguntar.
 - Tailwind + shadcn/ui
 - TanStack Query (server state) + Dexie (fila offline em IndexedDB, +
   `dexie-react-hooks` pro `useLiveQuery` — pacote oficial da Dexie, não é lib nova)
-- `signature_pad` (captura de assinatura)
+- ~~`signature_pad` (captura de assinatura)~~ — **desinstalado em
+  2026-09-12**, com o fim da assinatura manuscrita (4B). As assinaturas
+  históricas continuam aparecendo: tela e PDF redesenham os traços à mão,
+  sem a biblioteca.
 - `exceljs` (exportação do acerto em .xlsx — aprovado em 2026-08-13).
   Escolhido no lugar do SheetJS porque o pacote `xlsx` está descontinuado
   no npm e a versão que o npm ainda serve (0.18.5) carrega o
@@ -1246,8 +1249,8 @@ foram assinados.
 Construído em 2026-08-16, em seis etapas. A saída da tele deixou de ser
 "salvar uma assinatura do motoboy" e virou um documento selado.
 
-> **A ASSINATURA MANUSCRITA SAI — decidido em 2026-09-11. NA SAÍDA:
-> CONSTRUÍDO, APLICADO E ACEITO em 2026-09-12. NO RETORNO: não construído.**
+> **A ASSINATURA MANUSCRITA SAIU — decidido em 2026-09-11; CONSTRUÍDO,
+> APLICADO E ACEITO em 2026-09-12, na SAÍDA e no RETORNO.**
 > Nas palavras do usuário: *"Não é para deixar assinaturas do sistema,
 > apenas cartão e pin."* A evidência do motoboy passa a ser **cartão + PIN**;
 > a da farmácia, a **sessão com um ato explícito de confirmar** o conteúdo.
@@ -1273,15 +1276,23 @@ Construído em 2026-08-16, em seis etapas. A saída da tele deixou de ser
 > **O aceite da saída, medido em 2026-09-12** (item 107 do NOTAS): cartão do
 > motoboy e cartão do gerente, online e offline — `R-000033` a `R-000038` —,
 > com os vales sempre no nome do motoboy escolhido e o verificador em
-> **28 · 28 · 0**, lendo a versão de cada evidência. A assinatura desenhada
-> continua existindo **só no retorno e nos documentos antigos**, que seguem
-> verificando pela fórmula histórica.
+> **28 · 28 · 0**, lendo a versão de cada evidência.
+>
+> **O aceite do retorno, medido no mesmo dia** (item 108 do NOTAS):
+> `R-000039` a `R-000042`, um de cada modo — cartão do motoboy e do
+> gerente, online e offline, com `pin_esquecido` e `validador_profile_id`
+> nos dois do gerente, `sessao_confirmacao_explicita` nos quatro e nenhum
+> traço. Verificador em **32 · 32 · 0** (saída 22, retorno 10). No retorno o
+> motoboy vem da saída e não é escolhido; a máquina exige o motivo ANTES do
+> PIN do gerente, e é a evidência (autorização ou PIN capturado) que escolhe
+> a porta do selo, não a rede do instante do clique.
 >
 > Tudo o que esta seção descreve sobre traços (`strokes`, canvas, as duas
-> assinaturas, `signature_pad`) **já saiu da SAÍDA e continua sendo o código
-> do RETORNO**, de onde sai na etapa dele, com versão nova das fórmulas de `signature_hash` e do hash do evento
-> offline, lida da própria linha. **Os bytes de DCR1 e DCRR1 não mudam**: os
-> traços nunca entraram no canônico. Decisões na seção 12 de
+> assinaturas, `signature_pad`) **é HISTÓRIA desde 2026-09-12**: descreve os
+> documentos versão 1, que continuam no banco e verificando pela fórmula
+> histórica, lida de `versao_evidencia` na própria linha. `CampoAssinatura`,
+> `signature_pad` e a versão 1 do hash offline saíram do código. **Os bytes
+> de DCR1 e DCRR1 não mudaram**: os traços nunca entraram no canônico. Decisões na seção 12 de
 > `docs/levantamento-4a-2026-09-11.md`; **o desenho, já revisado, está em
 > `docs/desenho-4b-2026-09-11.md` (versão 2)** — leia-o antes da primeira
 > linha de código do 4B.
@@ -1325,14 +1336,17 @@ em duas linguagens.
   em erro imediato e legível.
 
 Existe um segundo par de gêmeos, bem menos arriscado porque é TypeScript
-dos dois lados: `calcularOfflineEventHash` em `src/lib/envelope.ts` e a
+dos dois lados: o hash do evento offline, em `src/lib/envelope.ts` e na
 cópia dentro de `supabase/functions/sync-romaneio/index.ts`.
 
-**Desde 2026-09-12 são DOIS pares, e os dois ficam:** a versão 1 (com traços)
-serve o retorno; `calcularOfflineEventHashSaidaV2` (`OEV2|…|validacao|motivo|
-motoboy|relógio`, sem traço nem geolocalização) serve a saída.
-`scripts/offline-hash-v2.spec.mts` confere as duas gêmeas da v2 contra
-digests congelados **antes** de qualquer implementação existir.
+**Desde 2026-09-12 são dois pares da versão 2**, um por documento:
+`calcularOfflineEventHashSaidaV2` e `calcularOfflineEventHashRetornoV2`
+(`OEV2|documento|romaneio|saida ou retorno|validacao|motivo|motoboy|relógio`,
+sem traço nem geolocalização). São funções separadas de propósito: a da
+saída já estava publicada e congelada quando a do retorno nasceu.
+`scripts/offline-hash-v2.spec.mts` confere as quatro contra digests
+congelados **antes** de qualquer implementação existir, e exige que a
+versão 1 (com traços) não exista mais em nenhum dos dois lados.
 
 ### O PIN offline, e por que não é criptografia simétrica
 
@@ -1632,24 +1646,21 @@ modos de falha e um spec inteiro. Valor operacional próximo de zero.
 aquecimento nas duas telas, a captura na selagem, a linha da Custódia e
 as duas linhas do PDF do romaneio.
 
-**O QUE FICOU, E POR QUE NÃO É DESCUIDO:**
+**O QUE FICOU, E POR QUE NÃO ERA DESCUIDO** — até 2026-09-12:
 
 ```
 envelope.ts        o campo `geolocalizacao` na assinatura de
-                   calcularOfflineEventHash — e ele entra na FÓRMULA
+                   calcularOfflineEventHash — e ele entrava na FÓRMULA
 sync-romaneio      a cópia GÊMEA da mesma fórmula
 romaneios.ts       p_geolocalizacao: null nas duas RPCs
 ```
 
-A fórmula serializa `null` como `-`, e a Edge Function já fazia
-`corpo.geolocalizacao ?? null`. Passando `null` de um lado e omitindo o
-campo do outro, **os dois gêmeos continuam produzindo bytes idênticos** —
-provado por `offline-hash.spec.mts` ("os dois lados concordam") e pelos
-três hashes congelados em `envelope.spec.mts`.
-
-Remover o campo da fórmula mudaria um lado só, e o sintoma seria o pior
-do projeto: a saída offline deixaria de sincronizar, sem erro legível. O
-campo sai junto com o envelope inteiro, na etapa seguinte da limpeza.
+Remover o campo da fórmula de um lado só teria feito a saída offline
+deixar de sincronizar, sem erro legível. **Ele saiu das fórmulas em
+2026-09-12**, pelos dois lados de uma vez: as versões 2 do hash do evento
+offline (4B) não o têm, e a versão 1 foi retirada do cliente e da
+`sync-romaneio` junto com os traços. O que sobra é só `p_geolocalizacao:
+null` nas RPCs.
 
 **Nada no SQL foi tocado.** `p_geolocalizacao` continua existindo nas
 funções e `romaneios.geolocalizacao` continua sendo coluna — as duas
@@ -3610,7 +3621,8 @@ Uma sessão = uma coisa testável no fim. Não construir três telas de uma vez.
    `corridas` + `assinaturas` + atualiza as entregas junto, não é fluxo em
    duas etapas. Assinatura é do motoboy na retirada (custódia/
    responsabilidade), não prova de chegada no endereço — isso exigiria GPS,
-   que está fora de escopo. `signature_pad` instalado (já estava na stack).
+   que está fora de escopo. `signature_pad` instalado (já estava na stack;
+   desinstalado em 2026-09-12, quando a assinatura manuscrita saiu).
 6. ~~Retorno / fechamento de corrida~~ — feito. Tela lista corridas abertas
    → escolhe uma → marca cada vale Entregue/Insucesso (motivo obrigatório
    no insucesso) → fecha a corrida. Testado ponta a ponta.
@@ -3653,8 +3665,9 @@ Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
 4B. cartão, PIN e confirmação, sem assinatura manuscrita — desenho v2 em docs/desenho-4b-2026-09-11.md
       ├ credencial do gerente + "Meu cartão"            ✓ 2026-09-12
       ├ SAÍDA v2 (online e offline, motoboy e gerente)  ✓ 2026-09-12 (28 · 28 · 0)
-      └ RETORNO v2                                      ← AQUI
-4C. continuidade offline: abrir o app sem rede (Service Worker + Cache API), telas no estado local e E12 — obrigatória antes do piloto
+      ├ RETORNO v2 (online e offline, motoboy e gerente) ✓ 2026-09-12 (32 · 32 · 0)
+      └ limpeza: CampoAssinatura, signature_pad, hash v1 ✓ 2026-09-12
+4C. continuidade offline: abrir o app sem rede (Service Worker + Cache API), telas no estado local e E12 — obrigatória antes do piloto   ← AQUI
 5.  conferência diária calculada, com exceções e aprovação versionada
 6.  painel da agência e conciliação por vale, por quinzena
 7A. staging e ensaio do corte

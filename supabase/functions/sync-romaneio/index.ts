@@ -44,53 +44,14 @@ function deBase64(texto: string): Uint8Array {
   return bytes
 }
 
-// Espelho de `calcularOfflineEventHash` em src/lib/envelope.ts. As duas
-// são TypeScript, então o risco de divergência é bem menor que o do
-// canônico do romaneio (TypeScript contra SQL) — mas mexeu numa, mexe na
-// outra. Ordem dos campos e separador fazem parte do contrato.
-// OS NOMES DOS PARÂMETROS SÃO NEUTROS DESDE A 2C.5, e a fórmula NÃO
-// mudou um byte — ela concatena VALORES, não chaves.
-//
-//     saída:   caixaStrokes       ┐
-//     retorno: responsavelStrokes ┴→ assinaturaInternaStrokes
-//
-// Renomear no FIO seria quebra (corpos já gravados dizem caixaStrokes);
-// renomear aqui dentro não é. E o nome antigo mentiria no retorno, onde
-// quem assina é o responsável da loja e pode ser gerente ou admin — a
-// armadilha do tipo_signatario outra vez.
-//
-// O spec do envelope congela três hashes calculados ANTES deste
-// refactor e exige que continuem idênticos. A intenção era "só renomeei
-// parâmetro"; a asserção é quem prova.
-async function calcularOfflineEventHash(entrada: {
-  documentHash: string
-  romaneioId: string
-  assinaturaInternaStrokes: unknown
-  assinaturaMotoboyStrokes: unknown
-  ocorridoEmLocal: string
-  geolocalizacao: unknown | null
-}): Promise<string> {
-  const partes = [
-    entrada.documentHash,
-    entrada.romaneioId.toLowerCase(),
-    JSON.stringify(entrada.assinaturaInternaStrokes),
-    JSON.stringify(entrada.assinaturaMotoboyStrokes),
-    entrada.ocorridoEmLocal,
-    entrada.geolocalizacao === null ? '-' : JSON.stringify(entrada.geolocalizacao),
-  ]
-  const bytes = new TextEncoder().encode(partes.join('|'))
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
-}
-
 // GÊMEA de `calcularOfflineEventHashSaidaV2` em src/lib/envelope.ts — o
 // hash do evento offline da SAÍDA, versão 2 (4B). Sem traço e sem
 // geolocalização; com o modo de validação, o motivo e o motoboy. Os tipos
 // são primitivos nos dois arquivos de propósito, pra o spec conseguir
-// extrair este texto e compilá-lo sozinho.
+// extrair este texto e compilá-lo sozinho. Mexeu numa, mexe na outra.
 //
-// A v1 logo acima ficou SEM CHAMADOR quando o retorno passou à versão 2
-// (a função logo abaixo desta). Sai na limpeza dos traços.
+// A versão 1 (com traços e geolocalização) saiu dos dois lados em
+// 2026-09-12, quando o retorno também passou à versão 2.
 // `scripts/offline-hash-v2.spec.mts` confere as gêmeas contra digests
 // congelados antes de qualquer uma existir.
 async function calcularOfflineEventHashSaidaV2(entrada: {

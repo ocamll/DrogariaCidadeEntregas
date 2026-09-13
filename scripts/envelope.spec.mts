@@ -20,13 +20,15 @@
 //     "o navegador sela e não reabre"
 //   ciphertext adulterado não abre             — AES-GCM é autenticado;
 //     sem esta asserção, "não abre" poderia ser sorte de padding
-//   os três hashes de ANTES do refactor        — a 2C.5 renomeou
-//     parâmetros ao lado de uma fórmula criptográfica, e "só renomeei"
-//     precisa ser medido, não afirmado
+//
+// Até 2026-09-12 havia um sétimo: os três hashes da versão 1 do evento
+// offline, congelados antes do rename da 2C.5. A versão 1 saiu dos dois
+// lados com os traços, e a regressão saiu junto — as fórmulas de hoje são
+// travadas por `offline-hash-v2.spec.mts`.
 //
 // A resolução de `tipo` do lado do servidor é EXTRAÍDA de
 // `supabase/functions/sync-romaneio/index.ts`, nunca reescrita aqui —
-// mesma disciplina do `offline-hash.spec.mts`. Reescrever faria deste
+// mesma disciplina do `offline-hash-v2.spec.mts`. Reescrever faria deste
 // spec uma segunda implementação da regra que ele deveria conferir.
 
 import { readFileSync, writeFileSync, mkdtempSync } from 'node:fs'
@@ -35,7 +37,6 @@ import { join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 import {
   selarSegredosCom,
-  calcularOfflineEventHash,
   type SegredosDoRomaneio,
 } from '../src/lib/envelope.ts'
 
@@ -191,43 +192,6 @@ console.log('\n--- (5) o que não pode abrir ---')
     /* esperado */
   }
   checa('iv trocado não abre', !abriuIv)
-}
-
-console.log('\n--- (6) regressão: o refactor de nomes não moveu a fórmula ---')
-{
-  // Estes três hashes foram calculados com o código de ANTES da 2C.5,
-  // quando os parâmetros ainda se chamavam `caixaStrokes`/`motoboyStrokes`.
-  // Se algum mudar, o refactor não foi "só renomear" — e a saída offline
-  // de todo mundo passaria a ser recusada com "o conteúdo da saída mudou
-  // depois de assinado", uma mensagem que aponta pra adulteração quando a
-  // causa é um rename.
-  const base = {
-    documentHash: 'a'.repeat(64),
-    romaneioId: '01A00D9D-AF9A-71C3-A15F-9B1F5967F599',
-    assinaturaInternaStrokes: [{ points: [[1, 2, 30]], rotulo: 'José Antônio', t: 1 }],
-    assinaturaMotoboyStrokes: [{ points: [[3, 4, 50]], t: 2 }],
-    ocorridoEmLocal: '2026-08-20T21:30:00.000-03:00',
-    geolocalizacao: { lat: -30.33, lon: -54.32, origem: 'cache' },
-  }
-
-  checa(
-    'com geolocalização',
-    (await calcularOfflineEventHash(base)) ===
-      'd91131afa76de52d5960a844edd8997c6a58835319d7ac26b4745abfb76fcd11'
-  )
-  checa(
-    'sem geolocalização',
-    (await calcularOfflineEventHash({ ...base, geolocalizacao: null })) ===
-      '44d50904f67a18b0f15dde815a0068e96014350bbff22dfa876c9dd2dd8c71ab'
-  )
-  checa(
-    'traços nulos',
-    (await calcularOfflineEventHash({
-      ...base,
-      assinaturaInternaStrokes: null,
-      assinaturaMotoboyStrokes: null,
-    })) === '000223191a177266c53ad3bb558171a51c09e71ec212ad972b0337f34cc03e33'
-  )
 }
 
 console.log(falhas === 0 ? '\nenvelope ok\n' : `\n${falhas} FALHA(S)\n`)

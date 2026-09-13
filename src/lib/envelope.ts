@@ -213,62 +213,18 @@ export async function selarSegredosCom(
   }
 }
 
-// Hash que amarra a operação offline inteira — snapshot, assinaturas e
-// relógio. Vai DENTRO do envelope, então o cliente não
-// consegue alterá-lo depois; a Edge Function recalcula a partir do
-// payload público e compara. É assim que alteração acidental (ou não) do
-// payload entre assinar e sincronizar aparece.
+// O hash do evento offline amarra ao envelope o que viaja no corpo da
+// requisição e NÃO está no canônico. Ele vai DENTRO do envelope, então o
+// cliente não consegue alterá-lo depois; a Edge Function recalcula a partir
+// do corpo e compara, e é assim que alteração do payload entre confirmar e
+// sincronizar aparece (`payload_alterado`).
 //
-// Este é TypeScript dos dois lados (aqui e na Edge Function), então o
-// risco de divergência é bem menor que o do canônico do romaneio, que é
-// TypeScript contra SQL. Ainda assim: mexeu aqui, mexe lá.
-export // OS NOMES DOS PARÂMETROS SÃO NEUTROS DESDE A 2C.5, e a fórmula NÃO
-// mudou um byte — ela concatena VALORES, não chaves.
+// A VERSÃO 1 SAIU em 2026-09-12. Ela concatenava os dois traços e a
+// geolocalização vestigial; ficou sem chamador quando o retorno passou à
+// versão 2, e foi retirada dos dois lados junto com `CampoAssinatura` e
+// `signature_pad`. Com ela saiu também o último uso da geolocalização numa
+// fórmula.
 //
-//     saída:   caixaStrokes       ┐
-//     retorno: responsavelStrokes ┴→ assinaturaInternaStrokes
-//
-// Renomear no FIO seria quebra (corpos já gravados dizem caixaStrokes);
-// renomear aqui dentro não é. E o nome antigo mentiria no retorno, onde
-// quem assina é o responsável da loja e pode ser gerente ou admin — a
-// armadilha do tipo_signatario outra vez.
-//
-// O spec do envelope congela três hashes calculados ANTES deste
-// refactor e exige que continuem idênticos. A intenção era "só renomeei
-// parâmetro"; a asserção é quem prova.
-async function calcularOfflineEventHash(entrada: {
-  documentHash: string
-  romaneioId: string
-  assinaturaInternaStrokes: unknown
-  assinaturaMotoboyStrokes: unknown
-  ocorridoEmLocal: string
-  // VESTIGIAL DE PROPÓSITO, e não é descuido. A geolocalização saiu do
-  // sistema, e todo chamador passa `null` daqui em diante — mas o campo
-  // fica, porque ele entra na FÓRMULA logo abaixo.
-  //
-  // A Edge Function tem a cópia gêmea deste hash e faz
-  // `corpo.geolocalizacao ?? null`, ou seja, ela já resolve a ausência
-  // como `null` e serializa o mesmo `-`. Removendo o campo daqui, a
-  // fórmula mudaria de UM LADO SÓ, e o sintoma seria o pior do projeto:
-  // a saída offline deixaria de sincronizar, sem erro legível.
-  //
-  // Ele some junto com o envelope inteiro, que é a etapa seguinte da
-  // limpeza — aí os dois lados caem na mesma sessão.
-  geolocalizacao: unknown | null
-}): Promise<string> {
-  const partes = [
-    entrada.documentHash,
-    entrada.romaneioId.toLowerCase(),
-    JSON.stringify(entrada.assinaturaInternaStrokes),
-    JSON.stringify(entrada.assinaturaMotoboyStrokes),
-    entrada.ocorridoEmLocal,
-    entrada.geolocalizacao === null ? '-' : JSON.stringify(entrada.geolocalizacao),
-  ]
-  const bytes = new TextEncoder().encode(partes.join('|'))
-  const digest = await crypto.subtle.digest('SHA-256', bytes)
-  return Array.from(new Uint8Array(digest), (b) => b.toString(16).padStart(2, '0')).join('')
-}
-
 // =====================================================================
 // O HASH DO EVENTO OFFLINE DA SAÍDA — versão 2 (4B, 2026-09-12)
 //
@@ -290,10 +246,6 @@ async function calcularOfflineEventHash(entrada: {
 // texto da Edge Function e o compila sozinho, e um tipo importado não
 // existiria lá. Mexeu numa, mexe na outra — `scripts/offline-hash-v2.spec.mts`
 // confere as duas contra digests congelados antes delas.
-//
-// A versão 1, logo acima, ficou SEM CHAMADOR quando o retorno passou à
-// versão 2 (logo abaixo). Ela sai junto com o resto dos traços, na
-// limpeza de `CampoAssinatura` e `signature_pad` — com os specs dela.
 // =====================================================================
 export async function calcularOfflineEventHashSaidaV2(entrada: {
   documentHash: string

@@ -45,7 +45,7 @@
 //
 // A Edge Function roda em Deno, fora deste bundle, então ela carrega uma
 // CÓPIA de `normalizarUsername`. É o mesmo arranjo de
-// `calcularOfflineEventHash`, que também tem cópia na `sync-romaneio`.
+// `calcularOfflineEventHashSaidaV2`, que também tem cópia na `sync-romaneio`.
 //
 // **Se as duas divergirem em um byte, a conta é criada com um endereço e
 // o login tenta outro — e o sintoma é "senha inválida", sem pista

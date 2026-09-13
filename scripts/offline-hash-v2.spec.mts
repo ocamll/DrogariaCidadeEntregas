@@ -2,8 +2,8 @@
 //
 //   npx tsx scripts/offline-hash-v2.spec.mts
 //
-// Mesma disciplina do `offline-hash.spec.mts`, que continua cobrindo a
-// versão 1 (ainda usada pelo retorno): a cópia da Edge Function é
+// Cobre as duas fórmulas vivas — saída e retorno. A versão 1, com traços,
+// saiu em 2026-09-12 com o spec dela. A cópia da Edge Function é
 // EXTRAÍDA do arquivo publicado, nunca reescrita aqui. Reescrever faria
 // deste teste uma terceira implementação — o defeito que ele existe pra
 // detectar.
@@ -177,12 +177,17 @@ checa('retorno: outro motoboy muda o hash',
   (await hr(base)) !== (await hr({ ...base, motoboyId: '019fe840-0000-7000-8000-000000000009' })))
 
 // ---------------------------------------------------------------------
-// (5) A VERSÃO 1 FICOU SEM CHAMADOR — e sai na limpeza dos traços
+// (5) A VERSÃO 1 SAIU DOS DOIS LADOS — 2026-09-12
+//
+// Não basta o handler não chamá-la: uma gêmea órfã num lado só é o
+// começo de duas fórmulas que divergem sem ninguém ver.
 // ---------------------------------------------------------------------
 
 const handler = fonte.slice(fonte.indexOf('Deno.serve('))
-checa('o handler da Edge Function não chama mais a versão 1',
-  !handler.includes('calcularOfflineEventHash('))
+checa('a Edge Function não tem mais a versão 1',
+  !fonte.includes('async function calcularOfflineEventHash('))
+checa('o cliente não tem mais a versão 1',
+  !readFileSync('src/lib/envelope.ts', 'utf8').includes('async function calcularOfflineEventHash('))
 checa('e o retorno do handler usa a versão 2',
   handler.includes('calcularOfflineEventHashRetornoV2({'))
 

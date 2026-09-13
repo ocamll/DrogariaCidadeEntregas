@@ -10509,7 +10509,81 @@ com quem ela deveria destravar.
 **O que falta do 4B:** o RETORNO v2 (mesmo padrão: selo e porta offline sem
 traço, tela com confirmação e o cartão do gerente abrindo a exceção com o
 motoboy vindo da saída), e depois retirar `CampoAssinatura` e
-`signature_pad` quando nada mais os usar.
+`signature_pad` quando nada mais os usar. **Feito — item 108.**
+
+## 108. O RETORNO sem assinatura manuscrita — construído e aceito; o 4B fecha
+
+**2026-09-12.** A segunda metade do 4B, no mesmo padrão da saída: nenhum
+traço, o motoboy validando por cartão e PIN ou o gerente autorizando no
+lugar dele, e a farmácia confirmando com um ato explícito.
+
+| commit | o quê |
+|---|---|
+| `a4ee738` | migration `20260912120000`: conflito, interno, porta online e porta offline do retorno sem traço, com EV2 e o gerente conferido contra a filial da SAÍDA; gate de placar dentro da transação |
+| `33f3f38` | máquina do retorno, tela, OEV2 do retorno nos dois gêmeos, `sync-romaneio` e specs |
+| (este) | limpeza: `CampoAssinatura`, `signature_pad` e a versão 1 do hash offline |
+
+**O aceite, medido pelo usuário:**
+
+| romaneio | modo | método do motoboy | motivo |
+|---|---|---|---|
+| `R-000039` | online | `gerente_card_pin_server_verified` | `pin_esquecido` |
+| `R-000040` | online | `physical_card_pin_server_verified` | — |
+| `R-000041` | offline_sincronizada | `physical_card_pin_offline_then_verified` | — |
+| `R-000042` | offline_sincronizada | `gerente_card_pin_offline_then_verified` | `pin_esquecido` |
+
+- `versao_evidencia = 2` e nenhum traço nas oito linhas;
+- a farmácia com `sessao_confirmacao_explicita` nos quatro;
+- `validador_profile_id` preenchido só nos dois do gerente;
+- **verificador em 32 · 32 · 0** (saída 22, retorno 10): os quatro novos
+  pela EV2, os antigos pela fórmula histórica.
+
+Não foi consultado à parte que as corridas fecharam e que os vales ficaram
+no nome do João Silva. As duas coisas saem da mesma transação do selo (o
+interno fecha a corrida e recusa `outro_motoboy`), e o verificador só
+reconhece o documento selado — mas é dedução, não medição.
+
+**Decisões que entraram no caminho, e ficam:**
+
+- **No retorno o motoboy não é escolhido**: vem da saída. O cartão do
+  gerente abre a exceção com "Autorizar o retorno de [motoboy] com a
+  credencial do gerente. Informe o PIN do gerente."; gerente de outra filial
+  é recusado no bipe, e o retorno por outro motoboy continua recusado;
+- **o motivo é carimbado e vem ANTES do PIN**: autenticar cartão de gerente
+  sem motivo é transição que não existe, e depois de autenticar o motivo
+  não muda;
+- **a evidência escolhe a porta**: `CONCLUIR` online só de
+  `custodia_autorizada`, offline só de `segredos_capturados`. PIN capturado
+  sem rede sobe pela fila mesmo que a internet volte antes do clique;
+- `TROCAR_MOTOBOY` virou `TROCAR_CARTAO`; ler um cartão novo zera tudo do
+  anterior;
+- `SegredosDoRomaneio` deixou de ser união: os dois tipos carregam
+  `validacao` e `motivoExcecao` dentro do envelope;
+- `mensagemDaAutorizacao` passou a morar em `lib/excecaoDoGerente.ts`, para
+  as duas telas.
+
+**Um defeito achado pela varredura do spec, antes de ir para o ar:**
+`PIN_RECUSADO` vale de qualquer estado, então `pin_recusado` era
+alcançável sem cartão lido, e dali um `PIN_AUTORIZADO` terminava autorizado
+sem credencial. A invariante nova ("todo estado autenticado tem validação a
+declarar") acusou; autenticar passou a exigir cartão lido.
+
+**A limpeza, e o que ela NÃO tirou:**
+
+- saíram `src/components/CampoAssinatura.tsx`, a dependência
+  `signature_pad`, a versão 1 do hash offline nos dois lados,
+  `scripts/offline-hash.spec.mts` e a regressão da v1 em
+  `envelope.spec.mts`. Com a v1 saiu o último uso da geolocalização numa
+  fórmula;
+- **ficam** a leitura histórica — `AssinaturaDesenhada` na tela e o desenho
+  no PDF, que nunca dependeram da biblioteca —, a coluna `strokes` e a
+  fórmula v1 do `signature_hash` no verificador. Os documentos antigos
+  continuam aparecendo e verificando até o corte;
+- a `sync-romaneio` do repositório perdeu a v1, que já não tinha chamador:
+  **republicar não muda comportamento**, e pode ir junto com o próximo
+  deploy dela.
+
+**O que vem:** o 4C — abrir o app sem rede, telas no estado local e o E12.
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
@@ -10592,9 +10666,11 @@ acumulados (lista no fim deste arquivo) — o app não deleta, então limpar
 > **A SAÍDA v2 ESTÁ CONSTRUÍDA E ACEITA (item 107)** — motoboy e gerente,
 > online e offline, verificador em 28 · 28 · 0.
 >
-> **O PRÓXIMO PASSO É O RETORNO v2.** Ele ainda sela com as assinaturas
-> desenhadas, e o cartão do gerente continua sendo recusado na tela de
-> retorno até lá.
+> **O RETORNO v2 ESTÁ CONSTRUÍDO E ACEITO, e a limpeza feita (item 108)** —
+> `R-000039` a `R-000042`, verificador em 32 · 32 · 0. **O 4B fechou.**
+>
+> **O PRÓXIMO PASSO É O 4C.** A `sync-romaneio` do repositório está sem a
+> versão 1 do hash (sem chamador); republicar não muda comportamento.
 >
 > **Depois:** o 4B implementa o contrato de evidências escolhido; o 4C
 > precisa das três partes (Service Worker + Cache API, telas no estado
