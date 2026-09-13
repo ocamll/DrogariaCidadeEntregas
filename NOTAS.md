@@ -10675,6 +10675,18 @@ oferece "Registrar R$ X como aplicado à compra (falta de R$ Y)" —
 desmarca a confirmação, e o selo registra a divergência. Spec com o caso
 (misto incluído) escrito antes: 5 falhas, depois 109 verificações verdes.
 
+**Aceito pelo usuário:** V-000073 ("Teste Dinheiro") selado com previsto
+`dinheiro 10000/0`, realizado `dinheiro 9000/0` e `status_financeiro =
+divergente`.
+
+**"Troco para" entrou na cadeia de Enter — 2026-09-13.** Relato do usuário:
+"o enter vai da forma de pagamento pro salvar direto, pulando o Troco para".
+O campo tinha nascido fora da cadeia de propósito, para custar zero tecla.
+Agora, com parcela em dinheiro, Enter na forma (ou no valor de uma linha)
+leva ao "Troco para", e Enter nele salva, vazio ou preenchido; sem dinheiro,
+Enter salva como antes. **Custo: um Enter a mais em todo vale com
+dinheiro.** O cronômetro dos 25 s não foi refeito.
+
 **Pendente de teste com cartão:** saída e retorno de V-000070 e V-000071,
 online e offline — os dois ficaram pendentes para isso.
 

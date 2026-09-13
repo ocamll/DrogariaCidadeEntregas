@@ -194,6 +194,8 @@ function CadastroEntregaForm({
   const enderecoRef = useRef<HTMLInputElement>(null)
   const valorCompraRef = useRef<HTMLInputElement>(null)
   const formaRef = useRef<HTMLSelectElement>(null)
+  // O "Troco para" entra na cadeia de Enter quando há parcela em dinheiro.
+  const trocoParaRef = useRef<HTMLInputElement>(null)
 
   const hoje = new Date().toLocaleDateString('pt-BR')
 
@@ -358,7 +360,24 @@ function CadastroEntregaForm({
   // Aceita os dois elementos porque, com pagamento dividido, ele também
   // fica no campo de VALOR de cada linha — Enter ali salva, em vez de não
   // fazer nada, que é o que o caixa espera de um formulário deste app.
+  //
+  // COM PARCELA EM DINHEIRO, Enter vai ao "Troco para" antes de salvar —
+  // relato do usuário em 2026-09-13 ("o enter vai da forma de pagamento pro
+  // salvar direto, pulando o Troco para"). O campo tinha nascido FORA da
+  // cadeia pra custar zero tecla; o custo agora é um Enter a mais em vale com
+  // dinheiro (vazio + Enter salva). Sem dinheiro, nada muda: Enter salva.
   function handleFormaKeyDown(e: KeyboardEvent<HTMLSelectElement | HTMLInputElement>) {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    if (trocoAplicavel) {
+      trocoParaRef.current?.focus()
+      return
+    }
+    handleSalvar()
+  }
+
+  // No "Troco para", Enter salva — vazio (sem troco) ou preenchido.
+  function handleTrocoKeyDown(e: KeyboardEvent<HTMLInputElement>) {
     if (e.key !== 'Enter') return
     e.preventDefault()
     handleSalvar()
@@ -509,18 +528,21 @@ function CadastroEntregaForm({
               )}
             </div>
 
-            {/* "TROCO PARA" FICA FORA DA CADEIA DE ENTER — Enter no select
-                continua salvando, então quem não precisa de troco não gasta
-                tecla nenhuma. Quem precisa chega por Tab ou clique, e Enter
-                aqui dentro salva. */}
+            {/* "TROCO PARA" ESTÁ NA CADEIA DE ENTER desde 2026-09-13: Enter na
+                forma chega aqui quando há parcela em dinheiro, e Enter aqui
+                salva, vazio ou preenchido. Ver `handleFormaKeyDown`. */}
             {trocoAplicavel && (
               <div className="flex flex-col gap-2">
                 <Label htmlFor="troco-para">Troco para (R$)</Label>
                 <CampoMoeda
                   id="troco-para"
+                  ref={trocoParaRef}
                   digitos={trocoPara}
                   onDigitos={setTrocoPara}
-                  onKeyDown={handleFormaKeyDown}
+                  onKeyDown={handleTrocoKeyDown}
+                  // Chegando pelo Enter com um valor já digitado, digitar de
+                  // novo troca o valor em vez de somar dígitos.
+                  selecionaAoFocar
                 />
                 {/* No misto a tela diz SOBRE O QUÊ o troco é calculado: sem
                     isso, "troco para 100" numa compra de 100 parece troco

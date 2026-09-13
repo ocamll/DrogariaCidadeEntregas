@@ -961,8 +961,11 @@ comparação               multiconjunto forma|valor_cents — troco FORA
   vazia não é comparada. É apresentação: não escreve `status_financeiro`, e
   as contagens de pendência continuam pelo status.
 - **"Troco para" (cadastro)** aparece quando há UMA parcela em dinheiro,
-  sozinha ou no misto, e fica **fora da cadeia de Enter** — custo zero pra
-  quem não usa. Vazio = sem troco; preenchido tem que ser maior que a
+  sozinha ou no misto, e **está na cadeia de Enter** desde 2026-09-13, a
+  pedido do usuário: Enter na forma chega ao campo, e Enter nele salva (vazio
+  = sem troco). **Custo: um Enter a mais em todo vale com dinheiro**; sem
+  dinheiro a cadeia não mudou. Nasceu fora da cadeia pra custar zero tecla, e
+  o cronômetro dos 25 s não foi refeito depois disso. Vazio = sem troco; preenchido tem que ser maior que a
   **parcela em dinheiro**. Vira `troco_cents` da linha de dinheiro e entra no
   DCR1 pela linha `p`, que sempre teve o campo; a compra não muda. Trocar a
   forma limpa o campo.

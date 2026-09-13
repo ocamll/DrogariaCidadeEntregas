@@ -318,6 +318,20 @@ console.log('\n--- (5) fiação: o troco atravessa cadastro, fila e retorno ---'
     /function mudarFormas\(/.test(cadastro) &&
       (cadastro.match(/setFormas\(\(prev\)/g) ?? []).length === 0)
 
+  // A CADEIA DE ENTER PASSA PELO "TROCO PARA" — relato do usuário em
+  // 2026-09-13: "o enter vai da forma de pagamento pro salvar direto, pulando
+  // o Troco para". Com parcela em dinheiro, Enter na forma (ou no valor de
+  // uma linha) leva ao campo; nele, Enter salva — vazio ou preenchido. Sem
+  // dinheiro a cadeia continua a de antes: Enter salva.
+  const tecla = cadastro.slice(cadastro.indexOf('function handleFormaKeyDown'))
+  const corpoTecla = tecla.slice(0, tecla.indexOf('\n  }'))
+  checa('Enter na forma vai ao "Troco para" quando há parcela em dinheiro',
+    /if \(trocoAplicavel\)/.test(corpoTecla) && /trocoParaRef\.current\?\.focus\(\)/.test(corpoTecla))
+  checa('e continua salvando quando não há dinheiro', /handleSalvar\(\)/.test(corpoTecla))
+  checa('o campo "Troco para" tem a ref da cadeia', /ref=\{trocoParaRef\}/.test(cadastro))
+  checa('e Enter nele salva', /onKeyDown=\{handleTrocoKeyDown\}/.test(cadastro) &&
+    /function handleTrocoKeyDown[\s\S]*?handleSalvar\(\)/.test(cadastro))
+
   checa('`criarEntrega` repassa o troco ao previsto (tolerando fila antiga)',
     /trocoCents:\s*forma\.trocoCents\s*\?\?\s*0/.test(entregas))
   checa('`criarPagamentoPrevisto` grava `troco_cents`', /troco_cents:\s*input\.trocoCents/.test(pagamentos))
