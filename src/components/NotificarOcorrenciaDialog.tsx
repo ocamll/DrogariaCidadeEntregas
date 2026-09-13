@@ -337,7 +337,9 @@ function DivergenciaPagamentoForm({
 
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between">
-          <Label>Forma(s) realizada(s)</Label>
+          {/* O valor é o APLICADO à compra, sem troco — o mesmo contrato do
+              retorno. Por isso a soma bate com a compra. */}
+          <Label>Forma(s) realizada(s) — valor aplicado à compra, sem troco</Label>
           {linhas.length < MAX_LINHAS && (
             <Button type="button" variant="ghost" size="sm" onClick={addLinha}>
               + Adicionar forma

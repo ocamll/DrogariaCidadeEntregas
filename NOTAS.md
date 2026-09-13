@@ -10585,6 +10585,59 @@ declarar") acusou; autenticar passou a exigir cartão lido.
 
 **O que vem:** o 4C — abrir o app sem rede, telas no estado local e o E12.
 
+## 109. Falsas divergências de pagamento, e o "Troco para"
+
+**2026-09-12.** O usuário viu vales marcados "(divergiu)" depois dos
+retornos v2. Medido no banco antes de mexer em nada:
+
+| vale | previsto | realizado | status |
+|---|---|---|---|
+| V-000066 a V-000069 | dinheiro = compra | igual ao previsto | `na_ordem` |
+| V-000063 | dinheiro 100 | dinheiro 200, troco 100 | `divergente` |
+
+**A causa:** `EntregasTable` e `data/fechamento.ts` decidiam divergência por
+`formasRealizadas.length > 0` — critério de antes do Romaneio de Retorno,
+quando só a ocorrência gravava realizado. O servidor estava certo nos
+quatro. O V-000063 é outro caso: o retorno pedia "Valor" e "Troco" sem
+rótulo, e o dinheiro RECEBIDO entrou no campo que o servidor compara como
+valor aplicado.
+
+**O contrato adotado** está no CLAUDE.md ("O contrato dos valores") e em
+`lib/formasDePagamento.ts`: `valor_cents` é o líquido aplicado à compra,
+`troco_cents` é o devolvido, o recebido é derivado. A comparação do servidor
+já era essa — **nenhuma migration**, nenhuma republicação.
+
+**O que mudou no cliente:** `situacaoDoPagamento` na lista e no fechamento;
+"Troco para" no cadastro (uma forma, dinheiro, fora da cadeia de Enter) com
+"Troco a levar" calculado, gravado em `troco_cents` do previsto e levado
+pela fila (`?? 0` para item antigo); no retorno, "Aplicado à compra",
+"Recebido em dinheiro" e "Troco devolvido" calculado, com recebido menor que
+o aplicado recusado; e o rótulo do dialog de ocorrência dizendo que o valor
+é o aplicado, sem troco.
+
+**Medido depois:**
+
+- `scripts/troco-e-divergencia.spec.mts`, escrito antes da correção: 23
+  falhas antes, 70 verificações verdes depois — inclusive o gêmeo SQL
+  comparando sem troco;
+- a bateria vizinha (formas previstas, escritor único, pagamento alterado,
+  fiação de texto, congelamento, vetores DCRR1, canônicos, custódia, PDF,
+  envelope, hash v2, despacho) verde; build ok; lint sem aviso nos arquivos
+  tocados;
+- **V-000070** (compra 100, troco para 200) gravado com previsto
+  `dinheiro 10000 / troco 10000`; **V-000071** (sem troco) com troco 0 — os
+  dois com compra de R$ 100;
+- na lista, V-000066 a V-000069 sem "(divergiu)"; no fechamento de 12/09,
+  "Nenhuma divergência"; no de 11/09, o V-000063 continua listado, como foi
+  gravado.
+
+**Pendente de decisão do usuário:** o troco no pagamento MISTO (pix 40 +
+dinheiro 60, recebendo 100 em espécie → troco 40). Até lá o misto segue
+como antes.
+
+**Pendente de teste com cartão:** saída e retorno de V-000070 e V-000071,
+online e offline — os dois ficaram pendentes para isso.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta

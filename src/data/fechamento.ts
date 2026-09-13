@@ -1,7 +1,13 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { buscarComTeto } from '@/lib/paginacao'
-import type { FormaPagamento, FormaComValor } from '@/data/pagamentos'
+import { situacaoDoPagamento } from '@/lib/formasDePagamento'
+import type {
+  FormaPagamento,
+  FormaComValor,
+  PagamentoLido,
+  SituacaoDoPagamento,
+} from '@/data/pagamentos'
 
 // Apoio ao fechamento de caixa — o lado TELE da história, e só ele.
 //
@@ -32,7 +38,14 @@ export type ValeFechamento = {
   // dizendo "Era: Pix" num vale que era pix + dinheiro, bem na tela onde
   // o gestor justifica uma diferença ao financeiro.
   formasPrevistas: FormaComValor[]
-  formasRealizadas: Array<{ forma: FormaPagamento; valorCents: number }>
+  /** Valor aplicado e troco, por forma — o contrato de `lib/formasDePagamento.ts`. */
+  formasRealizadas: PagamentoLido[]
+  /**
+   * Calculada, e SÓ apresentação: não escreve status. A contagem de
+   * pendências (`divergentes`, `aConferir`) continua sendo pelo
+   * `status_financeiro`, que é a marca que a gestão trata.
+   */
+  situacaoPagamento: SituacaoDoPagamento
   justificativa: string | null
   motivoCancelamento: string | null
   // quem cancelou. Gestão precisa dos dois lados — o motivo diz o quê, o
@@ -75,6 +88,7 @@ type PagamentoRow = {
   forma: FormaPagamento
   momento: 'previsto' | 'realizado'
   valor_cents: number
+  troco_cents: number
   observacao: string | null
 }
 
@@ -95,6 +109,14 @@ type ValeRow = {
 
 function mapVale(row: ValeRow): ValeFechamento {
   const realizados = row.pagamentos.filter((p) => p.momento === 'realizado')
+  const formasPrevistas = row.pagamentos
+    .filter((p) => p.momento === 'previsto')
+    .map((p) => ({ forma: p.forma, valor_cents: p.valor_cents }))
+  const formasRealizadas = realizados.map((p) => ({
+    forma: p.forma,
+    valor_cents: p.valor_cents,
+    troco_cents: p.troco_cents,
+  }))
   return {
     id: row.id,
     numeroVale: row.numero_vale,
@@ -104,13 +126,13 @@ function mapVale(row: ValeRow): ValeFechamento {
     valorCompraCents: row.valor_compra_cents,
     valorEntregaCents: row.valor_entrega_cents,
     entregaPagaClienteCents: row.entrega_paga_cliente_cents,
-    formasPrevistas: row.pagamentos
-      .filter((p) => p.momento === 'previsto')
-      .map((p) => ({ forma: p.forma, valor_cents: p.valor_cents })),
-    formasRealizadas: realizados.map((p) => ({ forma: p.forma, valorCents: p.valor_cents })),
-    // a justificativa é a mesma em todas as linhas realizadas (foi
-    // gravada uma vez por forma) — a primeira basta
-    justificativa: realizados[0]?.observacao ?? null,
+    formasPrevistas,
+    formasRealizadas,
+    situacaoPagamento: situacaoDoPagamento(formasPrevistas, formasRealizadas),
+    // A justificativa vem da OCORRÊNCIA, que grava a mesma em cada linha. As
+    // linhas do selo do retorno não têm observação, e podem vir primeiro —
+    // por isso a primeira que tiver, e não a primeira linha.
+    justificativa: realizados.find((p) => p.observacao)?.observacao ?? null,
     motivoCancelamento: row.motivo_cancelamento,
     canceladoPorNome: row.profiles?.nome ?? null,
     observacoes: row.observacoes,
@@ -135,7 +157,7 @@ async function buscarFechamento(filtro: FiltroFechamento): Promise<Fechamento> {
         .select(
           // hint de FK obrigatório: entregas tem 4 colunas apontando pra
           // profiles, e o embed sem hint devolve PGRST201 por ambiguidade.
-          'id, numero_vale, cliente_nome, status_entrega, status_financeiro, valor_compra_cents, valor_entrega_cents, entrega_paga_cliente_cents, motivo_cancelamento, profiles!entregas_cancelado_por_fkey(nome), observacoes, pagamentos(forma, momento, valor_cents, observacao)'
+          'id, numero_vale, cliente_nome, status_entrega, status_financeiro, valor_compra_cents, valor_entrega_cents, entrega_paga_cliente_cents, motivo_cancelamento, profiles!entregas_cancelado_por_fkey(nome), observacoes, pagamentos(forma, momento, valor_cents, troco_cents, observacao)'
         )
         .eq('tipo', 'cliente')
         .gte('ocorrido_em_local', inicio.toISOString())
@@ -191,7 +213,8 @@ async function buscarFechamento(filtro: FiltroFechamento): Promise<Fechamento> {
     aConferir: vales.filter(
       (v) => v.statusEntrega !== 'cancelada' && v.statusFinanceiro === 'na_ordem'
     ),
-    divergencias: vales.filter((v) => v.formasRealizadas.length > 0),
+    // Pela SITUAÇÃO CALCULADA: existência de realizado não é divergência.
+    divergencias: vales.filter((v) => v.situacaoPagamento === 'divergiu'),
     pagosEmMaos: vales.filter((v) => v.entregaPagaClienteCents > 0 && v.statusEntrega !== 'cancelada'),
     cancelados: vales.filter((v) => v.statusEntrega === 'cancelada'),
     insucessos: vales.filter((v) => v.statusEntrega === 'insucesso'),

@@ -51,7 +51,12 @@ import {
 } from '@/lib/excecaoDoGerente'
 import { useOnline } from '@/lib/useOnline'
 import { rotuloDoPapelNoMomento } from '@/lib/papeis'
-import { FORMA_PAGAMENTO_LABEL } from '@/data/pagamentos'
+import {
+  FORMA_PAGAMENTO_LABEL,
+  realizadoDaLinha,
+  digitosDoRecebidoPrevisto,
+  type LinhaRealizadaDigitada,
+} from '@/data/pagamentos'
 import { INSUCESSO_MOTIVO_LABEL } from '@/data/corridas'
 import { mensagemDeErro } from '@/lib/supabase'
 import { uuidv7 } from '@/lib/uuid'
@@ -334,7 +339,31 @@ function RetornoDaCorrida({
 // que é o uuid da entrega —, e o selo bateria em `on conflict do
 // nothing`, gravando nada e afirmando tudo.
 // ---------------------------------------------------------------------
-type LinhaDePagamento = { forma: FormaPagamento; digitos: string; trocoDigitos: string }
+/**
+ * Uma linha de pagamento realizado, em dígitos — o contrato de
+ * `lib/formasDePagamento.ts`: `aplicadoDigitos` vira `valor_cents` (a parte
+ * da compra), e o troco sai do recebido (uma linha) ou é informado (misto).
+ * Nunca o recebido no lugar do aplicado.
+ */
+type LinhaDePagamento = LinhaRealizadaDigitada & { forma: FormaPagamento }
+
+/**
+ * As linhas pré-preenchidas a partir do previsto — forma, aplicado e o
+ * recebido sugerido pelo "troco para". NUNCA o `pagamentoId`.
+ *
+ * O caixa confirma o que aconteceu: se o cliente pagou o valor exato, apaga o
+ * recebido e o troco vira zero.
+ */
+function linhasDoPrevisto(previstos: ValeDoContexto['pagamentosPrevistos']): LinhaDePagamento[] {
+  const umaSo = previstos.length === 1
+  return previstos.map((p) => ({
+    forma: p.forma as FormaPagamento,
+    aplicadoDigitos: String(p.valorCents),
+    recebidoDigitos:
+      umaSo && p.forma === 'dinheiro' ? digitosDoRecebidoPrevisto(p.valorCents, p.trocoCents) : '',
+    trocoDigitos: !umaSo && p.forma === 'dinheiro' && p.trocoCents > 0 ? String(p.trocoCents) : '',
+  }))
+}
 
 type Preenchimento = {
   desfecho: 'entregue' | 'insucesso'
@@ -350,12 +379,8 @@ function preenchimentoInicial(vale: ValeDoContexto): Preenchimento {
     desfecho: 'entregue',
     motivo: null,
     detalhe: '',
-    // Pré-preenche forma, valor e troco. NUNCA o `pagamentoId`.
-    pagamentos: vale.pagamentosPrevistos.map((p) => ({
-      forma: p.forma as FormaPagamento,
-      digitos: String(p.valorCents),
-      trocoDigitos: p.trocoCents ? String(p.trocoCents) : '',
-    })),
+    // Pré-preenche forma, aplicado e recebido sugerido. NUNCA o `pagamentoId`.
+    pagamentos: linhasDoPrevisto(vale.pagamentosPrevistos),
     documentos: {},
   }
 }
@@ -499,14 +524,21 @@ function FluxoDeRetorno({
           // Pagamento em vale com insucesso é recusado pelo contrato: não
           // houve entrega, não houve pagamento na porta.
           pagamentosRealizados: entregue
-            ? p.pagamentos.map((linha) => ({
-                // uuidv7 NOVO, aqui, a cada congelamento. É o que separa
-                // o realizado do previsto — cujo id é o uuid da entrega.
-                pagamentoId: uuidv7(),
-                forma: linha.forma,
-                valorCents: centsFromDigits(linha.digitos),
-                trocoCents: linha.trocoDigitos ? centsFromDigits(linha.trocoDigitos) : 0,
-              }))
+            ? p.pagamentos.map((linha) => {
+                // A CONVERSÃO É UMA SÓ, e a validação (`problemaDoPreenchimento`)
+                // chamou a mesma: o que foi aceito é o que vai pro documento.
+                const realizado = realizadoDaLinha(linha, p.pagamentos.length === 1)
+                if (!realizado.ok) throw new Error(`Vale ${vale.numeroVale}: ${realizado.erro}`)
+                return {
+                  // uuidv7 NOVO, aqui, a cada congelamento. É o que separa
+                  // o realizado do previsto — cujo id é o uuid da entrega.
+                  pagamentoId: uuidv7(),
+                  forma: linha.forma,
+                  // O APLICADO à compra e o troco devolvido — nunca o recebido.
+                  valorCents: realizado.valorCents,
+                  trocoCents: realizado.trocoCents,
+                }
+              })
             : [],
           // A expectativa sai do canônico ASSINADO da saída. A tela não
           // cria linha que aquela saída não gerou — `selar_romaneio_retorno`
@@ -531,9 +563,8 @@ function FluxoDeRetorno({
       }
       if (p.desfecho === 'entregue') {
         for (const linha of p.pagamentos) {
-          if (!linha.digitos || centsFromDigits(linha.digitos) <= 0) {
-            return `Vale ${vale.numeroVale}: falta o valor de um pagamento.`
-          }
+          const realizado = realizadoDaLinha(linha, p.pagamentos.length === 1)
+          if (!realizado.ok) return `Vale ${vale.numeroVale}: ${realizado.erro}`
         }
       }
       // Ausência NÃO vira `faltante`: normalizar inventaria um fato que
@@ -1176,10 +1207,14 @@ function ValeEmConferencia({
   onAlterar: (mudanca: Partial<Preenchimento>) => void
 }) {
   const entregue = preenchimento.desfecho === 'entregue'
+  // Soma do APLICADO à compra — o troco não entra, e o recebido também não.
   const somaRealizada = preenchimento.pagamentos.reduce(
-    (soma, l) => soma + (l.digitos ? centsFromDigits(l.digitos) : 0),
+    (soma, l) => soma + (l.aplicadoDigitos ? centsFromDigits(l.aplicadoDigitos) : 0),
     0
   )
+  // Uma linha só: o troco sai do recebido. Várias: a regra do misto está
+  // pendente, e o troco da linha de dinheiro continua informado.
+  const trocoCalculado = preenchimento.pagamentos.length === 1
   const divergeDaCompra =
     entregue &&
     preenchimento.pagamentos.length > 0 &&
@@ -1188,9 +1223,24 @@ function ValeEmConferencia({
 
   function alterarLinha(indice: number, mudanca: Partial<LinhaDePagamento>) {
     onAlterar({
-      pagamentos: preenchimento.pagamentos.map((l, i) =>
-        i === indice ? { ...l, ...mudanca } : l
-      ),
+      pagamentos: preenchimento.pagamentos.map((l, i) => {
+        if (i !== indice) return l
+        // Trocar a forma limpa recebido e troco: dígito de dinheiro não pode
+        // ficar escondido numa linha de pix e reaparecer ao voltar.
+        const trocouForma = mudanca.forma !== undefined && mudanca.forma !== l.forma
+        return { ...l, ...mudanca, ...(trocouForma ? { recebidoDigitos: '', trocoDigitos: '' } : {}) }
+      }),
+    })
+  }
+
+  // Adicionar ou remover linha pode mudar o MODO do troco (uma linha ↔ misto).
+  // Mudando, o que foi digitado no outro modo não vale mais, e sai.
+  function trocarLinhas(novas: LinhaDePagamento[]) {
+    const mudouModo = (novas.length === 1) !== trocoCalculado
+    onAlterar({
+      pagamentos: mudouModo
+        ? novas.map((l) => ({ ...l, recebidoDigitos: '', trocoDigitos: '' }))
+        : novas,
     })
   }
 
@@ -1210,7 +1260,9 @@ function ValeEmConferencia({
             {vale.pagamentosPrevistos
               .map(
                 (p) =>
-                  `${FORMA_PAGAMENTO_LABEL[p.forma as FormaPagamento] ?? p.forma} (${formatBRL(p.valorCents)})`
+                  `${FORMA_PAGAMENTO_LABEL[p.forma as FormaPagamento] ?? p.forma} (${formatBRL(p.valorCents)}` +
+                  // O "troco para" do cadastro é o valor mais o troco a levar.
+                  (p.trocoCents > 0 ? `, troco para ${formatBRL(p.valorCents + p.trocoCents)})` : ')')
               )
               .join(' + ')}
           </>
@@ -1235,11 +1287,7 @@ function ValeEmConferencia({
                   ? []
                   : preenchimento.pagamentos.length > 0
                     ? preenchimento.pagamentos
-                    : vale.pagamentosPrevistos.map((p) => ({
-                        forma: p.forma as FormaPagamento,
-                        digitos: String(p.valorCents),
-                        trocoDigitos: p.trocoCents ? String(p.trocoCents) : '',
-                      })),
+                    : linhasDoPrevisto(vale.pagamentosPrevistos),
             })
           }}
         >
@@ -1276,60 +1324,91 @@ function ValeEmConferencia({
       {entregue && vale.pagamentosPrevistos.length > 0 && (
         <div className="flex flex-col gap-2">
           <Label className="text-xs">Como o cliente pagou</Label>
-          {preenchimento.pagamentos.map((linha, i) => (
-            <div key={i} className="flex flex-wrap items-end gap-2">
-              <div className="flex w-40 flex-col gap-0.5">
-                <Label className="text-[0.65rem] text-foreground/70">Forma</Label>
-                <select
-                  className={SELECT_CLASSNAME}
-                  value={linha.forma}
-                  onChange={(e) => alterarLinha(i, { forma: e.target.value as FormaPagamento })}
-                >
-                  {FORMAS_PAGAMENTO.map((forma) => (
-                    <option key={forma} value={forma}>
-                      {FORMA_PAGAMENTO_LABEL[forma] ?? forma}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              {/* OS DOIS CAMPOS PRECISAM DE RÓTULO, e isto não é
-                  capricho: eles são visualmente idênticos, ficam lado a
-                  lado, e um decide o que o documento selado vai
-                  afirmar que o cliente pagou. Sem rótulo, "R$ 1.312,90"
-                  e "R$ 20,00" são dois campos iguais e a única defesa
-                  contra trocá-los é a memória de quem digita. */}
-              <div className="flex w-36 flex-col gap-0.5">
-                <Label className="text-[0.65rem] text-foreground/70">Valor</Label>
-                <CampoMoeda
-                  digitos={linha.digitos}
-                  onDigitos={(d) => alterarLinha(i, { digitos: d })}
-                />
-              </div>
-              {linha.forma === 'dinheiro' && (
-                <div className="flex w-32 flex-col gap-0.5">
-                  <Label className="text-[0.65rem] text-foreground/70">Troco</Label>
-                  <CampoMoeda
-                    digitos={linha.trocoDigitos}
-                    onDigitos={(d) => alterarLinha(i, { trocoDigitos: d })}
-                  />
+          {preenchimento.pagamentos.map((linha, i) => {
+            const realizado = realizadoDaLinha(linha, trocoCalculado)
+            const dinheiro = linha.forma === 'dinheiro'
+            return (
+              <div key={i} className="flex flex-col gap-1">
+                <div className="flex flex-wrap items-end gap-2">
+                  <div className="flex w-40 flex-col gap-0.5">
+                    <Label className="text-[0.65rem] text-foreground/70">Forma</Label>
+                    <select
+                      className={SELECT_CLASSNAME}
+                      value={linha.forma}
+                      onChange={(e) => alterarLinha(i, { forma: e.target.value as FormaPagamento })}
+                    >
+                      {FORMAS_PAGAMENTO.map((forma) => (
+                        <option key={forma} value={forma}>
+                          {FORMA_PAGAMENTO_LABEL[forma] ?? forma}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  {/* OS CAMPOS PRECISAM DE RÓTULO QUE DIGA O QUE SÃO. "Valor"
+                      solto fez o V-000063 entrar com o dinheiro recebido no
+                      lugar do valor aplicado à compra — e é o aplicado que o
+                      servidor compara com o previsto. */}
+                  <div className="flex w-36 flex-col gap-0.5">
+                    <Label className="text-[0.65rem] text-foreground/70">Aplicado à compra</Label>
+                    <CampoMoeda
+                      digitos={linha.aplicadoDigitos}
+                      onDigitos={(d) => alterarLinha(i, { aplicadoDigitos: d })}
+                      aria-label="Aplicado à compra"
+                    />
+                  </div>
+                  {dinheiro && trocoCalculado && (
+                    <>
+                      <div className="flex w-36 flex-col gap-0.5">
+                        <Label className="text-[0.65rem] text-foreground/70">
+                          Recebido em dinheiro
+                        </Label>
+                        <CampoMoeda
+                          digitos={linha.recebidoDigitos}
+                          onDigitos={(d) => alterarLinha(i, { recebidoDigitos: d })}
+                          aria-label="Recebido em dinheiro"
+                        />
+                      </div>
+                      {/* CALCULADO, não digitado: recebido menos aplicado. */}
+                      <div className="flex w-32 flex-col gap-0.5">
+                        <Label className="text-[0.65rem] text-foreground/70">Troco devolvido</Label>
+                        <span className="flex h-8 items-center text-sm tabular-nums">
+                          {realizado.ok ? formatBRL(realizado.trocoCents) : '—'}
+                        </span>
+                      </div>
+                    </>
+                  )}
+                  {dinheiro && !trocoCalculado && (
+                    <div className="flex w-32 flex-col gap-0.5">
+                      <Label className="text-[0.65rem] text-foreground/70">Troco devolvido</Label>
+                      <CampoMoeda
+                        digitos={linha.trocoDigitos}
+                        onDigitos={(d) => alterarLinha(i, { trocoDigitos: d })}
+                        aria-label="Troco devolvido"
+                      />
+                    </div>
+                  )}
+                  {preenchimento.pagamentos.length > 1 && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => trocarLinhas(preenchimento.pagamentos.filter((_, j) => j !== i))}
+                    >
+                      Remover
+                    </Button>
+                  )}
                 </div>
-              )}
-              {preenchimento.pagamentos.length > 1 && (
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  onClick={() =>
-                    onAlterar({
-                      pagamentos: preenchimento.pagamentos.filter((_, j) => j !== i),
-                    })
-                  }
-                >
-                  Remover
-                </Button>
-              )}
-            </div>
-          ))}
+                {dinheiro && trocoCalculado && linha.recebidoDigitos === '' && (
+                  <p className="text-xs text-foreground/70">
+                    Recebido vazio: o cliente pagou o valor exato, sem troco.
+                  </p>
+                )}
+                {!realizado.ok && (linha.aplicadoDigitos !== '' || linha.recebidoDigitos !== '') && (
+                  <p className="text-xs text-destructive">{realizado.erro}</p>
+                )}
+              </div>
+            )
+          })}
           {preenchimento.pagamentos.length < MAX_PAGAMENTOS && (
             <Button
               type="button"
@@ -1337,12 +1416,10 @@ function ValeEmConferencia({
               size="sm"
               className="self-start"
               onClick={() =>
-                onAlterar({
-                  pagamentos: [
-                    ...preenchimento.pagamentos,
-                    { forma: 'dinheiro', digitos: '', trocoDigitos: '' },
-                  ],
-                })
+                trocarLinhas([
+                  ...preenchimento.pagamentos,
+                  { forma: 'dinheiro', aplicadoDigitos: '', recebidoDigitos: '', trocoDigitos: '' },
+                ])
               }
             >
               + Outra forma

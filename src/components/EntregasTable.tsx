@@ -130,7 +130,10 @@ export function EntregasTable({
       </TableHeader>
       <TableBody>
         {entregas.map((entrega) => {
-          const divergiu = entrega.formasRealizadas.length > 0
+          // A SITUAÇÃO CALCULADA, nunca a existência de realizado: o selo do
+          // retorno grava realizado em todo vale entregue, e isso sozinho não
+          // prova divergência. Ver `situacaoDoPagamento`.
+          const divergiu = entrega.situacaoPagamento === 'divergiu'
           // SÓ OS RÓTULOS, sem valor — E4. Um vale previsto em duas
           // formas mostra "Pix + Dinheiro", e não
           // "Pix (R$ 50,00) + Dinheiro (R$ 73,90)".
@@ -140,7 +143,9 @@ export function EntregasTable({
           // arrasta tabela pro lado com fila no balcão. O valor por forma
           // existe no dialog de ocorrência, que é onde ele é pedido.
           const textoPagamento = divergiu
-            ? entrega.formasRealizadas.map((f) => FORMA_PAGAMENTO_LABEL[f]).join(' + ')
+            ? entrega.formasRealizadas
+                .map((f) => FORMA_PAGAMENTO_LABEL[f.forma] ?? f.forma)
+                .join(' + ')
             : entrega.formasPrevistas.length > 0
               ? entrega.formasPrevistas
                   .map((p) => FORMA_PAGAMENTO_LABEL[p.forma] ?? p.forma)

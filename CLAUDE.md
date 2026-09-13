@@ -933,6 +933,47 @@ E3.B corrigiu o do servidor (`limit 1` → agrega todos); `marcarDivergencia`
 ficou escalar até o E4. Quem mexer no `de` desse evento tem que mexer nos
 dois — `eventos` é append-only, e evento errado não se corrige depois.
 
+### O contrato dos valores, e o "Troco para" — 2026-09-12
+
+Escrito depois de medir falsas divergências: a lista de vales e o
+fechamento chamavam de divergência a mera **existência** de pagamento
+realizado, e o selo do retorno grava realizado em todo vale entregue. O
+contrato já estava implícito (a soma dos previstos bate com a compra; o
+servidor compara `forma|valor_cents`), e agora está escrito em
+`lib/formasDePagamento.ts`:
+
+```
+pagamentos.valor_cents   parte da COMPRA paga por aquela forma — líquido
+pagamentos.troco_cents   dinheiro devolvido naquela linha (só dinheiro)
+recebido / "troco para"  valor_cents + troco_cents — derivado, SEM coluna
+comparação               multiconjunto forma|valor_cents — troco FORA
+```
+
+| caso | valor | troco | diverge de previsto 100/0? |
+|---|---|---|---|
+| pagou exato | 10000 | 0 | não |
+| entregou 200, levou 100 | 10000 | 10000 | não |
+| entregou só 90 | 9000 | 0 | **sim** |
+| pagou em pix | pix 10000 | 0 | **sim** |
+
+- **Existência de realizado não é divergência.** A tela usa
+  `situacaoDoPagamento` (`sem_realizado` · `confere` · `divergiu`); lista
+  vazia não é comparada. É apresentação: não escreve `status_financeiro`, e
+  as contagens de pendência continuam pelo status.
+- **"Troco para" (cadastro)** só aparece com UMA forma, dinheiro, e fica
+  **fora da cadeia de Enter** — custo zero pra quem não usa. Vazio = sem
+  troco; preenchido tem que ser maior que a compra. Vira `troco_cents` do
+  previsto e entra no DCR1 pela linha `p`, que sempre teve o campo; a compra
+  não muda. Trocar a forma limpa o campo.
+- **No retorno**, com uma linha em dinheiro: "Aplicado à compra",
+  "Recebido em dinheiro" (vazio = exato) e "Troco devolvido" CALCULADO.
+  Recebido menor que o aplicado é recusado — o cálculo não esconde falta.
+- **Pagamento misto: regra do troco PENDENTE.** O campo não aparece no
+  cadastro, e no retorno o troco da linha de dinheiro continua informado.
+- **O servidor não mudou**: a comparação já era a do contrato. O V-000063
+  (200 no valor, 100 no troco, entrado pelo "Valor" sem rótulo) continua
+  divergente, como foi gravado — nada de UPDATE.
+
 ## Cidade, filial e agência
 
 Confirmado com o usuário em 2026-08-13. Em cada cidade **uma** agência de

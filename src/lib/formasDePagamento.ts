@@ -327,12 +327,215 @@ export function divergiuDoPrevisto(
   previstos: FormaComValor[],
   realizados: FormaComValor[]
 ): boolean {
+  // O TROCO NÃO ENTRA NA CHAVE — ver "O contrato dos valores" abaixo.
+  // `valor_cents` já é o líquido aplicado à compra; somar ou subtrair troco
+  // aqui misturaria bruto com líquido, e o gêmeo SQL também não o faz.
   const chaves = (lista: FormaComValor[]) =>
     lista.map((f) => `${f.forma}|${f.valor_cents}`).sort()
 
   const a = chaves(previstos)
   const b = chaves(realizados)
   return a.length !== b.length || a.some((chave, i) => chave !== b[i])
+}
+
+// =====================================================================
+// O CONTRATO DOS VALORES — valor aplicado, troco e recebido (2026-09-12)
+//
+// Escrito porque o sistema já o pressupunha sem dizer: o cadastro exige
+// que a soma dos previstos bata com a compra, e o selo do retorno compara
+// `forma|valor_cents`. As duas regras só fazem sentido se `valor_cents` for
+// o LÍQUIDO. O retorno, porém, pedia "Valor" e "Troco" sem dizer isso, e o
+// V-000063 entrou com o dinheiro RECEBIDO no campo do valor.
+//
+//     pagamentos.valor_cents   parte da COMPRA paga por aquela forma
+//     pagamentos.troco_cents   dinheiro devolvido ao cliente naquela linha
+//                              (só em dinheiro; 0 nas outras formas)
+//     recebido / "troco para"  valor_cents + troco_cents — DERIVADO, nunca
+//                              gravado em coluna própria
+//
+// PREVISTO (cadastro)
+//
+//     compra 100, dinheiro, "troco para" vazio   valor 10000  troco     0
+//     compra 100, dinheiro, "troco para" 200     valor 10000  troco 10000
+//     compra 100, pix 40 + dinheiro 60           pix 4000/0 · dinheiro 6000/0
+//                                                (troco no misto: pendente)
+//
+// REALIZADO (retorno)
+//
+//     pagou o valor exato                        valor 10000  troco     0
+//     entregou 200, levou 100 de troco           valor 10000  troco 10000
+//     entregou só 90                             valor  9000  troco     0
+//
+// COMPARAÇÃO: multiconjunto de `forma|valor_cents`. Troco certo, ou outra
+// nota com a mesma forma e o mesmo líquido, NÃO é divergência; 90 contra
+// 100, ou dinheiro virando pix, é.
+//
+// O HISTÓRICO não é reinterpretado para caber: o V-000063 (200 no valor, 100
+// no troco) afirma 200 aplicados sob este contrato, e é exatamente a
+// divergência que o servidor gravou na época. Ninguém o corrige por UPDATE.
+// =====================================================================
+
+/** Um pagamento lido do banco, com o troco junto — só pra exibir. */
+export type PagamentoLido = FormaComValor & { troco_cents: number }
+
+/**
+ * O que a tela pode AFIRMAR sobre o pagamento de um vale.
+ *
+ *   sem_realizado   ninguém conferiu ainda (vale sem retorno, por exemplo)
+ *   confere         conferido, e bate com o previsto
+ *   divergiu        conferido, e não bate
+ *
+ * **Existência de realizado NÃO é divergência.** Era o critério da lista e
+ * do fechamento até 2026-09-12, de antes do Romaneio de Retorno — quando só
+ * a "Notificar ocorrência" gravava realizado. O selo do retorno grava o
+ * realizado de todo vale entregue, e todo retorno virou "(divergiu)".
+ *
+ * **Lista vazia não é comparada**: previsto contra nada divergiria sempre,
+ * e um vale que ainda não voltou apareceria como problema.
+ *
+ * É apresentação, e só: não escreve `status_financeiro`. A pendência de
+ * gestão continua sendo o status, que o servidor marca e a conferência nunca
+ * sobrescreve — recalcular esta situação não reabre nem fecha nada.
+ *
+ * Com realizados de mais de uma origem (retorno e, depois, uma ocorrência),
+ * o multiconjunto inteiro é comparado: a ocorrência só é gravada quando
+ * diverge, então as linhas dela sempre tornam o conjunto diferente do
+ * previsto.
+ */
+export type SituacaoDoPagamento = 'sem_realizado' | 'confere' | 'divergiu'
+
+export function situacaoDoPagamento(
+  previstos: FormaComValor[],
+  realizados: FormaComValor[]
+): SituacaoDoPagamento {
+  if (realizados.length === 0) return 'sem_realizado'
+  return divergiuDoPrevisto(previstos, realizados) ? 'divergiu' : 'confere'
+}
+
+/**
+ * "Troco para" aparece no cadastro?
+ *
+ * Só com UMA forma, e ela dinheiro. O pagamento misto (pix 40 + dinheiro 60,
+ * troco sobre a parcela em espécie) tem regra PENDENTE de decisão do
+ * usuário; até lá o campo não aparece e o misto segue como antes.
+ */
+export function trocoParaAplicavel(formas: ReadonlyArray<{ forma: string }>): boolean {
+  return formas.length === 1 && formas[0].forma === 'dinheiro'
+}
+
+export type ResultadoDoTroco = { ok: true; trocoCents: number } | { ok: false; erro: string }
+
+/**
+ * O troco a levar, a partir do "Troco para" digitado no cadastro.
+ *
+ * Vazio é resposta legítima — não há troco a preparar. Preenchido, tem que
+ * ser ESTRITAMENTE maior que o valor em dinheiro: igual seria "troco zero",
+ * que é o campo vazio dito de um jeito que confunde.
+ *
+ * O "troco para" NÃO é gravado: vira `troco_cents` do previsto, e o valor da
+ * compra continua sendo o `valor_cents`. Não aumenta venda nem cobrança.
+ */
+export function trocoDoPrevisto(
+  valorEmDinheiroCents: number,
+  trocoParaDigitos: string
+): ResultadoDoTroco {
+  if (trocoParaDigitos === '') return { ok: true, trocoCents: 0 }
+  const trocoParaCents = centsFromDigits(trocoParaDigitos)
+  if (trocoParaCents <= 0) {
+    return {
+      ok: false,
+      erro: '“Troco para” precisa de um valor — ou deixe o campo vazio se não houver troco.',
+    }
+  }
+  if (valorEmDinheiroCents <= 0) {
+    return { ok: false, erro: 'Informe o valor da compra antes do “Troco para”.' }
+  }
+  if (trocoParaCents <= valorEmDinheiroCents) {
+    return {
+      ok: false,
+      erro: `“Troco para” precisa ser maior que a compra (${formatBRL(valorEmDinheiroCents)}). Se o cliente vai pagar o valor exato, deixe o campo vazio.`,
+    }
+  }
+  return { ok: true, trocoCents: trocoParaCents - valorEmDinheiroCents }
+}
+
+/**
+ * O troco devolvido no retorno, a partir do dinheiro RECEBIDO.
+ *
+ * Vazio significa valor exato. Recebido MENOR que o aplicado é recusado, e a
+ * mensagem diz o que fazer: se entrou menos dinheiro, o aplicado é o que
+ * entrou — e aí o selo registra a divergência. O cálculo não pode esconder
+ * falta de dinheiro atrás de um troco negativo.
+ */
+export function trocoDoRecebido(aplicadoCents: number, recebidoDigitos: string): ResultadoDoTroco {
+  if (recebidoDigitos === '') return { ok: true, trocoCents: 0 }
+  const recebidoCents = centsFromDigits(recebidoDigitos)
+  if (recebidoCents <= 0) {
+    return {
+      ok: false,
+      erro: 'Informe o dinheiro recebido — ou deixe o campo vazio se o cliente pagou o valor exato.',
+    }
+  }
+  if (recebidoCents < aplicadoCents) {
+    return {
+      ok: false,
+      erro: `O recebido (${formatBRL(recebidoCents)}) é menor que o aplicado à compra (${formatBRL(aplicadoCents)}). Se o cliente pagou só ${formatBRL(recebidoCents)}, informe esse valor como aplicado — fica registrado como divergência.`,
+    }
+  }
+  return { ok: true, trocoCents: recebidoCents - aplicadoCents }
+}
+
+/** Uma linha de pagamento realizado como o retorno a guarda em dígitos. */
+export type LinhaRealizadaDigitada = {
+  forma: string
+  /** Parte da compra paga por esta forma — vira `valor_cents`. */
+  aplicadoDigitos: string
+  /** Só dinheiro, só com uma linha: o que o cliente entregou. */
+  recebidoDigitos: string
+  /** Só dinheiro no pagamento MISTO, enquanto a regra dele está pendente. */
+  trocoDigitos: string
+}
+
+export type ResultadoDaLinha =
+  | { ok: true; valorCents: number; trocoCents: number }
+  | { ok: false; erro: string }
+
+/**
+ * A CONVERSÃO ÚNICA da tela do retorno para `valor_cents` e `troco_cents`.
+ *
+ * A validação e o payload chamam a mesma função, então a tela não consegue
+ * aceitar uma coisa e gravar outra.
+ *
+ *   - forma que não é dinheiro: troco sempre 0, mesmo que sobre dígito no
+ *     estado — nada de valor escondido indo pro documento;
+ *   - dinheiro numa linha só (`trocoCalculado`): troco = recebido − aplicado;
+ *   - dinheiro no misto: troco informado, como antes, até a regra do misto
+ *     ser decidida.
+ */
+export function realizadoDaLinha(
+  linha: LinhaRealizadaDigitada,
+  trocoCalculado: boolean
+): ResultadoDaLinha {
+  const valorCents = linha.aplicadoDigitos === '' ? 0 : centsFromDigits(linha.aplicadoDigitos)
+  if (valorCents <= 0) return { ok: false, erro: 'falta o valor aplicado à compra.' }
+  if (linha.forma !== 'dinheiro') return { ok: true, valorCents, trocoCents: 0 }
+  if (!trocoCalculado) {
+    return {
+      ok: true,
+      valorCents,
+      trocoCents: linha.trocoDigitos === '' ? 0 : centsFromDigits(linha.trocoDigitos),
+    }
+  }
+  const troco = trocoDoRecebido(valorCents, linha.recebidoDigitos)
+  return troco.ok ? { ok: true, valorCents, trocoCents: troco.trocoCents } : troco
+}
+
+/**
+ * O recebido sugerido no retorno, a partir do previsto: o "troco para" do
+ * cadastro. Sem troco previsto, o campo nasce vazio — valor exato.
+ */
+export function digitosDoRecebidoPrevisto(valorCents: number, trocoCents: number): string {
+  return trocoCents > 0 ? String(valorCents + trocoCents) : ''
 }
 
 // =====================================================================

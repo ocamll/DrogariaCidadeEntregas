@@ -3,8 +3,11 @@ import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tansta
 import { supabase } from '@/lib/supabase'
 import {
   criarPagamentoPrevisto,
+  situacaoDoPagamento,
   type FormaPagamento,
   type FormaComValor,
+  type PagamentoLido,
+  type SituacaoDoPagamento,
 } from '@/data/pagamentos'
 import { inserirEventoIdempotente } from '@/data/eventos'
 import { centsFromDigits } from '@/lib/money'
@@ -42,7 +45,18 @@ const GERAM_DOCUMENTO_FISICO: FormaPagamento[] = ['convenio', 'crediario']
 export type FormaPrevistaDoCadastro = {
   pagamentoId: string
   forma: FormaPagamento
+  /** Parte da compra paga por esta forma — o líquido; a soma bate com a compra. */
   valorCents: number
+  /**
+   * Troco a levar — 2026-09-12. "Troco para" menos o valor em dinheiro, e 0
+   * quando não há troco. O "troco para" em si não é guardado: ele é
+   * `valorCents + trocoCents`, e não aumenta a compra.
+   *
+   * Um item enfileirado antes desta mudança não traz o campo; quem lê a fila
+   * (`criarEntrega`) trata a ausência como 0, que é o que aquele cadastro
+   * afirmava.
+   */
+  trocoCents: number
 }
 
 export type NovaEntrega = {
@@ -116,6 +130,7 @@ export async function criarEntrega(input: NovaEntrega): Promise<{ numeroVale: st
             pagamentoId: legado.pagamentoPrevistoId ?? input.id,
             forma: legado.formaPagamento,
             valorCents: input.valorCompraCents,
+            trocoCents: 0,
           },
         ]
       : [])
@@ -186,6 +201,10 @@ export async function criarEntrega(input: NovaEntrega): Promise<{ numeroVale: st
       entregaId: input.id,
       forma: forma.forma,
       valorCents: forma.valorCents,
+      // `?? 0`: item enfileirado antes do "troco para" não tem o campo, e o
+      // que aquele cadastro afirmava era "sem troco". Os ids e os valores
+      // congelados na fila não mudam no reenvio.
+      trocoCents: forma.trocoCents ?? 0,
       registradoPor: input.criadoPor,
       registradoEmLocal: input.ocorridoEmLocal,
     })
@@ -358,7 +377,14 @@ export type EntregaRecente = {
    * o defeito que o §65 documentou tendo achado TRÊS.
    */
   formasPrevistas: FormaComValor[]
-  formasRealizadas: FormaPagamento[]
+  /** Com valor aplicado e troco — 2026-09-12. Era só a forma. */
+  formasRealizadas: PagamentoLido[]
+  /**
+   * O que a lista pode afirmar sobre o pagamento — ver `situacaoDoPagamento`.
+   * Era `formasRealizadas.length > 0`, e todo vale que passava pelo retorno
+   * aparecia como "(divergiu)".
+   */
+  situacaoPagamento: SituacaoDoPagamento
   temReceita: boolean
   receitaRecebidaEm: string | null
   // quem lançou o vale. Cada caixa tem o próprio login, então isso
@@ -374,7 +400,7 @@ export type EntregaRecente = {
 // devolve PGRST201 por ambiguidade — o mesmo erro que o embed de lojas
 // deu no Registro de Auditoria.
 const ENTREGA_RECENTE_SELECT =
-  'id, numero_vale, tipo, cliente_nome, cliente_endereco, valor_compra_cents, valor_entrega_cents, status_entrega, ocorrido_em_local, tem_receita, receita_recebida_em, criado_por, profiles!entregas_criado_por_fkey(nome), pagamentos(forma, momento, valor_cents)'
+  'id, numero_vale, tipo, cliente_nome, cliente_endereco, valor_compra_cents, valor_entrega_cents, status_entrega, ocorrido_em_local, tem_receita, receita_recebida_em, criado_por, profiles!entregas_criado_por_fkey(nome), pagamentos(forma, momento, valor_cents, troco_cents)'
 
 type EntregaRecenteRow = {
   id: string
@@ -398,10 +424,17 @@ type EntregaRecenteRow = {
     forma: FormaPagamento
     momento: 'previsto' | 'realizado'
     valor_cents: number
+    troco_cents: number
   }>
 }
 
 function mapEntregaRecente(row: EntregaRecenteRow): EntregaRecente {
+  const formasPrevistas = row.pagamentos
+    .filter((p) => p.momento === 'previsto')
+    .map((p) => ({ forma: p.forma, valor_cents: p.valor_cents }))
+  const formasRealizadas = row.pagamentos
+    .filter((p) => p.momento === 'realizado')
+    .map((p) => ({ forma: p.forma, valor_cents: p.valor_cents, troco_cents: p.troco_cents }))
   return {
     id: row.id,
     numeroVale: row.numero_vale,
@@ -412,10 +445,9 @@ function mapEntregaRecente(row: EntregaRecenteRow): EntregaRecente {
     valorEntregaCents: row.valor_entrega_cents,
     statusEntrega: row.status_entrega,
     ocorridoEmLocal: row.ocorrido_em_local,
-    formasPrevistas: row.pagamentos
-      .filter((p) => p.momento === 'previsto')
-      .map((p) => ({ forma: p.forma, valor_cents: p.valor_cents })),
-    formasRealizadas: row.pagamentos.filter((p) => p.momento === 'realizado').map((p) => p.forma),
+    formasPrevistas,
+    formasRealizadas,
+    situacaoPagamento: situacaoDoPagamento(formasPrevistas, formasRealizadas),
     temReceita: row.tem_receita,
     receitaRecebidaEm: row.receita_recebida_em,
     criadoPorNome: row.profiles?.nome ?? null,

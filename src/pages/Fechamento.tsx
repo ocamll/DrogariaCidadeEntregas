@@ -225,11 +225,9 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
                         do Registro de Auditoria. */}
                     Era <strong>{textoDoPagamentoAlterado(v.formasPrevistas)}</strong>,
                     virou{' '}
-                    <strong>
-                      {v.formasRealizadas
-                        .map((f) => `${FORMA_PAGAMENTO_LABEL[f.forma]} (${formatBRL(f.valorCents)})`)
-                        .join(' + ')}
-                    </strong>
+                    {/* Valor APLICADO à compra, por forma — o mesmo lado
+                        que a comparação usa. O troco não entra aqui. */}
+                    <strong>{textoDoPagamentoAlterado(v.formasRealizadas)}</strong>
                     {v.justificativa && <em className="block text-muted-foreground">"{v.justificativa}"</em>}
                   </>
                 )}

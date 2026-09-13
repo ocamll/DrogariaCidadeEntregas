@@ -10,6 +10,8 @@ import {
   validarFormasPrevistas,
   resolverValoresDasFormas,
   digitosDoValor,
+  trocoParaAplicavel,
+  trocoDoPrevisto,
   type FormaPagamento,
 } from '@/data/pagamentos'
 import { uuidv7 } from '@/lib/uuid'
@@ -83,6 +85,10 @@ function CadastroEntregaForm({
   // nunca dentro de `criarEntrega`, senão o reenvio da fila criaria um
   // previsto novo a cada oscilação de rede (E3.C).
   const [formas, setFormas] = useState<LinhaForma[]>(() => [linhaNova()])
+  // "Troco para", em dígitos crus. Vazio = não há troco a preparar. Só vale
+  // com uma forma, e ela dinheiro (`trocoParaAplicavel`); quando deixa de
+  // valer, `mudarFormas` o limpa — nada de valor escondido reaparecendo.
+  const [trocoPara, setTrocoPara] = useState('')
   const [temReceita, setTemReceita] = useState(false)
   const [erroValidacao, setErroValidacao] = useState<string | null>(null)
   const [gravacao, setGravacao] = useState<Gravacao | null>(null)
@@ -109,10 +115,23 @@ function CadastroEntregaForm({
     valorCompraCents
   )
 
+  /**
+   * O TROCO A LEVAR, recalculado a cada render a partir da compra e do
+   * "troco para" — o caixa não faz a subtração. `null` quando o campo não se
+   * aplica (outra forma, ou pagamento misto, cuja regra está pendente).
+   *
+   * Com uma forma só, o valor em dinheiro É a compra (`valoresCents[0]`).
+   */
+  const trocoAplicavel = trocoParaAplicavel(formas)
+  const resultadoTroco = trocoAplicavel ? trocoDoPrevisto(valoresCents[0], trocoPara) : null
+
   const previstos: FormaPrevistaDoCadastro[] = formas.map((linha, i) => ({
     pagamentoId: linha.pagamentoId,
     forma: linha.forma,
     valorCents: valoresCents[i],
+    // O "troco para" NÃO vira valor: o valor continua sendo a parte da
+    // compra, e o troco vai para `troco_cents`. Sem troco aplicável, 0.
+    trocoCents: resultadoTroco?.ok && i === 0 ? resultadoTroco.trocoCents : 0,
   }))
 
   const totalPrevistoCents = previstos.reduce((soma, p) => soma + p.valorCents, 0)
@@ -179,8 +198,21 @@ function CadastroEntregaForm({
     }
   }
 
+  /**
+   * O ÚNICO caminho por onde as formas mudam depois de nascer — e é por isso
+   * que ele limpa o "troco para" quando o campo deixa de se aplicar. Com o
+   * limpador espalhado em cada handler, o próximo que mexesse nas formas
+   * poderia esquecer, e um troco antigo voltaria ao trocar de volta para
+   * dinheiro sem o caixa ter digitado.
+   */
+  function mudarFormas(proxima: (prev: LinhaForma[]) => LinhaForma[]) {
+    const novas = proxima(formas)
+    setFormas(novas)
+    if (!trocoParaAplicavel(novas)) setTrocoPara('')
+  }
+
   function addForma() {
-    setFormas((prev) => {
+    mudarFormas((prev) => {
       if (prev.length >= MAX_FORMAS_PREVISTAS) return prev
       // AS DUAS LINHAS FICAM VAZIAS, e isso é o inverso do que se fazia
       // aqui antes. A primeira herdava o valor cheio da compra pra o
@@ -196,7 +228,7 @@ function CadastroEntregaForm({
   }
 
   function removeForma(index: number) {
-    setFormas((prev) => {
+    mudarFormas((prev) => {
       if (prev.length <= 1) return prev
       const restantes = prev.filter((_, i) => i !== index)
       // VOLTANDO A UMA LINHA, ela precisa voltar a ser vazia — e este é
@@ -216,7 +248,7 @@ function CadastroEntregaForm({
   }
 
   function updateForma(index: number, patch: Partial<LinhaForma>) {
-    setFormas((prev) => prev.map((linha, i) => (i === index ? { ...linha, ...patch } : linha)))
+    mudarFormas((prev) => prev.map((linha, i) => (i === index ? { ...linha, ...patch } : linha)))
   }
 
   function resetForm() {
@@ -227,6 +259,7 @@ function CadastroEntregaForm({
     // Linha nova, id novo. Reaproveitar o id faria o segundo vale do dia
     // colidir na PK com o primeiro.
     setFormas([linhaNova()])
+    setTrocoPara('')
     setTemReceita(false)
     nomeRef.current?.focus()
   }
@@ -252,6 +285,11 @@ function CadastroEntregaForm({
     )
     if (erroFormas) {
       setErroValidacao(erroFormas)
+      return
+    }
+    // Mesma regra, mesmo lugar: antes de enfileirar, nunca na sincronização.
+    if (resultadoTroco && !resultadoTroco.ok) {
+      setErroValidacao(resultadoTroco.erro)
       return
     }
     // Sem tarifa carregada não dá pra montar o valor da entrega — melhor
@@ -462,6 +500,31 @@ function CadastroEntregaForm({
                 </p>
               )}
             </div>
+
+            {/* "TROCO PARA" FICA FORA DA CADEIA DE ENTER — Enter no select
+                continua salvando, então quem não precisa de troco não gasta
+                tecla nenhuma. Quem precisa chega por Tab ou clique, e Enter
+                aqui dentro salva. */}
+            {trocoAplicavel && (
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="troco-para">Troco para (R$)</Label>
+                <CampoMoeda
+                  id="troco-para"
+                  digitos={trocoPara}
+                  onDigitos={setTrocoPara}
+                  onKeyDown={handleFormaKeyDown}
+                />
+                {trocoPara !== '' &&
+                  resultadoTroco &&
+                  (resultadoTroco.ok ? (
+                    <p className="text-sm">
+                      Troco a levar: <strong>{formatBRL(resultadoTroco.trocoCents)}</strong>
+                    </p>
+                  ) : (
+                    <p className="text-xs text-destructive">{resultadoTroco.erro}</p>
+                  ))}
+              </div>
+            )}
 
             <label className="flex items-center gap-2 text-sm text-muted-foreground">
               <input

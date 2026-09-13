@@ -32,11 +32,21 @@ export {
   ORIGEM_INFORMADA,
   referenciaInformadaDoEvento,
   textoDaReferenciaInformada,
+  // O contrato dos valores (2026-09-12): situação do pagamento e troco.
+  situacaoDoPagamento,
+  trocoParaAplicavel,
+  trocoDoPrevisto,
+  trocoDoRecebido,
+  realizadoDaLinha,
+  digitosDoRecebidoPrevisto,
 } from '@/lib/formasDePagamento'
 export type {
   FormaPagamento,
   FormaComValor,
   LadoDoPagamentoAlterado,
+  PagamentoLido,
+  SituacaoDoPagamento,
+  LinhaRealizadaDigitada,
 } from '@/lib/formasDePagamento'
 
 import type { FormaPagamento, FormaComValor } from '@/lib/formasDePagamento'
@@ -46,7 +56,14 @@ export async function criarPagamentoPrevisto(input: {
   tenantId: string
   entregaId: string
   forma: FormaPagamento
+  /** Parte da compra paga por esta forma — o líquido. */
   valorCents: number
+  /**
+   * Troco a levar (2026-09-12): o "troco para" do cadastro menos o valor em
+   * dinheiro. Zero quando não há troco a preparar. Ver o contrato em
+   * `lib/formasDePagamento.ts`.
+   */
+  trocoCents: number
   registradoPor: string
   // relógio do dispositivo, capturado por quem chama antes de enfileirar —
   // mesmo instante de ocorrido_em_local da entrega/divergência que gerou
@@ -83,6 +100,7 @@ export async function criarPagamentoPrevisto(input: {
     momento: 'previsto',
     forma: input.forma,
     valor_cents: input.valorCents,
+    troco_cents: input.trocoCents,
     registrado_por: input.registradoPor,
     registrado_em_local: input.registradoEmLocal,
   })
