@@ -11027,9 +11027,85 @@ a ele é a CONSULTA GERENCIAL (uma RPC com o cargo conferido dentro) e as
 tabelas novas de recebimento, providência e encaminhamento — não as colunas
 de status do vale que ele já lê hoje.
 
-**Ainda em aberto:** receita no retorno (fora, registro do balcão ou dentro
-do DCRR1); relato ou "precisa apurar" obrigatório; descobertas posteriores
-nesta etapa ou como limitação; e o alcance offline de "Receber documento".
+### Decisões do usuário — 2026-09-14
+
+Respondidas depois do relatório pedido no §11 da versão 2:
+
+| pergunta | decisão |
+|---|---|
+| receita no retorno | **dentro do documento assinado** — confirmada pelo motoboy com cartão e PIN, com vetores, gêmeos TS/SQL e verificador |
+| relato nos itens com diferença | **relato ou "precisa apurar" obrigatório**, só nesses itens |
+| descobertas depois do retorno selado | **limitação registrada** nesta etapa; a ocorrência posterior entra com o acompanhamento da gestão |
+| "Receber documento" sem internet | **offline pela fila**, com "aguardando sincronização" distinto de "recebido" e idempotência por documento |
+
+Fecha as decisões 1, 3 e 4 da lista acima; a 5 segue o que a versão 2
+decidiu.
+
+**O que a primeira decisão encontrou no código, medido em 2026-09-14:**
+
+- **`tem_receita` não está em documento assinado nenhum.** A linha `v` do
+  DCR1 não tem o campo (`canonico.ts`, `romaneio_canonico`), e nenhuma
+  migration além da `20260809210000` o cita.
+- **`fn_entrega_imutavel` não o congela** (`20260816140000:849-860`): a marca
+  muda depois da saída.
+- **A expectativa de documento do retorno sai só das linhas `p` do canônico
+  ASSINADO da saída** (`romaneio_documentos_esperados`,
+  `20260820160000:111-126`) — "nenhuma tabela mutável participa". Para a
+  receita não existe linha de onde ler.
+- **O selo agrega todas as linhas `d` do vale em `status_documental`**
+  (`20260912120000:464-478`). Receita entrando como `d` sem ajuste faria
+  recebê-la quitar o convênio, o que o CLAUDE.md proíbe: ela fica fora dessa
+  agregação.
+- **`documento_faltante` já carrega `tipo_documento`**, então uma receita
+  faltante sai no mesmo evento — e o `falta_receita` do cliente perde a razão
+  de existir.
+
+**Em aberto por causa disso:** de onde o servidor tira que a receita era
+esperada. Levado ao usuário com cenários — respondido logo abaixo.
+
+### Construção — 1ª etapa: a receita no documento assinado (2026-09-14)
+
+**A resposta que abriu esta etapa:** a expectativa da receita sai da SAÍDA,
+que passa a afirmá-la numa linha `r` do DCR1. As alternativas eram ler
+`tem_receita` na hora do selo (quebra no offline: desmarcar a receita entre a
+assinatura e a sincronização faz o servidor recusar depois do PIN) e aceitar
+a linha de receita sem conferir se era esperada.
+
+**CONSTRUÍDA; a migration NÃO está aplicada.**
+
+| peça | o quê |
+|---|---|
+| `canonico.ts` + `romaneio_canonico` | bloco `r <entrega_id>` depois dos `p`, só para vale com receita |
+| `fn_entrega_imutavel` | `tem_receita` congela com o documento |
+| `canonicoRetorno.ts` + `romaneio_retorno_validar` | `receita` no domínio do bloco `d` |
+| `romaneio_documentos_esperados` | a linha `r` espera `d/receita`; a mesma função serve o selo e `obter_contexto_retorno` |
+| `selar_romaneio_retorno_interno` | receita FORA do `status_documental`; a declarada recebida grava `receita_recebida_*` só se ninguém a recebeu antes |
+| telas | a Nova Corrida mostra "traz receita"; o retorno pede a receita pelo mesmo caminho dos outros documentos (lido no código, não visto na tela) |
+
+- **Os golden vectors do DCR1 nasceram** (`scripts/dcr1-vetores.mts`,
+  S001–S003). O spec lê `src/lib/canonico.ts` de `19402cd` pelo git e prova
+  que, sem receita, a implementação nova e a anterior produzem os mesmos
+  bytes.
+- **DCRR1:** V017 (receita e convênio no mesmo vale) e V018 (insucesso com a
+  receita faltante). **O I014 trocou de exemplo**: usava `receita` como tipo
+  fora do domínio, e agora usa `nota_fiscal`, com a razão no vetor. É mudança
+  do contrato decidida pelo usuário, não asserção ajustada para passar.
+- **A migration `20260914120000` é gerada** por
+  `scripts/patch-receita-no-documento.mts`, que prova, função a função, que
+  fora dos trechos trocados nada mudou. Ela roda numa transação com gates: uma
+  função de cada (nenhuma sobrecarga), e o placar do verificador e a
+  expectativa de toda saída selada idênticos antes e depois.
+- **Medido:** 33 de 33 specs, build verde, lint sem erro.
+
+**A TRANSIÇÃO JÁ VALE:** o cliente passou a emitir a linha `r`. Até a migration
+ser aplicada, uma saída online com vale de receita é recusada pela Nova Corrida
+na comparação dos canônicos — antes do PIN, com mensagem —, e uma offline seria
+recusada ao sincronizar. **Aplicar junto com este código**, sem saída offline
+pendente e com as abas recarregadas.
+
+**Fora desta etapa:** a página e o PDF da saída não mostram a receita (o
+documento a tem, na linha `r`); o Registro de Auditoria e as Notificações ainda
+não leem `documento_faltante`; a aba Documentos continua a de hoje.
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 

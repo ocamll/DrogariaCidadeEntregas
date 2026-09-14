@@ -139,7 +139,8 @@ export const MOTIVOS_INSUCESSO = ['ausente', 'endereco_errado', 'recusou', 'outr
 export type MotivoInsucesso = (typeof MOTIVOS_INSUCESSO)[number]
 
 /**
- * OS DOIS TIPOS DE PAPEL QUE SAEM E TÊM QUE VOLTAR.
+ * OS PAPÉIS QUE TÊM QUE VOLTAR — dois que saem com a entrega, e a receita,
+ * que vem do cliente.
  *
  * Congelado em 2026-08-20, com o processo real: convênio e crediário
  * geram, cada um, exatamente um documento físico que acompanha a entrega
@@ -153,8 +154,16 @@ export type MotivoInsucesso = (typeof MOTIVOS_INSUCESSO)[number]
  * convênio faria o documento assinado afirmar custódia de um papel que
  * nunca existiu, e a transação exigiria de volta algo que ninguém
  * emitiu. São três conceitos distintos.
+ *
+ * **`receita` entrou em 2026-09-14**, por decisão do usuário: a receita
+ * passa a ser conferida no retorno, dentro do documento assinado. Ela não
+ * é forma de pagamento, então a expectativa não sai de uma linha `p` da
+ * saída, e sim da linha `r` do DCR1. E continua documento DISTINTO do
+ * convênio: recebê-la não quita o convênio — o selo a deixa fora do
+ * `status_documental`. Nenhum retorno já selado muda: um bloco `d` sem
+ * receita produz os mesmos bytes de antes.
  */
-export const TIPOS_DOCUMENTO_FISICO = ['convenio', 'crediario'] as const
+export const TIPOS_DOCUMENTO_FISICO = ['convenio', 'crediario', 'receita'] as const
 export type TipoDocumentoFisico = (typeof TIPOS_DOCUMENTO_FISICO)[number]
 
 /**

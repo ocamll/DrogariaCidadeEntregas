@@ -121,8 +121,14 @@ export type PagamentoRealizadoCanonico = {
 //
 // A entrega falhou e o papel voltou em branco. O retorno físico
 // aconteceu.
+//
+// E a RECEITA, desde 2026-09-14 (V017, V018): o usuário decidiu conferi-la
+// no retorno, dentro do documento assinado. Ela não sai com a entrega — vem
+// do cliente —, e por isso a expectativa não é derivada de forma de
+// pagamento: é a linha `r` da saída que a afirma. Recebê-la não quita o
+// convênio; são documentos distintos.
 export type DocumentoFisicoCanonico = {
-  tipo: 'convenio' | 'crediario'
+  tipo: 'convenio' | 'crediario' | 'receita'
   situacao: 'recebido' | 'faltante'
 }
 
@@ -810,6 +816,86 @@ export const VETORES: Vetor[] = [
     bytes: 495,
     sha256: '3767a590eae4cf270e1c0b6dc0a3cdef88787d0da15b787430cfaf8bf5e2df7f',
   },
+
+  // ===================================================================
+  // A RECEITA — acrescentada em 2026-09-14
+  //
+  // Os dezesseis acima seguem valendo byte a byte: `receita` é só um valor
+  // a mais no domínio do bloco `d`, e nenhum deles o usa.
+  // ===================================================================
+
+  {
+    nome: 'V017 — a receita junto do convênio, no mesmo vale',
+    porque:
+      'A receita é documento DISTINTO do convênio, e o mesmo vale pode exigir ' +
+      'os dois — receber um não quita o outro. Trava também a ordem dentro ' +
+      'do vale: "convenio" < "receita" por code unit, com a entrada ao ' +
+      'contrário. A expectativa da receita sai da linha `r` da saída, não do ' +
+      'pagamento em convênio.',
+    entrada: {
+      saidaRomaneioId: SAIDA,
+      saidaDocumentHash: SAIDA_HASH,
+      motoboyId: MOTOBOY,
+      responsavelId: RESPONSAVEL,
+      vales: [
+        {
+          entregaId: E1,
+          desfecho: 'entregue',
+          motivo: null,
+          detalhe: null,
+          pagamentosRealizados: [
+            { pagamentoId: P1, forma: 'convenio', valorCents: 9000, trocoCents: 0 },
+          ],
+          // Na entrada, receita primeiro. Na saída, convênio primeiro.
+          documentos: [
+            { tipo: 'receita', situacao: 'recebido' },
+            { tipo: 'convenio', situacao: 'recebido' },
+          ],
+        },
+      ],
+    },
+    canonico: [
+      ...CABECALHO,
+      `v\t${E1}\tentregue\t-\t-`,
+      `pr\t${E1}\t${P1}\tconvenio\t9000\t0`,
+      `d\t${E1}\tconvenio\trecebido`,
+      `d\t${E1}\treceita\trecebido`,
+    ].join('\n'),
+    bytes: 476,
+    sha256: '4b4627e1f4071e9f2723d67917b1e3737e5d888aa743b24b90ec58b1fa92beb8',
+  },
+
+  {
+    nome: 'V018 — insucesso com a receita FALTANTE',
+    porque:
+      'O cliente estava ausente: não houve entrega, não houve dinheiro, e a ' +
+      'receita que tinha que voltar não veio. O `d` não é filtrado por ' +
+      'desfecho (V014), e `faltante` é pendência aberta — a chegada posterior ' +
+      'não reescreve este documento, vira registro novo sobre o vale.',
+    entrada: {
+      saidaRomaneioId: SAIDA,
+      saidaDocumentHash: SAIDA_HASH,
+      motoboyId: MOTOBOY,
+      responsavelId: RESPONSAVEL,
+      vales: [
+        {
+          entregaId: E1,
+          desfecho: 'insucesso',
+          motivo: 'ausente',
+          detalhe: null,
+          pagamentosRealizados: [],
+          documentos: [{ tipo: 'receita', situacao: 'faltante' }],
+        },
+      ],
+    },
+    canonico: [
+      ...CABECALHO,
+      `v\t${E1}\tinsucesso\tausente\t-`,
+      `d\t${E1}\treceita\tfaltante`,
+    ].join('\n'),
+    bytes: 333,
+    sha256: '1ed0bd5d390a2c8e1e28eed3c71d6ed03d84fd3330fa27c13f1e799e77dd79ad',
+  },
 ]
 
 // =====================================================================
@@ -1154,14 +1240,16 @@ export const VETORES_INVALIDOS: VetorInvalido[] = [
   {
     nome: 'I014 — tipo_documento fora do domínio',
     porque:
-      'Só convênio e crediário geram papel que sai e volta. Um tipo ' +
-      'desconhecido no documento assinado seria a farmácia afirmando ' +
-      'custódia de uma coisa que ninguém sabe o que é — e, na transação, ' +
-      'nada teria como derivar da saída se ele era esperado.',
+      'Só convênio, crediário e receita têm custódia no retorno. A NOTA ' +
+      'FISCAL é o exemplo mais plausível de engano: ela sai com a entrega, ' +
+      'mas fica com o cliente — o documento assinado afirmaria custódia de ' +
+      'um papel que não volta, e nada na saída diria que ele era esperado. ' +
+      'Até 2026-09-14 o exemplo daqui era `receita`, que entrou no domínio ' +
+      'por decisão do usuário (V017, V018).',
     motivo: 'tipo_documento_invalido',
     entrada: {
       ...BASE,
-      vales: [{ ...VALE_OK, documentos: [{ tipo: 'receita', situacao: 'recebido' }] }],
+      vales: [{ ...VALE_OK, documentos: [{ tipo: 'nota_fiscal', situacao: 'recebido' }] }],
     },
   },
   {

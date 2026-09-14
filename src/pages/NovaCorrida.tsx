@@ -862,6 +862,9 @@ function NovaCorridaFluxo({
                           <strong>{vale.numeroVale}</strong> — {vale.clienteNome} (
                           {vale.clienteEndereco})
                           {vale.quantidadeVales > 1 && ` · ${vale.quantidadeVales} vales`}
+                          {/* Entra no documento como linha `r`: confirmar a saída é
+                              confirmar que esta receita tem que voltar. */}
+                          {vale.temReceita && ' · traz receita'}
                         </span>
                       </label>
                     ))}

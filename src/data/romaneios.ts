@@ -615,6 +615,7 @@ type LinhaVale = {
   entrega_paga_cliente_cents: number
   loja_origem_id: string | null
   convenio_id: string | null
+  tem_receita: boolean
   pagamentos: Array<{
     id: string
     momento: string
@@ -630,7 +631,7 @@ async function buscarValesParaSaida(lojaId: string): Promise<ValeCanonico[]> {
     .select(
       'id, numero_vale, tipo, cliente_nome, cliente_endereco, quantidade_vales, ' +
         'valor_compra_cents, valor_entrega_cents, entrega_paga_cliente_cents, ' +
-        'loja_origem_id, convenio_id, pagamentos(id, momento, forma, valor_cents, troco_cents)'
+        'loja_origem_id, convenio_id, tem_receita, pagamentos(id, momento, forma, valor_cents, troco_cents)'
     )
     .eq('status_entrega', 'pendente')
     // Filtro de filial NO CLIENTE, e não é redundância com a RLS.
@@ -677,6 +678,9 @@ async function buscarValesParaSaida(lojaId: string): Promise<ValeCanonico[]> {
     entregaPagaClienteCents: row.entrega_paga_cliente_cents,
     lojaOrigemId: row.loja_origem_id,
     convenioId: row.convenio_id,
+    // Entra no DCR1 como linha `r` desde 2026-09-14: é a saída que afirma que
+    // a receita tem que voltar, e o retorno a cobra por esse documento.
+    temReceita: row.tem_receita,
     // Filtra por momento aqui, e não no embed: com filtro no embed o
     // PostgREST vira inner join e o vale SEM pagamento (transferência)
     // sumiria da lista inteira.

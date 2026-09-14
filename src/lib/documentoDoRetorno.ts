@@ -47,6 +47,7 @@ export const INSUCESSO_MOTIVO_LABEL = {
 export const DOCUMENTO_FISICO_LABEL: Record<string, string> = {
   convenio: 'Convênio',
   crediario: 'Crediário',
+  receita: 'Receita',
 }
 
 export type DocumentoDeclarado = { tipo: string; situacao: string }

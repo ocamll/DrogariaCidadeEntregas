@@ -162,7 +162,9 @@ for (const vetor of VETORES) {
   // `canonicoRetorno.ts`: este spec confere os vetores contra a
   // ESPECIFICAÇÃO, e importar da implementação faria a checagem
   // concordar consigo mesma. Mesma razão do `FORMAS` lá em cima.
-  const TIPOS_DOC = ['convenio', 'crediario']
+  // `receita` entrou em 2026-09-14 (V017, V018): a expectativa dela sai da
+  // linha `r` da saída, não de forma de pagamento.
+  const TIPOS_DOC = ['convenio', 'crediario', 'receita']
   const SITUACOES_DOC = ['recebido', 'faltante']
   const ds = corpo.filter((l) => l.startsWith('d\t')).map((l) => l.split('\t'))
   // Diferente do `pr`, o `d` NÃO é filtrado por desfecho: o papel saiu
@@ -199,7 +201,7 @@ type ValeSolto = Record<string, unknown>
 type EntradaSolta = { vales?: ValeSolto[]; saidaDocumentHash?: unknown }
 
 type DocSolto = { tipo?: unknown; situacao?: unknown }
-const TIPOS_DOC_ESP = ['convenio', 'crediario']
+const TIPOS_DOC_ESP = ['convenio', 'crediario', 'receita']
 const SITUACOES_DOC_ESP = ['recebido', 'faltante']
 const docsDe = (v: ValeSolto) => ((v.documentos as DocSolto[]) ?? [])
 
@@ -289,8 +291,9 @@ checa(
 //           `v2 não é mais lido` do parser do cartão
 //
 //   tipo_documento_invalido
-//     I014  `receita` — tipo que não é documento de custódia desta
-//           família (a receita volta dias depois, é outro ciclo)
+//     I014  `nota_fiscal` — papel que sai com a entrega e fica com o
+//           cliente. Até 2026-09-14 o exemplo era `receita`, que entrou no
+//           domínio por decisão do usuário
 //     I015  `convcard` — e este é o que mais importa: ele é forma de
 //           pagamento VÁLIDA e tipo de documento INVÁLIDO. Sem um vetor
 //           próprio, a assimetria dependeria de alguém lembrar dela
@@ -313,7 +316,7 @@ checa(
 checa(
   'duplicata deliberada de tipo_documento_invalido',
   VETORES_INVALIDOS.filter((v) => v.motivo === 'tipo_documento_invalido').length === 2,
-  'I014 (não é desta família) e I015 (convcard: forma válida, documento inválido)'
+  'I014 (nota fiscal: fica com o cliente) e I015 (convcard: forma válida, documento inválido)'
 )
 // A recíproca: nenhum vetor VÁLIDO pode disparar um motivo de rejeição.
 // Sem isto, uma regra escrita larga demais tornaria os oito válidos

@@ -110,6 +110,7 @@ const MAX_PAGAMENTOS = 4
 const DOCUMENTO_LABEL: Record<TipoDocumentoFisico, string> = {
   convenio: 'Documento do convênio',
   crediario: 'Nota do crediário',
+  receita: 'Receita',
 }
 
 export function RetornoCorrida({

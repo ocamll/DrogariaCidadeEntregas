@@ -2,6 +2,7 @@ import { useQuery } from '@tanstack/react-query'
 import { supabase, mensagemDeErro } from '@/lib/supabase'
 import { db, type ContextoRetornoEmCache } from '@/lib/db'
 import { aceito, recusado, type ConsultaComVeredito } from '@/lib/estadoDeConsulta'
+import type { TipoDocumentoFisico } from '@/lib/canonicoRetorno'
 
 // =====================================================================
 // O CONTEXTO DO RETORNO — os fatos ANTIGOS, selados na saída
@@ -43,7 +44,7 @@ export type ValeDoContexto = {
   /** Referência de conferência. O realizado é fato NOVO, e mora na entrada. */
   pagamentosPrevistos: PagamentoPrevistoDoContexto[]
   /** Exatamente os papéis que ESTA saída espera. A tela não cria outros. */
-  documentosEsperados: Array<'convenio' | 'crediario'>
+  documentosEsperados: TipoDocumentoFisico[]
 }
 
 export type ContextoRetorno = {
@@ -85,7 +86,7 @@ type ContextoRow = {
       valor_cents: number
       troco_cents: number
     }>
-    documentos_esperados: Array<'convenio' | 'crediario'>
+    documentos_esperados: TipoDocumentoFisico[]
   }>
 }
 

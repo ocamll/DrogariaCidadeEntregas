@@ -47,7 +47,7 @@ const { data: entregas } = await supabase
   .select(
     'id, numero_vale, tipo, cliente_nome, cliente_endereco, quantidade_vales, ' +
       'valor_compra_cents, valor_entrega_cents, entrega_paga_cliente_cents, ' +
-      'loja_origem_id, convenio_id'
+      'loja_origem_id, convenio_id, tem_receita'
   )
   .eq('status_entrega', 'pendente')
   .is('corrida_id', null)
@@ -84,6 +84,9 @@ const entrada = {
     entregaPagaClienteCents: e.entrega_paga_cliente_cents,
     lojaOrigemId: e.loja_origem_id,
     convenioId: e.convenio_id,
+    // Desde 2026-09-14: vale com receita ganha a linha `r`. Para exercitá-la,
+    // marque "Precisa de receita" num vale pendente antes de rodar.
+    temReceita: e.tem_receita,
     pagamentosPrevistos: (pagamentos ?? [])
       .filter((p) => p.entrega_id === e.id)
       .map((p) => ({

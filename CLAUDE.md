@@ -2877,9 +2877,21 @@ acrescentar o `d` em 2026-08-20 não moveu nenhum dos dez hashes que já
 existiam.
 
 ```
-tipo_documento ∈ { convenio, crediario }
+tipo_documento ∈ { convenio, crediario, receita }
 situacao       ∈ { recebido, faltante }
 ```
+
+**`receita` entrou em 2026-09-14** (item 111 do NOTAS), por decisão do
+usuário: a receita é conferida no retorno, dentro do documento assinado. A
+expectativa dela **não** sai de forma de pagamento — sai da linha
+`r <entrega_id>` que o DCR1 passou a ter, depois dos `p`, só para vale com
+receita (saída sem receita mantém os bytes; golden vectors em
+`scripts/dcr1-vetores.mts`, conferidos contra a implementação anterior).
+`tem_receita` congela com o documento. A receita fica **fora** do
+`status_documental` — recebê-la não quita o convênio — e, declarada
+recebida, grava `receita_recebida_*` sem sobrescrever quem recebeu antes.
+Migration `20260914120000`, gerada por `scripts/patch-receita-no-documento.mts`
+— **construída, não aplicada** nesta data.
 
 Ordenação do `d`: por `entrega_id`, depois por `tipo_documento`. A
 identidade da linha é o PAR, não só o `entrega_id` — um vale pode ter
@@ -3732,8 +3744,13 @@ Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
           │                                                 estados confirmados; classificação do §4 em revisão
           ├ aceite complementar: cartão perdido e recusas  roteiro pronto, não rodado
           ├ republicar a sync-romaneio                     pendente (sem mudança de comportamento)
-          └ divergências registradas NO RETORNO            decidido 2026-09-13, não construído — sai o "Notificar ocorrência";
+          └ divergências registradas NO RETORNO            decidido 2026-09-13 (versão 2 em 14/09) — sai o "Notificar ocorrência";
                                                            pagamento_alterado só do servidor (NOTAS 111, docs/mudanca-de-escopo-divergencias-no-retorno-2026-09-13.md)
+              ├ receita no documento assinado (linha `r`)          construída 2026-09-14 — migration 20260914120000 NÃO aplicada
+              ├ relato ou "precisa apurar" nos itens com diferença   não começado — tabela nova, SQL antes
+              ├ "Receber documento" no vale, offline pela fila       não começado — tabela nova, SQL antes
+              ├ aba Documentos só da gestão; notificações; fechamento não começado
+              └ tirar o formulário, drenar a fila, migration de permissões  não começado
 4C. continuidade offline: abrir o app sem rede (Service Worker + Cache API), telas no estado local e E12 — obrigatória antes do piloto — desenho v1 em docs/desenho-4c-2026-09-13.md, começa depois do fechamento do 4B
 5.  conferência diária calculada, com exceções e aprovação versionada
 6.  painel da agência e conciliação por vale, por quinzena

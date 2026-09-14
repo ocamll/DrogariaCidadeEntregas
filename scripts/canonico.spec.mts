@@ -28,7 +28,7 @@ const base: EntradaCanonica = {
       numeroVale: 'V-000022', tipo: 'cliente',
       clienteNome: 'Maria Silva', clienteEndereco: 'Rua General Câmara, 520',
       quantidadeVales: 2, valorCompraCents: 12399, valorEntregaCents: 1800,
-      entregaPagaClienteCents: 900, lojaOrigemId: null, convenioId: null,
+      entregaPagaClienteCents: 900, lojaOrigemId: null, convenioId: null, temReceita: false,
       pagamentosPrevistos: [
         { pagamentoId: 'ffffffff-0000-0000-0000-000000000002', forma: 'pix', valorCents: 12399, trocoCents: 0 },
         { pagamentoId: 'ffffffff-0000-0000-0000-000000000001', forma: 'dinheiro', valorCents: 100, trocoCents: 0 },
@@ -39,7 +39,7 @@ const base: EntradaCanonica = {
       numeroVale: 'V-000021', tipo: 'cliente',
       clienteNome: 'João\tSouza', clienteEndereco: 'Av. Brasil\n1000',
       quantidadeVales: 1, valorCompraCents: 5000, valorEntregaCents: 900,
-      entregaPagaClienteCents: 0, lojaOrigemId: null, convenioId: null,
+      entregaPagaClienteCents: 0, lojaOrigemId: null, convenioId: null, temReceita: false,
       pagamentosPrevistos: [],
     },
   ],

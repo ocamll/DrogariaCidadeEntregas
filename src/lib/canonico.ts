@@ -58,6 +58,15 @@ export type ValeCanonico = {
   entregaPagaClienteCents: number
   lojaOrigemId: string | null
   convenioId: string | null
+  /**
+   * A saída AFIRMA que este vale traz receita de volta: linha `r`.
+   *
+   * Entrou em 2026-09-14, quando o usuário decidiu conferir a receita
+   * dentro do documento assinado. Sem esta linha o retorno não teria de
+   * onde tirar que a receita era esperada — `tem_receita` não estava em
+   * documento nenhum e mudava depois da saída.
+   */
+  temReceita: boolean
   pagamentosPrevistos: PagamentoPrevistoCanonico[]
 }
 
@@ -127,6 +136,18 @@ export function montarCanonico(entrada: EntradaCanonica): string {
         String(pagamento.trocoCents),
       ].join(TAB)
     )
+  }
+
+  // O bloco `r` — a receita que tem que VOLTAR —, depois de TODOS os
+  // pagamentos. Entrou em 2026-09-14. Uma linha por vale com receita e
+  // nenhuma sem: bloco vazio é ausência de linha, nunca placeholder, e é
+  // isso que deixa byte a byte igual o canônico de toda saída sem receita
+  // (o mesmo arranjo do bloco `d` no DCRR1). Os vales já vêm ordenados por
+  // entrega_id, e o lado SQL faz um terceiro laço separado.
+  //
+  // Só a PRESENÇA: nada de medicamento nem de tipo de receita (regra 9).
+  for (const vale of vales) {
+    if (vale.temReceita) linhas.push(['r', idCanonico(vale.entregaId)].join(TAB))
   }
 
   // Sem \n no fim — o array_to_string do lado SQL também não põe.
