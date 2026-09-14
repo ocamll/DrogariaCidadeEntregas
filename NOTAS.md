@@ -11071,7 +11071,8 @@ que passa a afirmá-la numa linha `r` do DCR1. As alternativas eram ler
 assinatura e a sincronização faz o servidor recusar depois do PIN) e aceitar
 a linha de receita sem conferir se era esperada.
 
-**CONSTRUÍDA; a migration NÃO está aplicada.**
+**CONSTRUÍDA, APLICADA E CONFERIDA em 2026-09-14** (resultados no fim desta
+subseção).
 
 | peça | o quê |
 |---|---|
@@ -11097,11 +11098,31 @@ a linha de receita sem conferir se era esperada.
   expectativa de toda saída selada idênticos antes e depois.
 - **Medido:** 33 de 33 specs, build verde, lint sem erro.
 
-**A TRANSIÇÃO JÁ VALE:** o cliente passou a emitir a linha `r`. Até a migration
-ser aplicada, uma saída online com vale de receita é recusada pela Nova Corrida
-na comparação dos canônicos — antes do PIN, com mensagem —, e uma offline seria
-recusada ao sincronizar. **Aplicar junto com este código**, sem saída offline
-pendente e com as abas recarregadas.
+**A transição, que valeu até a aplicação:** o cliente passou a emitir a linha
+`r` antes do banco. Nesse intervalo, uma saída online com vale de receita seria
+recusada na comparação dos canônicos, antes do PIN.
+
+#### Aplicação e conferência — 2026-09-14
+
+**A primeira tentativa chegou ao banco cortada.** O SQL recebido terminava na
+linha 323 do arquivo (fim do laço de pagamentos do validador, seção 3) e falhou
+com `42601 unterminated dollar-quoted string`. Antes disso, execuções separadas
+já tinham posto a seção 1 no ar: a conferência (e) devolveu a linha `r` do
+servidor. O arquivo não tem caractere invisível e tem o tamanho da
+`20260912120000`, aplicada sem problema; **a causa do corte não foi medida**.
+Lição: esta migration só vale inteira, numa execução — os gates usam
+`set_config` local à transação. Reaplicada inteira, sem erro.
+
+| conferência | resultado |
+|---|---|
+| diagnóstico por `pg_get_functiondef` | as cinco funções na versão nova, uma linha cada |
+| (b) saída selada esperando receita | zero linhas |
+| (c) mudar `tem_receita` de vale selado | `RESULTADO — recusou, como esperado` |
+| (d) golden vectors DCRR1 no SQL | 72 de 72 |
+| (e) canônico da saída TS × SQL, V-000074 e V-000075 (com receita) | iguais, 661 bytes, com a linha `r` do V-000075 |
+| (f) placar | 40 · 40 · 0 (saída 26, retorno 14), igual ao anterior |
+
+**Não medido ainda:** saída e retorno reais com receita, recebida e faltante.
 
 **Fora desta etapa:** a página e o PDF da saída não mostram a receita (o
 documento a tem, na linha `r`); o Registro de Auditoria e as Notificações ainda

@@ -2891,7 +2891,8 @@ receita (saída sem receita mantém os bytes; golden vectors em
 `status_documental` — recebê-la não quita o convênio — e, declarada
 recebida, grava `receita_recebida_*` sem sobrescrever quem recebeu antes.
 Migration `20260914120000`, gerada por `scripts/patch-receita-no-documento.mts`
-— **construída, não aplicada** nesta data.
+— **aplicada e conferida em 2026-09-14**: 72 de 72 vetores no SQL, placar
+40 · 40 · 0.
 
 Ordenação do `d`: por `entrega_id`, depois por `tipo_documento`. A
 identidade da linha é o PAR, não só o `entrega_id` — um vale pode ter
@@ -3746,7 +3747,7 @@ Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
           ├ republicar a sync-romaneio                     pendente (sem mudança de comportamento)
           └ divergências registradas NO RETORNO            decidido 2026-09-13 (versão 2 em 14/09) — sai o "Notificar ocorrência";
                                                            pagamento_alterado só do servidor (NOTAS 111, docs/mudanca-de-escopo-divergencias-no-retorno-2026-09-13.md)
-              ├ receita no documento assinado (linha `r`)          construída 2026-09-14 — migration 20260914120000 NÃO aplicada
+              ├ receita no documento assinado (linha `r`)          ✓ 2026-09-14 aplicada e conferida (72/72, 40 · 40 · 0)
               ├ relato ou "precisa apurar" nos itens com diferença   não começado — tabela nova, SQL antes
               ├ "Receber documento" no vale, offline pela fila       não começado — tabela nova, SQL antes
               ├ aba Documentos só da gestão; notificações; fechamento não começado
