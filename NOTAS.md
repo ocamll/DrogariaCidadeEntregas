@@ -10810,6 +10810,56 @@ fora de migration (§1 do documento). Depois, confirmar o SQL da versão 2
 (§11). O endurecimento de `eventos_insert` e `assinaturas_insert` (§12) é
 decisão à parte.
 
+### A segunda revisão, e a versão 3 — mesmo dia
+
+**O "primeiro passo" acima estava errado e foi retirado.** O usuário conferiu
+no banco: as duas tabelas da v1 têm **RLS ligada e nenhuma policy**, o que é
+negação por padrão — faltava estrutura, não havia exposição pública. Eu
+confundi ausência de policy com ausência de RLS. Também não há evidência de
+quem as criou. **Nenhum `drop` avulso**: a remoção vai na migration, com
+verificação de conteúdo e dependências.
+
+Confirmado por ele: as tabelas continuam vazias, e as 5 assinaturas
+`pin_esquecido` são 5 autorizações excepcionais consumidas por romaneios
+selados — recuperáveis pela origem da v2.
+
+**O que a revisão derrubou na v2:**
+
+- **a janela de 24 h no relógio do balcão** — reproduzido: operação offline
+  às 8h, balcão dois dias adiantado, PIN novo às 10h, sincronização às 11h →
+  "Aguardando o admin", pedindo reset desnecessário. Alargar a janela só
+  desloca. **Na v3 o relógio do balcão não entra em regra nenhuma**: o limite
+  inferior de uma operação offline é a exceção ONLINE mais recente do mesmo
+  motoboy (que prova no relógio do servidor que o problema existia), ou o
+  início do acompanhamento; havendo dúvida, "Verificar";
+- **providências já iniciadas** (PIN zerado, cartão emitido, encerramento)
+  não eram reconhecidas antes da sincronização. Na v3, providência em curso
+  cobre toda exceção — inclusive a atrasada e a que vier depois do reset — e
+  nenhuma delas oferece reset;
+- **o gatilho de fatos quebraria o gerente redefinindo o próprio PIN**:
+  `motoboy_credenciais` guarda os dois titulares, e o `motoboy_id not null`
+  desfaria a transação. Guarda explícita na cláusula `when` e na função;
+- **gerente veria operações de outras filiais** num pedido compartilhado. A
+  função passa a devolver ao gerente só o que é da filial dele;
+- **60 s não é tempo real**: fica como entrega intermediária, com o contador
+  no cabeçalho de qualquer tela. O fluxo em tempo real continua pendente, e
+  para as divergências entre caixa, gestor e admin ele é necessário.
+
+**Decisões do usuário:** as 24 h não são aprovadas; a proteção de `eventos`
+e `assinaturas` é feita **agora**, em migration separada.
+
+**Medido para essa proteção:** todo escritor de `eventos` no servidor é
+`SECURITY DEFINER` (`fn_log_entrega`, `log_credencial`, os dois selos e os
+dois registradores de conflito); o cliente grava só `pagamento_alterado`,
+`falta_receita`, `falta_documento_convenio` e `entrega_cancelada`; nenhuma
+Edge Function grava; nenhuma migration usa `force row level security`; e
+nada no cliente grava `assinaturas`. Limitar `eventos_insert` aos quatro
+tipos e remover `assinaturas_insert` não quebra escrita legítima.
+
+**Ordem combinada:** documento corrigido (v3) → regras de estado do §4
+confirmadas → migrations completas (proteção; pedidos) → implementação e
+aceite.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
