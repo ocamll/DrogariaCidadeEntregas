@@ -10993,6 +10993,44 @@ nem as demais regras do 4B.
 5. **Tratamento pelo gestor** nesta etapa: consultar, registrar providência,
    encaminhar ao admin e dar baixa.
 
+### Versão 2 do documento — 2026-09-14
+
+A cópia em `docs/` foi substituída pela versão 2. **O que ela decidiu:**
+
+- **a aba Documentos passa a ser só de gestor (própria filial) e admin (todas,
+  com filtro)**, e mostra, por vale e tipo, **recebido no retorno**,
+  **pendente** e **recebido posteriormente**, também os recebidos, com
+  histórico e providências. Vale sem retorno conferido aparece como
+  **aguardando conferência**, nunca como "não voltou";
+- **o caixa registra a chegada posterior pela ação "Receber documento" no
+  vale**, validada no servidor (cargo, filial, vale e documento), por
+  documento, sem duplicar nem sobrescrever quem recebeu primeiro. O gerente
+  conserva a ação no balcão; o admin não ganha função de balcão;
+- **"Não voltou" sai**: repete a conferência do retorno;
+- o gestor registra providências e encaminha ao admin; ler um aviso ou
+  encerrar uma análise **não** é receber o documento.
+
+Isso responde às decisões 2 e (em parte) 5 acima.
+
+**O que o código de hoje faz, medido, contra isso:**
+
+| hoje | a versão 2 pede |
+|---|---|
+| a aba aparece para **todos os cargos** (`Painel.tsx`) | só gestor e admin, com a consulta gerencial gateada no servidor |
+| "convênio pendente" = `status_documental = 'pendente'`, que o **cadastro** já marca: vale que nem saiu aparece | "aguardando conferência" antes do retorno |
+| baixa de convênio é `update` direto em `entregas` **por vale** (`status_documental`, `documento_recebido_*`): convênio e crediário do mesmo vale caem juntos, e nada impede sobrescrever o primeiro recebedor | recebimento por documento, primeiro recebedor preservado |
+| receita: colunas próprias (`receita_recebida_*`), pendente desde o cadastro, **sem passar pelo retorno** | receita conferida no retorno (exemplo do documento) |
+
+**Uma limitação da RLS que precisa ficar dita:** o caixa lê `entregas` da
+própria filial para operar, e RLS não restringe coluna. O que dá para recusar
+a ele é a CONSULTA GERENCIAL (uma RPC com o cargo conferido dentro) e as
+tabelas novas de recebimento, providência e encaminhamento — não as colunas
+de status do vale que ele já lê hoje.
+
+**Ainda em aberto:** receita no retorno (fora, registro do balcão ou dentro
+do DCRR1); relato ou "precisa apurar" obrigatório; descobertas posteriores
+nesta etapa ou como limitação; e o alcance offline de "Receber documento".
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta

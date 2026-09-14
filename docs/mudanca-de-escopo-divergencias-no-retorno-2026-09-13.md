@@ -1,6 +1,6 @@
-# Mudança de escopo: divergências registradas no retorno da corrida
+# Mudança de escopo: divergências e documentos conferidos no retorno da corrida
 
-Data: 13/09/2026. Documento de orientação para o Claude Code.
+Criado em 13/09/2026. **Versão 2, atualizada em 14/09/2026.** Documento de orientação para o Claude Code. Esta versão substitui a anterior; o nome do arquivo foi mantido para facilitar o envio.
 
 Este documento foi solicitado pelo usuário durante a construção do fluxo de “Notificar divergência”. Registra a mudança de direção e as condições para implementá-la. A produção deste documento não alterou código, migrations ou dados do sistema e não constitui autorização para aplicar alterações no banco.
 
@@ -12,13 +12,22 @@ O usuário percebeu que o registro separado de divergência repete a conferênci
 
 O caixa informa o que aconteceu. O servidor compara o previsto com o realizado, registra a divergência e disponibiliza a ocorrência para acompanhamento. O caixa não deve preencher o retorno e depois repetir a informação em outra janela para avisar a gestão.
 
+**Complemento confirmado em 14/09: a aba Documentos fica apenas para gestores e administradores acompanharem o que voltou, o que está pendente e o que foi recebido posteriormente.** A conferência inicial dos documentos sai dessa aba e integra o retorno. O caixa registra um recebimento posterior por uma ação contextual no vale, sem acesso à aba gerencial e sem reabrir o retorno selado.
+
+| Ponto de acesso | Quem usa | Responsabilidade |
+|---|---|---|
+| Retorno da corrida | Caixa; gerente quando assumir excepcionalmente o balcão | Confirmar desfecho, pagamentos e documentos; informar o contexto das diferenças. O admin continua sem fluxo de balcão. |
+| Aba Documentos | Gestor da filial; admin em todas as filiais do tenant | Consultar documentos recebidos e pendentes, histórico e providências; acompanhar a resolução. |
+| Ação “Receber documento” no vale | Caixa da filial; gerente quando atuar no balcão | Registrar a chegada posterior do documento físico. |
+| Notificações | Destinatários autorizados de cada ocorrência | Avisar e abrir o registro correspondente; sem repetir a conferência ou encerrar a pendência pela leitura. |
+
 Esta decisão substitui a premissa de manter `pagamento_alterado` como evento produzido tanto pelo cliente quanto pelo selo. Não cancela a proteção da auditoria, o acompanhamento de credenciais ou as demais regras do 4B.
 
 Como há trabalho em andamento, comece conferindo o diff atual, os commits e as migrations já aplicadas. Preserve as mudanças úteis e ajuste somente o que dependia da existência do formulário separado. Não reverta o trabalho inteiro.
 
 ## 2. O que foi conferido no código
 
-Referências relativas à raiz do repositório. Os números de linha podem mudar durante a construção.
+Referências relativas à raiz do repositório, conferidas em 13/09/2026. Revalidar o estado ao retomar: há construção em andamento e os números de linha podem mudar.
 
 | Arquivo e símbolo | Situação observada | Consequência |
 |---|---|---|
@@ -28,7 +37,7 @@ Referências relativas à raiz do repositório. Os números de linha podem mudar
 | `src/pages/RetornoCorrida.tsx` | Já coleta pagamentos realizados, troco, desfecho e situação dos documentos. | O retorno será o ponto de entrada desses fatos. Ainda precisa comportar a explicação da divergência de pagamento/documento; o detalhe atual de insucesso não substitui essa explicação. |
 | `supabase/migrations/20260912120000_selo_do_retorno_versao_2.sql` | O selo grava pagamentos, calcula divergências e produz `pagamento_alterado` e `documento_faltante`. | Aproveitar essa origem. Conferir a definição efetivamente vigente antes de modificar funções. |
 | `src/data/notificacoes.ts` e `src/data/auditoria.ts` | Há leitura dos eventos antigos e distinção de origem de pagamento. A lista de notificações inspecionada ainda não inclui `documento_faltante`. | Preservar leitores necessários ao histórico e integrar os eventos produzidos pelo retorno ao acompanhamento. |
-| `src/pages/DocumentosPendentes.tsx` e `src/data/documentos.ts` | Existem baixa de recebimento posterior e ações de notificar falta de receita/convênio fora do diálogo dos vales. | Não apagar funções compartilhadas por presumir que perderam todos os consumidores. Separar recebimento, acompanhamento e declaração repetida da mesma falta. |
+| `src/pages/DocumentosPendentes.tsx` e `src/data/documentos.ts` | Existem baixa de recebimento posterior e ações de notificar falta de receita/convênio fora do diálogo dos vales. | Transformar a aba em acompanhamento gerencial, incluindo recebidos; reaproveitar a baixa em uma ação contextual no vale para o balcão. Retirar a declaração repetida da mesma falta. Conferir consumidores antes de apagar funções. |
 | `src/lib/db.ts` e `src/data/filaOffline.ts` | A fila tipa e processa `divergencia` e `falta_receita`. | A ausência do botão não prova que deixou de existir trabalho pendente em IndexedDB. |
 | `supabase/migrations/20260913120000_eventos_e_assinaturas_so_do_servidor.sql` | O arquivo já existe e ainda permite ao cliente `pagamento_alterado`, recusando as chaves `origem` e `romaneio_retorno_id`. | A proteção construída continua útil, mas sua lista final de escritores muda. A existência do arquivo não comprova aplicação no banco. |
 
@@ -70,15 +79,50 @@ Depois da sincronização aceita, a ocorrência fica disponível ao gestor da fi
 
 O encaminhamento em tempo real continua sendo requisito do acompanhamento de divergências. Um evento no banco, um contador ou uma consulta periódica não comprovam que esse fluxo já está pronto. Reabertura da tela e reconexão precisam recuperar as pendências mesmo quando um aviso em tempo real não chegar.
 
-## 4. O que permanece depois do retorno
+## 4. Aba Documentos gerencial e recebimentos posteriores
 
-### Documentos que chegam mais tarde
+### A aba Documentos deixa de ser uma segunda conferência do caixa
 
-Manter a baixa posterior de receita e documento de convênio. Se o retorno registrou “faltante” e o documento chegou no dia seguinte, registrar o recebimento com autor e horário, preservando o fato anterior.
+Remover o acesso à aba Documentos do painel do caixa. Manter a aba para gestores e administradores, com estes escopos:
 
-O acompanhamento deve permitir consultar a ocorrência, registrar uma providência, encaminhá-la e dar baixa quando houver o recebimento físico. Não deve exigir declarar de novo a mesma falta para torná-la visível ao gestor.
+- o gestor consulta e acompanha os documentos da própria filial;
+- o admin consulta e acompanha todas as filiais do tenant, com filtro de filial;
+- o caixa consulta os documentos do vale necessário à sua operação e registra recebimento posterior, sem receber a listagem gerencial completa.
 
-As ações “Não voltou” existentes em `DocumentosPendentes` precisam ser avaliadas nesse contexto. Retirar a duplicação quando o retorno já declarou a falta, preservando a capacidade de acompanhar e receber o documento posteriormente. Não apagar a página inteira.
+A restrição da aba precisa alcançar a rota e a consulta gerencial, não apenas esconder o item no menu. Separar esse acesso das leituras contextuais necessárias ao cadastro, retorno e recebimento posterior; não bloquear o trabalho do caixa ao restringir a listagem gerencial.
+
+A aba deve mostrar os documentos por vale e tipo, com acesso ao romaneio e ao histórico, distinguindo:
+
+| Situação exibida | Significado |
+|---|---|
+| **Recebido no retorno** | A conferência do retorno declarou que o documento voltou naquele momento. |
+| **Pendente** | O retorno declarou o documento faltante e ainda não existe recebimento posterior confirmado. |
+| **Recebido posteriormente** | O retorno declarou falta, e outro registro documenta a chegada depois, com quem recebeu e quando. |
+
+Esses são rótulos de apresentação; não exigem criar um novo enum no banco sem necessidade. Antes da conferência do retorno, não afirmar que o documento “não voltou”: ele ainda pode estar com o motoboy. Se esses vales aparecerem na consulta, indicar que aguardam conferência.
+
+A consulta não pode se limitar às pendências atuais. Deve permitir checar também o que voltou, filtrar por situação, tipo de documento e período, e localizar um vale. Datas de retorno e de recebimento posterior precisam aparecer com seus significados, sem transformar a chegada posterior em chegada no retorno.
+
+O gestor pode registrar providências e encaminhar o que exigir decisão do admin. Encerrar uma análise administrativa ou ler uma notificação não equivale a receber fisicamente um documento. A pendência documental permanece até o recebimento correspondente.
+
+### Documentos que chegam mais tarde: ação contextual no vale
+
+Manter a baixa posterior de receita e documento de convênio, acessível ao caixa pela ação **“Receber documento”** ao localizar o vale. Não exigir que o caixa entre na aba gerencial nem recriar uma página paralela de conferência.
+
+Exemplo: o retorno de segunda-feira declarou a receita faltante. Na terça-feira, o caixa localiza o vale, seleciona a receita pendente e confirma que está com o documento em mãos. A aba gerencial passa a mostrar “Recebido posteriormente”, com autor e horário. O romaneio de segunda-feira continua afirmando corretamente que a receita não voltou naquele retorno.
+
+Requisitos dessa ação:
+
+- validar no servidor o cargo, a filial, o vale e o documento que está sendo recebido;
+- registrar o recebimento por documento; receber a receita não dá baixa automática no convênio do mesmo vale;
+- preservar autoria, horário do fato e horário de registro/sincronização quando aplicável;
+- impedir duplicação por clique repetido ou reenvio e não sobrescrever silenciosamente quem recebeu primeiro;
+- atualizar o acompanhamento do gestor sem exigir nova notificação manual;
+- só apresentar o recebimento como confirmado após a persistência aceita. Se houver suporte offline para essa ação, distinguir claramente “aguardando sincronização” de “recebido”. O alcance offline do recebimento posterior deve ser explicitado na implementação; a obrigatoriedade de saída e retorno offline permanece.
+
+O gerente conserva essa ação quando atuar no balcão. O acesso gerencial do admin não deve ganhar automaticamente uma função de declarar recebimento físico.
+
+Retirar as ações “Não voltou” que apenas repetem a conferência já registrada no retorno. Substituir o uso gerencial delas pelo acompanhamento da pendência existente, quando cabível. Não manter um segundo formulário para produzir a mesma ocorrência, e não apagar a página de Documentos inteira.
 
 ### Problemas descobertos posteriormente
 
@@ -107,7 +151,9 @@ Remover, quando os consumidores e a transição estiverem conferidos:
 - o formulário manual de divergência de pagamento;
 - `marcarDivergencia`, seu tipo de entrada e auxiliares exclusivamente usados por esse caminho;
 - a criação de novos itens `divergencia` na fila e, concluída a transição, seu tipo e executor;
-- código de escrita de falta de receita que realmente ficar sem consumidor, após conferir a página de documentos;
+- o acesso do caixa à aba e à consulta gerencial de Documentos, preservando sua consulta contextual do vale;
+- as ações de declarar novamente “Não voltou” quando repetem o fato já registrado no retorno;
+- código de escrita de falta de receita/convênio que realmente ficar sem consumidor depois dessa reorganização, com tratamento da fila antiga quando existir;
 - imports, reexports e testes que existam exclusivamente para o fluxo removido.
 
 Se a remoção deixar o menu de um vale sem nenhuma ação válida, remover também o acionador vazio. O cancelamento de vale pendente continua sendo uma ação distinta.
@@ -118,6 +164,7 @@ Aproveitar o trabalho em andamento que ainda serve:
 - explicações legíveis de previsto versus realizado;
 - distinção entre ocorrência informada e divergência calculada;
 - leitores dos eventos históricos;
+- a lógica de recebimento posterior de documentos, adaptada para a ação contextual e com autoria e permissões verificadas;
 - proteções contra escrita indevida de eventos e assinaturas;
 - testes de comportamento e de permissões que continuem relevantes.
 
@@ -135,7 +182,9 @@ Antes de alterar a migration já construída:
 2. Se já foi aplicada, preparar uma migration adicional para a nova restrição; não reescrever o passado como se a alteração já estivesse aplicada.
 3. Coordenar a retirada de `pagamento_alterado` da lista do cliente com a desativação do escritor antigo e o tratamento da fila.
 4. Preservar as restrições de assinaturas e a proteção dos marcadores de origem que ainda se apliquem.
-5. Conferir separadamente os outros tipos escritos pelo cliente. A existência de `entrega_cancelada` e de ações de documentos impede revogar toda escrita em `eventos` sem análise.
+5. Conferir separadamente os outros tipos escritos pelo cliente. Reavaliar `falta_receita` e `falta_documento_convenio` depois da retirada das notificações duplicadas, preservando leitores e tratando filas antigas. `entrega_cancelada`, a baixa posterior e outras ações ainda legítimas precisam ter seu caminho de escrita conferido antes de qualquer revogação geral.
+
+A restrição da aba Documentos e a permissão de receber um documento são controles diferentes. A API de recebimento posterior deve aceitar o operador autorizado da filial sem abrir para ele as consultas de gestão de outras operações ou filiais. Não conceder uma permissão genérica de alterar documentos selados para viabilizar essa ação.
 
 As leituras de `pagamento_alterado` permanecem: o servidor continua produzindo esse evento e o histórico contém registros anteriores. Não inventar uma origem comprovada para eventos antigos.
 
@@ -158,8 +207,8 @@ Não executar reset do banco, limpeza geral do armazenamento local ou descarte d
 1. **Reconciliar o trabalho em andamento.** Apresentar o que já foi feito, o que permanece útil e o que foi superado por esta decisão. Atualizar a documentação correspondente sem reabrir decisões não relacionadas.
 2. **Conferir cobertura do retorno.** Verificar pagamento misto, troco, documentos, explicação, autoria, offline e conflitos. Definir a persistência do relato sem alterar documentos anteriores.
 3. **Preparar a transição.** Identificar consumidores e itens antigos da fila; conferir migrations e políticas aplicadas. Escolher a sequência de publicação coerente com esse estado.
-4. **Centralizar a experiência.** Concluir a coleta e a explicação no retorno e retirar o botão e o formulário paralelo. Não copiar a janela antiga para dentro do retorno: aproveitar a conferência que já existe ali.
-5. **Integrar o acompanhamento.** Ler os eventos do retorno, inclusive `documento_faltante`, e permitir o tratamento pela gestão. Separar o que está entregue do que ainda depende da etapa de encaminhamento em tempo real.
+4. **Centralizar a experiência.** Concluir a coleta e a explicação no retorno e retirar o botão e o formulário paralelo. Entregar a ação contextual “Receber documento” para a chegada posterior e retirar a aba Documentos do caixa. Não copiar a janela antiga para dentro do retorno: aproveitar a conferência que já existe ali.
+5. **Integrar o acompanhamento.** Transformar Documentos em consulta gerencial de recebidos e pendentes, com histórico e escopos por cargo. Ler os eventos do retorno, inclusive `documento_faltante`, e permitir o tratamento pela gestão. Separar o que está entregue do que ainda depende da etapa de encaminhamento em tempo real.
 6. **Fechar a escrita antiga.** Com a transição resolvida, restringir `pagamento_alterado` ao servidor e eliminar código, tipos e processamento exclusivos do caminho antigo.
 7. **Validar e registrar.** Executar os testes pertinentes, build e lint; relatar o resultado e as pendências reais.
 
@@ -175,7 +224,14 @@ Não executar reset do banco, limpeza geral do armazenamento local ou descarte d
 | Forma ou valor divergente | Diferença visível no próprio vale; relato vinculado; ocorrência produzida pelo servidor. |
 | Motivo ainda desconhecido | O caixa registra que precisa de apuração, sem inventar explicação nem perder o retorno. |
 | Receita ou convênio não volta | Fato registrado no retorno e acessível ao acompanhamento, sem exigir outra declaração da mesma falta. |
-| Documento chega no dia seguinte | Baixa posterior com autoria e horário; o retorno original continua afirmando que estava faltante. |
+| Documento chega no dia seguinte | Caixa localiza o vale e usa “Receber documento”, sem abrir a aba gerencial; baixa com autoria e horário, preservando a falta declarada no retorno original. |
+| Vale com receita e documento de convênio pendentes | Receber um não dá baixa no outro. |
+| Clique repetido ou reenvio do recebimento posterior | Nenhuma duplicação e nenhuma substituição silenciosa da autoria do primeiro recebimento. |
+| Consulta de Documentos pelo gestor/admin | Distingue recebido no retorno, pendente e recebido posteriormente; permite consultar também os recebidos, com histórico. |
+| Caixa tenta abrir a aba ou chamar a consulta gerencial diretamente | Acesso recusado; as leituras contextuais e o recebimento autorizado do próprio vale continuam funcionando. |
+| Gestor tenta consultar ou receber documento de outra filial | Acesso recusado; admin consulta as filiais do próprio tenant sem ganhar função de balcão. |
+| Vale ainda sem retorno conferido | Não aparece como documento comprovadamente faltante; a interface informa que aguarda conferência. |
+| Gestor lê o aviso ou encerra uma análise | A pendência documental não é baixada como recebida sem o registro do recebimento físico. |
 | Retorno offline com explicação | Dados e relato sobrevivem ao fechamento/reabertura e à sincronização; a tela distingue pendente de confirmado. |
 | Reenvio ou sincronização concorrente | Nenhum pagamento ou ocorrência duplicado para a mesma operação. |
 | Retorno em conflito | Relato preservado; nenhuma apresentação indevida como retorno selado. |
@@ -193,7 +249,8 @@ Ao retomar, informar:
 
 1. quais partes da construção atual serão mantidas, removidas ou adaptadas;
 2. como a explicação ficará vinculada ao retorno e sobreviverá ao offline;
-3. como serão tratados os itens antigos da fila e a mudança de permissões;
-4. quais critérios de aceite foram demonstrados e quais ainda dependem de outra etapa.
+3. como a aba Documentos ficará restrita à gestão e como o caixa registrará o recebimento posterior pelo vale;
+4. como serão tratados os itens antigos da fila e a mudança de permissões;
+5. quais critérios de aceite foram demonstrados e quais ainda dependem de outra etapa.
 
 Se alguma ambiguidade de negócio impedir uma escolha, apresentar um cenário concreto ao usuário. Não presumir que esta decisão autoriza alterar documentos selados, descartar filas ou aplicar migrations remotas.
