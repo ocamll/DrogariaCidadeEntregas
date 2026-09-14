@@ -3727,7 +3727,7 @@ Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
       ├ limpeza: CampoAssinatura, signature_pad, hash v1 ✓ 2026-09-12
       └ fechamento contra o desenho (item 110 do NOTAS)   ← AQUI
           ├ página, PDF e sangria do Romaneio de Retorno   ✓ 2026-09-13
-          ├ proteção de eventos e assinaturas               migration 20260913120000 PREPARADA, não aplicada
+          ├ proteção de eventos e assinaturas               ✓ 2026-09-13 aplicada e conferida (40 · 40 · 0)
           ├ pedidos de credencial (§5) — docs/pendencia-pin-4b-2026-09-13.md v3.1
           │                                                 estados confirmados; classificação do §4 em revisão
           ├ aceite complementar: cartão perdido e recusas  roteiro pronto, não rodado

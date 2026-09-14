@@ -10901,8 +10901,29 @@ sistema como "Justificativa".
 tipos da policy com o que o fonte do cliente grava, e confere que nenhum
 payload do cliente usa os marcadores do servidor.
 
-**Pendente:** o usuário aplicar a migration e rodar as conferências (c) a
-(e); confirmar o §4 da v3.1; depois, a migration dos pedidos.
+**APLICADA E CONFERIDA pelo usuário em 2026-09-13** — as conferências do
+rodapé, lidas do banco:
+
+| | resultado |
+|---|---|
+| (a) policies | `eventos_insert` com os quatro tipos e os dois `?`; `eventos_select`; `assinaturas` só com `assinaturas_select` |
+| (b) privilégios de `authenticated` | eventos: insert sim, update não, select sim · assinaturas: insert não, update não, select sim |
+| (c) cliente simulado | **1** `falta_receita`, **2** `pagamento_alterado` e **3** com `origem_referencia`: permitidos · **4** `romaneio_retorno_id` nulo, **5** `origem` alegada, **6** `romaneio_selado`, **7** `credencial_pin_definido`, **8** assinatura e **9** update em eventos: recusados, 42501 |
+| (d) servidor depois | `romaneio_selado`, `romaneio_retorno_selado`, `status_alterado` e o `pagamento_alterado` do selo **com** origem, gravados; `entrega_criada` do gatilho `fn_log_entrega` também — o escritor `SECURITY DEFINER` disparado por escrita do cliente continua funcionando |
+| (e) verificador | **40 · 40 · 0** — saída 26, retorno 14 |
+
+**O placar fecha contra o anterior:** os 32 de antes (saída 22 até
+`R-000038`, retorno 10 até `R-000042`) continuam todos verificando, e os 8
+novos (`R-000043` a `R-000050`, quatro de cada tipo) verificam também.
+Nenhum sumiu.
+
+**O que a (d) não mostrou:** uma ocorrência notificada PELA TELA depois da
+migration. O caminho do cliente está provado pela simulação da (c), mas o
+fluxo real — select de idempotência, insert e a tela dizendo "Divergência
+informada" — ainda não foi exercitado.
+
+**Pendente:** uma ocorrência de pagamento pela tela; confirmar o §4 da
+v3.1; depois, a migration dos pedidos.
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
