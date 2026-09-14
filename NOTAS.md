@@ -10925,6 +10925,74 @@ informada" — ainda não foi exercitado.
 **Pendente:** uma ocorrência de pagamento pela tela; confirmar o §4 da
 v3.1; depois, a migration dos pedidos.
 
+**SUPERADO em parte pelo item 111, no mesmo dia:** a ocorrência de
+pagamento pela tela deixa de existir, então essa conferência não será feita.
+
+## 111. Mudança de escopo: as divergências são registradas no retorno
+
+**2026-09-13.** Documento do usuário, copiado em
+`docs/mudanca-de-escopo-divergencias-no-retorno-2026-09-13.md`. **Decidido,
+não construído.**
+
+> Remover o botão separado de notificar divergência e centralizar no retorno
+> o registro das diferenças de pagamento, dos documentos faltantes e do
+> desfecho da tentativa.
+
+O caixa informa o que aconteceu; o servidor compara, registra a divergência e
+a deixa para acompanhamento. **`pagamento_alterado` passa a ser produzido só
+pelo servidor.** Não cancela a proteção da auditoria, os pedidos de credencial
+nem as demais regras do 4B.
+
+### O que foi medido antes de propor (2026-09-13/14)
+
+- **Menu do vale:** "Notificar ocorrência" e "Cancelar vale". Sem o primeiro,
+  o menu some sozinho quando não há o que cancelar (`return null` já existe) —
+  não sobra acionador vazio. Único consumidor: `EntregasTable`.
+- **`NotificarOcorrenciaDialog`** enfileira `divergencia` (→ `marcarDivergencia`:
+  realizado em `pagamentos`, `status_financeiro`, `pagamento_alterado`) e
+  `falta_receita`.
+- **`DocumentosPendentes`** grava `falta_receita` e `falta_documento_convenio`
+  por mutation direta ("Não voltou"), e dá baixa de recebimento.
+- **O retorno não trata RECEITA em ponto nenhum.** Os documentos do retorno
+  são convênio e crediário, que estão no DCRR1; receita ficou fora por
+  decisão do desenho do DCRR1.
+- **O retorno avisa só "a soma diverge da compra"** — não compara previsto ×
+  realizado. Troca de forma no mesmo valor (cartão → pix) passa sem aviso.
+- **O Fechamento lê a justificativa de `pagamentos.observacao`**, que só
+  `marcarDivergencia` preenche.
+- **Notificações não leem `documento_faltante`.**
+- **A migration `20260913120000` JÁ ESTÁ APLICADA** (item 110). Retirar
+  `pagamento_alterado` do cliente exige migration nova, depois da transição.
+- Os validadores (SQL e TS) leem só as chaves do canônico; chave a mais no
+  vale não é recusada.
+
+### Proposta técnica (a confirmar com o usuário)
+
+- **O relato fica fora dos bytes assinados**: parâmetro próprio no selo do
+  retorno (online e sincronizado), gravado na MESMA transação, com autoria e
+  vínculo a vale e romaneio; guardado também no registro de conflito.
+  **Não** dentro de `p_retorno`: lá ele pareceria conteúdo confirmado pelo
+  motoboy. Offline, viaja no item da fila ao lado do `retornoJsonb`, fora do
+  hash — é declaração do balcão, não assinatura.
+- **A fila:** o executor de `divergencia` deixa de escrever e marca o item
+  como terminal com contexto, para decisão humana (nada apagado, nada
+  convertido); `falta_receita` continua executando até a decisão sobre
+  receita e documentos.
+- **As permissões:** migration nova tirando `pagamento_alterado` do cliente
+  só depois de a versão sem o formulário estar nos navegadores e as filas
+  conferidas.
+
+### Decisões do usuário pendentes
+
+1. **Receita no retorno** — fora, registro do balcão fora da assinatura, ou
+   dentro do DCRR1 (contrato novo).
+2. **"Não voltou" na aba Documentos** para o que o retorno já declarou.
+3. **Relato ou "precisa apurar"** obrigatório nos itens com diferença.
+4. **Descobertas posteriores** ao retorno selado: limitação registrada nesta
+   etapa, ou ocorrência posterior sem pagamento já agora.
+5. **Tratamento pelo gestor** nesta etapa: consultar, registrar providência,
+   encaminhar ao admin e dar baixa.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta

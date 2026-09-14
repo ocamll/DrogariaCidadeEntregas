@@ -3731,7 +3731,9 @@ Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
           ├ pedidos de credencial (§5) — docs/pendencia-pin-4b-2026-09-13.md v3.1
           │                                                 estados confirmados; classificação do §4 em revisão
           ├ aceite complementar: cartão perdido e recusas  roteiro pronto, não rodado
-          └ republicar a sync-romaneio                     pendente (sem mudança de comportamento)
+          ├ republicar a sync-romaneio                     pendente (sem mudança de comportamento)
+          └ divergências registradas NO RETORNO            decidido 2026-09-13, não construído — sai o "Notificar ocorrência";
+                                                           pagamento_alterado só do servidor (NOTAS 111, docs/mudanca-de-escopo-divergencias-no-retorno-2026-09-13.md)
 4C. continuidade offline: abrir o app sem rede (Service Worker + Cache API), telas no estado local e E12 — obrigatória antes do piloto — desenho v1 em docs/desenho-4c-2026-09-13.md, começa depois do fechamento do 4B
 5.  conferência diária calculada, com exceções e aprovação versionada
 6.  painel da agência e conciliação por vale, por quinzena
