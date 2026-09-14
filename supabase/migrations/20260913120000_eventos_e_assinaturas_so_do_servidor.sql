@@ -1,0 +1,258 @@
+-- =====================================================================
+-- EVENTOS E ASSINATURAS: O QUE É DO SERVIDOR, SÓ O SERVIDOR ESCREVE
+-- 2026-09-13 — decidido pelo usuário na revisão dos pedidos de credencial
+-- (docs/pendencia-pin-4b-2026-09-13.md, §12)
+--
+-- O ACHADO
+--
+-- A revisão mostrou que duas policies do schema inicial aceitam do
+-- cliente mais do que o cliente produz:
+--
+--   eventos_insert       qualquer `tipo` do tenant. Um navegador conseguia
+--                        gravar `romaneio_selado`, `conflito_retorno` ou
+--                        `credencial_pin_definido`, e o Registro de
+--                        Auditoria os mostraria como se o servidor os
+--                        tivesse produzido.
+--   assinaturas_insert   inserção direta de assinatura, sobra do fluxo
+--                        anterior ao romaneio.
+--
+-- E o `grant select, insert, update on all tables` do schema inicial deu
+-- INSERT e UPDATE nas duas tabelas. A falta de policy de UPDATE já negava
+-- a alteração; o grant continuava lá.
+--
+--
+-- O QUE FOI MEDIDO ANTES DE ESCREVER ISTO
+--
+-- Quem grava em `eventos` (última versão de cada função):
+--
+--   fn_log_entrega (trg_entregas_log)   entrega_criada, status_alterado    SECURITY DEFINER
+--   log_credencial                      credencial_*                        SECURITY DEFINER
+--   selar_romaneio_interno              romaneio_selado                     SECURITY DEFINER
+--   selar_romaneio_retorno_interno      romaneio_retorno_selado,            SECURITY DEFINER
+--                                       insucesso_detalhado,
+--                                       documento_faltante,
+--                                       pagamento_alterado
+--   registrar_conflito_romaneio         conflito_sincronizacao              SECURITY DEFINER
+--   registrar_conflito_retorno          conflito_retorno                    SECURITY DEFINER
+--   cliente (inserirEventoIdempotente)  pagamento_alterado, falta_receita,  policy eventos_insert
+--                                       falta_documento_convenio,
+--                                       entrega_cancelada
+--   Edge Functions                      nenhum
+--
+-- Todo escritor do servidor é SECURITY DEFINER e roda como dono da
+-- tabela, que a RLS não alcança — nenhuma migration usa `force row level
+-- security`. É o mesmo mecanismo que já faz as funções gravarem em
+-- `motoboy_autorizacoes`, que não tem policy nenhuma.
+--
+-- Quem grava em `assinaturas`: só as funções de selo. O cliente só lê
+-- (`src/data/romaneios.ts`), desde 16/08.
+--
+-- O payload do `pagamento_alterado` do cliente (`marcarDivergencia`) tem
+-- `de`, `para`, `justificativa`, `autor_nome` e, quando há,
+-- `referencia_informada` + `origem_referencia`. Nunca `origem` nem
+-- `romaneio_retorno_id` — que são exatamente os dois marcadores que o selo
+-- do retorno grava.
+--
+--
+-- O QUE MUDA
+--
+--   eventos_insert   só os quatro tipos do cliente, e sem os marcadores de
+--                    origem do servidor: `origem` e `romaneio_retorno_id`
+--                    são recusados como CHAVE — presentes com qualquer
+--                    valor, inclusive nulo.
+--   eventos          revoke UPDATE (regra 6: append-only; já era negado
+--                    pela falta de policy)
+--   assinaturas      sem policy de INSERT; revoke INSERT e UPDATE
+--
+-- `origem_referencia` NÃO é marcador do servidor: é o campo que diz que a
+-- forma anterior foi informada pelo operador (E4.1). Continua permitido.
+--
+--
+-- O QUE NÃO MUDA, E FICA ESCRITO
+--
+-- - NENHUM EVENTO ANTIGO É REESCRITO, nem recebe origem comprovada por
+--   dedução. O que foi gravado antes desta migration continua como está.
+-- - As funções de selo, o verificador e hash nenhum são tocados.
+-- - Isto protege os MARCADORES de origem. Não transforma o conteúdo de uma
+--   ocorrência informada por alguém em prova de que o pagamento aconteceu
+--   assim — ela continua sendo uma declaração, com autor e justificativa.
+-- - O cliente continua gravando `pagamento_alterado` legítimo: a
+--   divergência descoberta DEPOIS do retorno selado.
+-- =====================================================================
+
+
+-- ---- eventos ----------------------------------------------------------
+
+drop policy eventos_insert on public.eventos;
+
+create policy eventos_insert on public.eventos for insert to authenticated
+  with check (
+    tenant_id = public.current_tenant_id()
+    -- A lista é o que o cliente PRODUZ, medido no código. Tipo novo de
+    -- cliente exige mexer aqui E em `scripts/eventos-do-cliente.spec.mts`,
+    -- que compara esta lista com o fonte.
+    and tipo in ('pagamento_alterado',
+                 'falta_receita',
+                 'falta_documento_convenio',
+                 'entrega_cancelada')
+    -- Marcadores de origem do servidor, recusados como CHAVE: `?` é
+    -- verdadeiro com a chave presente mesmo com valor nulo, que é o caso
+    -- que um `->> is null` deixaria passar.
+    and not (payload ? 'origem')
+    and not (payload ? 'romaneio_retorno_id')
+  );
+
+revoke update on public.eventos from anon, authenticated;
+
+
+-- ---- assinaturas --------------------------------------------------------
+
+drop policy assinaturas_insert on public.assinaturas;
+
+revoke insert, update on public.assinaturas from anon, authenticated;
+
+
+-- =====================================================================
+-- CONFERÊNCIAS — rodar no SQL Editor, UMA POR VEZ, depois de aplicar
+-- =====================================================================
+--
+-- (a) as policies que ficaram
+--
+--   select tablename, policyname, cmd, with_check
+--     from pg_policies
+--    where schemaname = 'public' and tablename in ('eventos', 'assinaturas')
+--    order by tablename, cmd;
+--
+--   esperado: eventos com eventos_select e eventos_insert (o with_check
+--   com os quatro tipos e os dois `?`); assinaturas só com
+--   assinaturas_select.
+--
+--
+-- (b) os privilégios de tabela
+--
+--   select t.tabela,
+--          has_table_privilege('authenticated', t.tabela, 'insert') as insert,
+--          has_table_privilege('authenticated', t.tabela, 'update') as update,
+--          has_table_privilege('authenticated', t.tabela, 'select') as select
+--     from (values ('public.eventos'), ('public.assinaturas')) as t(tabela);
+--
+--   esperado: eventos      insert true   update false  select true
+--             assinaturas  insert false  update false  select true
+--
+--
+-- (c) O CLIENTE, SIMULADO — termina com ERRO DE PROPÓSITO
+--
+--   A mensagem do erro final É o resultado, e o erro garante que nada do
+--   teste fica gravado. Roda como `authenticated` com a sessão de um caixa
+--   ativo, cada tentativa isolada no próprio bloco.
+--
+--   begin;
+--   select set_config('request.jwt.claims',
+--     json_build_object('sub', (select id::text from public.profiles
+--                                where papel = 'caixa' and ativo limit 1),
+--                       'role', 'authenticated')::text, true);
+--   set local role authenticated;
+--
+--   do $$
+--   declare
+--     v_resultado text := '';
+--     v_tenant uuid := public.current_tenant_id();
+--     v_uid uuid := auth.uid();
+--   begin
+--     -- 1 a 3: o que o cliente produz — devem PASSAR
+--     begin
+--       insert into public.eventos (tenant_id, tipo, payload, user_id)
+--       values (v_tenant, 'falta_receita', '{"justificativa":"teste"}', v_uid);
+--       v_resultado := v_resultado || '1 falta_receita: permitido | ';
+--     exception when others then
+--       v_resultado := v_resultado || '1 falta_receita: RECUSADO ' || sqlstate || ' | ';
+--     end;
+--     begin
+--       insert into public.eventos (tenant_id, tipo, payload, user_id)
+--       values (v_tenant, 'pagamento_alterado',
+--               '{"de":null,"para":[],"justificativa":"teste"}', v_uid);
+--       v_resultado := v_resultado || '2 pagamento_alterado: permitido | ';
+--     exception when others then
+--       v_resultado := v_resultado || '2 pagamento_alterado: RECUSADO ' || sqlstate || ' | ';
+--     end;
+--     begin
+--       insert into public.eventos (tenant_id, tipo, payload, user_id)
+--       values (v_tenant, 'pagamento_alterado',
+--               '{"referencia_informada":"pix","origem_referencia":"informada_pelo_operador"}', v_uid);
+--       v_resultado := v_resultado || '3 com origem_referencia: permitido | ';
+--     exception when others then
+--       v_resultado := v_resultado || '3 com origem_referencia: RECUSADO ' || sqlstate || ' | ';
+--     end;
+--
+--     -- 4 a 9: o que é do servidor — devem ser RECUSADOS (42501)
+--     begin
+--       insert into public.eventos (tenant_id, tipo, payload, user_id)
+--       values (v_tenant, 'pagamento_alterado', '{"romaneio_retorno_id":null}', v_uid);
+--       v_resultado := v_resultado || '4 romaneio_retorno_id nulo: PERMITIDO | ';
+--     exception when others then
+--       v_resultado := v_resultado || '4 romaneio_retorno_id nulo: recusado ' || sqlstate || ' | ';
+--     end;
+--     begin
+--       insert into public.eventos (tenant_id, tipo, payload, user_id)
+--       values (v_tenant, 'pagamento_alterado', '{"origem":"romaneio_retorno"}', v_uid);
+--       v_resultado := v_resultado || '5 origem alegada: PERMITIDO | ';
+--     exception when others then
+--       v_resultado := v_resultado || '5 origem alegada: recusado ' || sqlstate || ' | ';
+--     end;
+--     begin
+--       insert into public.eventos (tenant_id, tipo, payload, user_id)
+--       values (v_tenant, 'romaneio_selado', '{}', v_uid);
+--       v_resultado := v_resultado || '6 romaneio_selado: PERMITIDO | ';
+--     exception when others then
+--       v_resultado := v_resultado || '6 romaneio_selado: recusado ' || sqlstate || ' | ';
+--     end;
+--     begin
+--       insert into public.eventos (tenant_id, tipo, payload, user_id)
+--       values (v_tenant, 'credencial_pin_definido', '{}', v_uid);
+--       v_resultado := v_resultado || '7 credencial_pin_definido: PERMITIDO | ';
+--     exception when others then
+--       v_resultado := v_resultado || '7 credencial_pin_definido: recusado ' || sqlstate || ' | ';
+--     end;
+--     begin
+--       insert into public.assinaturas (tenant_id, corrida_id, tipo_signatario)
+--       values (v_tenant, (select id from public.corridas limit 1), 'motoboy');
+--       v_resultado := v_resultado || '8 assinatura: PERMITIDO | ';
+--     exception when others then
+--       v_resultado := v_resultado || '8 assinatura: recusado ' || sqlstate || ' | ';
+--     end;
+--     begin
+--       update public.eventos set payload = payload where id = (select max(id) from public.eventos);
+--       v_resultado := v_resultado || '9 update em eventos: PERMITIDO';
+--     exception when others then
+--       v_resultado := v_resultado || '9 update em eventos: recusado ' || sqlstate;
+--     end;
+--
+--     raise exception 'RESULTADO — %', v_resultado;
+--   end $$;
+--
+--   esperado, na mensagem de erro:
+--     1, 2 e 3 "permitido"; 4 a 9 "recusado 42501".
+--   Qualquer "RECUSADO" em 1–3 quebra o cliente; qualquer "PERMITIDO" em
+--   4–9 é a porta ainda aberta.
+--
+--
+-- (d) o servidor continua gravando — pela TELA, depois de (c)
+--
+--   Notificar uma ocorrência de pagamento num vale de teste e registrar uma
+--   saída ou um retorno. Depois:
+--
+--   select tipo, ocorrido_em, payload ? 'origem' as tem_origem
+--     from public.eventos
+--    order by ocorrido_em desc limit 10;
+--
+--   esperado: o `pagamento_alterado` da ocorrência SEM origem; o
+--   `romaneio_selado` / `romaneio_retorno_selado` e, se o retorno divergiu,
+--   o `pagamento_alterado` do selo COM origem. Nada recusado na tela.
+--
+--
+-- (e) nenhum documento mudou
+--
+--   select * from public.verificar_romaneios_selados();
+--
+--   esperado: as mesmas contagens de antes, e divergências = 0.
+-- =====================================================================

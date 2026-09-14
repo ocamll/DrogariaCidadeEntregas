@@ -5,6 +5,10 @@ import {
   textoDaReferenciaInformada,
   type LadoDoPagamentoAlterado,
 } from '@/data/pagamentos'
+import {
+  origemDoPagamentoAlterado,
+  type OrigemDoPagamentoAlterado,
+} from '@/lib/formasDePagamento'
 
 // Leitura agregada dos eventos que viram "notificação" pra gestão — 4
 // tipos hoje (pagamento_alterado, falta_receita, falta_documento_convenio,
@@ -28,6 +32,12 @@ export type Notificacao = {
   justificativa: string
   autorNome: string
   ocorridoEm: string
+  /**
+   * Só na divergência de pagamento: calculada no selo do retorno ou
+   * informada por alguém. Sai dos marcadores gravados, nunca do texto.
+   * Nulo nos outros tipos.
+   */
+  origem: OrigemDoPagamentoAlterado | null
 }
 
 type PayloadPagamentoAlterado = {
@@ -60,7 +70,12 @@ type EventoNotificacaoRow = {
   entregas: { numero_vale: string; cliente_nome: string } | null
 }
 
-function resumoEJustificativa(row: EventoNotificacaoRow): { resumo: string; justificativa: string; autorNome: string } {
+function resumoEJustificativa(row: EventoNotificacaoRow): {
+  resumo: string
+  justificativa: string
+  autorNome: string
+  origem: OrigemDoPagamentoAlterado | null
+} {
   switch (row.tipo) {
     case 'pagamento_alterado': {
       const payload = row.payload as PayloadPagamentoAlterado
@@ -81,10 +96,17 @@ function resumoEJustificativa(row: EventoNotificacaoRow): { resumo: string; just
       // e o leitor concluiria que o sistema sabia. Ele não sabia.
       const informado = textoDaReferenciaInformada(payload as unknown as Record<string, unknown>)
       const ladoAnterior = informado ? `${de} (${informado})` : de
+      // De onde veio, pelos MARCADORES gravados — nunca pelo texto da
+      // justificativa, que é livre. Ver `origemDoPagamentoAlterado`.
+      const origem = origemDoPagamentoAlterado(payload as unknown as Record<string, unknown>)
       return {
-        resumo: `Divergência de pagamento — era ${ladoAnterior}, virou ${paraTexto}.`,
+        resumo:
+          origem === 'calculada_no_retorno'
+            ? `Divergência calculada no Romaneio de Retorno — era ${ladoAnterior}, virou ${paraTexto}.`
+            : `Divergência informada — era ${ladoAnterior}, virou ${paraTexto}.`,
         justificativa: payload.justificativa,
         autorNome: payload.autor_nome,
+        origem,
       }
     }
     case 'falta_receita': {
@@ -93,6 +115,7 @@ function resumoEJustificativa(row: EventoNotificacaoRow): { resumo: string; just
         resumo: 'Receita não retornou com o motoboy.',
         justificativa: payload.justificativa,
         autorNome: payload.autor_nome,
+        origem: null,
       }
     }
     case 'falta_documento_convenio': {
@@ -101,6 +124,7 @@ function resumoEJustificativa(row: EventoNotificacaoRow): { resumo: string; just
         resumo: 'Documento de convênio não voltou assinado.',
         justificativa: payload.justificativa,
         autorNome: payload.autor_nome,
+        origem: null,
       }
     }
     case 'insucesso_detalhado': {
@@ -109,13 +133,14 @@ function resumoEJustificativa(row: EventoNotificacaoRow): { resumo: string; just
         resumo: 'Insucesso na entrega — motivo "outro".',
         justificativa: payload.motivo_detalhe,
         autorNome: payload.autor_nome,
+        origem: null,
       }
     }
   }
 }
 
 function mapNotificacao(row: EventoNotificacaoRow): Notificacao {
-  const { resumo, justificativa, autorNome } = resumoEJustificativa(row)
+  const { resumo, justificativa, autorNome, origem } = resumoEJustificativa(row)
   return {
     id: row.id,
     tipo: row.tipo,
@@ -126,6 +151,7 @@ function mapNotificacao(row: EventoNotificacaoRow): Notificacao {
     justificativa,
     autorNome,
     ocorridoEm: row.ocorrido_em,
+    origem,
   }
 }
 

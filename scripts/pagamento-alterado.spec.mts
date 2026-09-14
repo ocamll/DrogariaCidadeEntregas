@@ -21,6 +21,7 @@
 
 import {
   formasDoEvento,
+  origemDoPagamentoAlterado,
   textoDoPagamentoAlterado,
   type LadoDoPagamentoAlterado,
 } from '../src/lib/formasDePagamento.ts'
@@ -232,6 +233,51 @@ console.log('\n--- (7) E3.C — o id do previsto vem do PAYLOAD, nunca de dentro
   // era tratada como sucesso, e sumia em silêncio.
   checa('nenhum chamador deriva o id do previsto da entrega',
     !/criarPagamentoPrevisto\(\{\s*\n\s*id: input\.(id|entregaId),/.test(entregas + pagamentos))
+}
+
+// ---------------------------------------------------------------------
+console.log('\n--- DE ONDE VEIO: calculada no retorno × informada (2026-09-13) ---')
+// ---------------------------------------------------------------------
+// Só os MARCADORES decidem, e os dois juntos. A migration 20260913120000
+// impede o cliente de gravar qualquer um deles; aqui fica provado que um
+// só, alegado, não basta, e que o texto da justificativa não decide nada.
+{
+  const retornoId = '01a00d0c-0000-7000-8000-0000000000dd'
+  igual('os dois marcadores → calculada',
+    origemDoPagamentoAlterado({ origem: 'romaneio_retorno', romaneio_retorno_id: retornoId }),
+    'calculada_no_retorno')
+  igual('só a origem alegada → informada',
+    origemDoPagamentoAlterado({ origem: 'romaneio_retorno' }), 'informada')
+  igual('origem com id nulo → informada',
+    origemDoPagamentoAlterado({ origem: 'romaneio_retorno', romaneio_retorno_id: null }), 'informada')
+  igual('só o id → informada',
+    origemDoPagamentoAlterado({ romaneio_retorno_id: retornoId }), 'informada')
+  igual('origem diferente com id → informada',
+    origemDoPagamentoAlterado({ origem: 'outra', romaneio_retorno_id: retornoId }), 'informada')
+  igual('o payload real do cliente → informada',
+    origemDoPagamentoAlterado({
+      de: null,
+      para: [{ forma: 'pix', valor_cents: 1000 }],
+      referencia_informada: [{ forma: 'dinheiro', valor_cents: 1000 }],
+      origem_referencia: 'informada_pelo_operador',
+      justificativa: 'Divergência derivada do Romaneio de Retorno R-000042',
+      autor_nome: 'Camilo',
+    }),
+    'informada')
+  igual('payload nulo → informada', origemDoPagamentoAlterado(null), 'informada')
+
+  // As duas leituras decidem pela função — e nenhuma pelo texto que o selo
+  // escreve na justificativa. O `ler` do bloco de fiação acima é local
+  // àquele bloco; este tem o seu.
+  const { readFileSync: lerSync } = await import('node:fs')
+  const semComentarios = (texto: string) =>
+    texto.split('\n').filter((l) => !l.trim().startsWith('//') && !l.trim().startsWith('*')).join('\n')
+  const notificacoes = semComentarios(lerSync('src/data/notificacoes.ts', 'utf8'))
+  const auditoria = semComentarios(lerSync('src/data/auditoria.ts', 'utf8'))
+  checa('Notificações decidem a origem pela função', /origemDoPagamentoAlterado\(/.test(notificacoes))
+  checa('o Registro de Auditoria decide a origem pela função', /origemDoPagamentoAlterado\(/.test(auditoria))
+  checa('nenhuma das duas lê o texto do selo',
+    !/Ninguém digitou|Divergência derivada|\.justificativa\??\.(includes|startsWith|match)/.test(notificacoes + auditoria))
 }
 
 console.log(falhas === 0 ? '\nTUDO OK\n' : `\n${falhas} FALHA(S)\n`)

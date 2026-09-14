@@ -16,9 +16,24 @@ export function NotificacaoCard({
         {notificacao.clienteNome ? ` — ${notificacao.clienteNome}` : ''}
       </p>
       <p className="mt-1">{notificacao.resumo}</p>
-      <p className="mt-1 text-muted-foreground">Justificativa: "{notificacao.justificativa}"</p>
+      {/* A divergência CALCULADA no selo do retorno não tem justificativa
+          de ninguém: o texto gravado é do sistema, e mostrá-lo entre aspas
+          como "Justificativa" o faria parecer uma declaração digitada. A
+          distinção sai de `origem`, que vem dos marcadores gravados — nunca
+          do texto. */}
+      {notificacao.origem === 'calculada_no_retorno' ? (
+        <p className="mt-1 text-foreground/70">
+          Calculada pelo sistema ao selar o retorno: o que o balcão confirmou não bateu com o
+          previsto.
+        </p>
+      ) : (
+        <p className="mt-1 text-muted-foreground">Justificativa: "{notificacao.justificativa}"</p>
+      )}
       <p className="mt-1 text-xs text-muted-foreground">
-        {notificacao.autorNome} ·{' '}
+        {notificacao.origem === 'calculada_no_retorno'
+          ? `Retorno recebido por ${notificacao.autorNome}`
+          : notificacao.autorNome}{' '}
+        ·{' '}
         {mostrarData
           ? quando.toLocaleString('pt-BR', {
               day: '2-digit',

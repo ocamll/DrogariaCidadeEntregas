@@ -639,3 +639,42 @@ export function textoDaReferenciaInformada(
   if (!formas) return null
   return `informado pelo operador: ${textoDoPagamentoAlterado(formas)}`
 }
+
+// =====================================================================
+// DE ONDE VEIO O `pagamento_alterado` — 2026-09-13
+//
+// O evento tem dois escritores, e eles afirmam coisas de natureza
+// diferente:
+//
+//     o selo do retorno     CALCULA: comparou o previsto com o que o
+//                           balcão confirmou ao selar
+//     "Notificar ocorrência" INFORMA: uma pessoa declarou o que descobriu
+//                           depois, com a justificativa dela
+//
+// A tela precisa distinguir os dois, e **só o dado estruturado decide**.
+// O texto da justificativa é livre — e o do selo, que dizia que ninguém o
+// digitou, era a única pista que a tela tinha até aqui.
+//
+// O selo grava os DOIS marcadores desde a primeira versão
+// (`20260820130000`): `origem: 'romaneio_retorno'` e
+// `romaneio_retorno_id`. Desde a migration `20260913120000` o cliente não
+// consegue gravar nenhum dos dois. Exigir os dois JUNTOS é o que impede um
+// só, alegado, de bastar.
+//
+// Isto LÊ o que está gravado. Não reescreve o histórico nem certifica o
+// passado; e "informada" não quer dizer "comprovada" — é uma declaração,
+// com autor.
+// =====================================================================
+
+export type OrigemDoPagamentoAlterado = 'calculada_no_retorno' | 'informada'
+
+export function origemDoPagamentoAlterado(
+  payload: Record<string, unknown> | null | undefined
+): OrigemDoPagamentoAlterado {
+  const retornoId = payload?.['romaneio_retorno_id']
+  return payload?.['origem'] === 'romaneio_retorno' &&
+    typeof retornoId === 'string' &&
+    retornoId.length > 0
+    ? 'calculada_no_retorno'
+    : 'informada'
+}

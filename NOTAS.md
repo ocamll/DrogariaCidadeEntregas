@@ -10860,6 +10860,50 @@ tipos e remover `assinaturas_insert` não quebra escrita legítima.
 confirmadas → migrations completas (proteção; pedidos) → implementação e
 aceite.
 
+### A terceira revisão: v3.1, e a proteção de eventos preparada
+
+**Os três estados do painel foram confirmados**; a classificação do §4 não,
+por três casos que a v3 errava:
+
+- **exceção anterior ao acompanhamento, resolvida depois** — "anterior"
+  vinha antes de "resolvida" e a deixava em Verificar. Na v3.1 uma
+  conclusão posterior e confiável resolve também a exceção antiga;
+- **credencial já sem PIN no início** — a linha de base não conta como
+  providência, e a v3 ofereceria reset. Na v3.1 o **estado atual** da
+  credencial entra na regra (lido pela função, só o booleano "tem PIN"), e
+  cartão ativo sem PIN leva a "Aguardando cadastro";
+- **cartão emitido e perdido de novo antes do PIN** — a emissão "em curso"
+  escondia a perda nova. Na v3.1 PIN esquecido e cartão perdido têm regras
+  separadas: para o cartão, só a emissão POSTERIOR à exceção conta, porque
+  uma emissão anterior não prova que o motoboy ainda tem o cartão.
+
+A ação de "Verificar" passou a depender do tipo ("emitir cartão" no cartão
+perdido). O §4.5 ganhou os três casos (9, 10, 11 e 11b).
+
+**A proteção de `eventos` e `assinaturas` está PREPARADA, não aplicada**
+(`20260913120000_eventos_e_assinaturas_so_do_servidor.sql`), com o ajuste
+do usuário: além dos quatro tipos do cliente, a policy recusa as CHAVES
+`origem` e `romaneio_retorno_id` (presentes com qualquer valor, inclusive
+nulo); `origem_referencia` continua permitido; nenhum evento antigo é
+reescrito. Medido antes: toda versão do selo do retorno, desde
+`20260820130000`, grava os dois marcadores juntos; o cliente nunca grava
+nenhum. O schema inicial tinha concedido `insert` e `update` nas duas
+tabelas, e a migration os revoga.
+
+**A tela passou a distinguir pelos marcadores, não pelo texto.** Até aqui
+Notificações e Auditoria mostravam a divergência calculada no retorno e a
+informada do mesmo jeito, e só o texto do selo na justificativa denunciava
+a diferença. `origemDoPagamentoAlterado` (lib, pura) exige os dois
+marcadores juntos; o cartão de notificação deixa de mostrar o texto do
+sistema como "Justificativa".
+
+**Spec novo:** `scripts/eventos-do-cliente.spec.mts` compara a lista de
+tipos da policy com o que o fonte do cliente grava, e confere que nenhum
+payload do cliente usa os marcadores do servidor.
+
+**Pendente:** o usuário aplicar a migration e rodar as conferências (c) a
+(e); confirmar o §4 da v3.1; depois, a migration dos pedidos.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta

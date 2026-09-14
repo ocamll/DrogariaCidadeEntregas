@@ -6,6 +6,7 @@ import {
   type LadoDoPagamentoAlterado,
 } from '@/data/pagamentos'
 import { formatBRL } from '@/lib/money'
+import { origemDoPagamentoAlterado } from '@/lib/formasDePagamento'
 import type { FiltroPeriodo } from '@/data/relatorios'
 
 // Leitura crua de TUDO que já foi gravado em `eventos` — diferente de
@@ -148,7 +149,17 @@ function resumoEDetalhe(row: EventoAuditoriaRow): { resumo: string; detalhe: str
       // as duas não podem se parecer no Registro de Auditoria.
       const informado = textoDaReferenciaInformada(row.payload)
       const ladoAnterior = informado ? `${de} (${informado})` : de
-      return { resumo: `Era ${ladoAnterior}, virou ${para}`, detalhe: row.payload.justificativa ?? null }
+      // De onde veio, pelos MARCADORES gravados, e não pelo texto: a
+      // divergência calculada no selo do retorno não tem justificativa de
+      // ninguém, e o texto que o sistema grava ali não é mostrado como se
+      // alguém o tivesse digitado.
+      if (origemDoPagamentoAlterado(row.payload) === 'calculada_no_retorno') {
+        return { resumo: `Calculada no Romaneio de Retorno — era ${ladoAnterior}, virou ${para}`, detalhe: null }
+      }
+      return {
+        resumo: `Informada — era ${ladoAnterior}, virou ${para}`,
+        detalhe: row.payload.justificativa ?? null,
+      }
     }
     case 'falta_receita':
       return { resumo: 'Receita não retornou com o motoboy', detalhe: row.payload.justificativa ?? null }
