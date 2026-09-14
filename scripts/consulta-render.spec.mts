@@ -1,10 +1,27 @@
-// npx tsx --tsconfig tsconfig.app.json scripts/consulta-render.spec.mts
+// npx tsx scripts/consulta-render.spec.mts
 //
-// O `--tsconfig` NÃO É OPCIONAL: sem ele o esbuild do `tsx` compila JSX
-// no runtime clássico e o componente quebra com `React is not defined`.
-// O `tsconfig.app.json` é quem tem `"jsx": "react-jsx"`, que é o que o
-// Vite usa. É o único spec do projeto que precisa disso, porque é o
-// único que renderiza componente.
+// É o único spec que RENDERIZA componente, então é o único que depende
+// do runtime de JSX — e o `tsconfig.json` da raiz não serve pra isso. O
+// `tsx` só aplica `compilerOptions` a arquivo que o tsconfig INCLUI, e a
+// raiz tem `files: []`. Medido em 2026-09-13, com `jsx` e `paths`
+// iguais: `files: []` quebra, `include: ["src"]` passa. Sem o tsconfig do
+// app, `Consulta.tsx` sai no runtime clássico e o spec morre com
+// `React is not defined` antes da primeira asserção, sem imprimir linha
+// `FALHA` nenhuma — e a varredura de specs contava isso como zero falhas.
+//
+// Por isso o spec fixa o próprio tsconfig: chamado sem ele, reexecuta a
+// si mesmo com `TSX_TSCONFIG_PATH` apontando pro `tsconfig.app.json`, que
+// é exatamente o que `--tsconfig` faz por baixo. Os dois jeitos de chamar
+// funcionam. O que NÃO resolve, e já foi tentado:
+//
+//   pragma de JSX aqui      vale só pro arquivo onde está; o JSX que
+//                           quebra é o do componente
+//   `jsx` na raiz           ignorado, por causa do `files: []`
+//   `include` na raiz       a raiz deixaria de ser só referência, e o
+//                           `tsc -b` passaria a compilar `src` por ela
+//
+// Quem varre specs conta a SAÍDA do processo, não linhas `FALHA`: spec
+// que aborta não chega a escrever nenhuma.
 //
 // ---------------------------------------------------------------------
 // O QUE ESTE SPEC ALCANÇA E OS OUTROS DOIS NÃO
@@ -19,10 +36,26 @@
 // certa e a tela faria outra. Aqui o componente roda de verdade, sem
 // navegador, por `react-dom/server`.
 
+import { spawnSync } from 'node:child_process'
+import { fileURLToPath } from 'node:url'
 import { createElement as h, type ReactNode } from 'react'
 import { renderToStaticMarkup } from 'react-dom/server'
 import { Consulta } from '../src/components/Consulta.tsx'
 import type { EstadoDeConsulta } from '../src/lib/estadoDeConsulta.ts'
+
+// Importar o componente compilado errado é inofensivo: o JSX só executa
+// no render, e este processo sai antes de renderizar qualquer coisa. O
+// filho já nasce com a variável, então não há como reexecutar em laço.
+if (!process.env.TSX_TSCONFIG_PATH) {
+  const filho = spawnSync(process.execPath, [...process.execArgv, ...process.argv.slice(1)], {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      TSX_TSCONFIG_PATH: fileURLToPath(new URL('../tsconfig.app.json', import.meta.url)),
+    },
+  })
+  process.exit(filho.status ?? 1)
+}
 
 let falhas = 0
 function checa(nome: string, condicao: boolean, extra = '') {
