@@ -11124,6 +11124,68 @@ Lição: esta migration só vale inteira, numa execução — os gates usam
 
 **Não medido ainda:** saída e retorno reais com receita, recebida e faltante.
 
+### Construção — 2ª etapa: o relato no selo do retorno (2026-09-15)
+
+**Decisões do usuário, esclarecidas nesta sessão** (ver a pergunta e a
+resposta completa acima, "Como assim..."): as duas regras cruzam o que a
+tela manda em `p_relatos` contra o que `p_retorno` apurou — não são
+decisão de negócio, são o selo fechando a porta pra um documento gerado
+errado.
+
+| regra | quem verifica | resultado |
+|---|---|---|
+| relato sem diferença | o selo, cruzando `p_relatos` com `p_retorno` já validado | recusa o selo inteiro, com uma exceção comum — antes de gastar cartão/PIN |
+| diferença sem relato | a tela, antes de congelar | servidor aceita; ausência de linha em `retorno_relatos` já significa "sem relato" |
+
+**Tabela confirmada pelo usuário e CONSTRUÍDA, migration `20260915120000`,
+NÃO aplicada ainda:** `retorno_relatos` — um relato por (romaneio_retorno_id,
+entrega_id, natureza, tipo_documento), `situacao` em `relatado`/
+`precisa_apurar`, `relato` obrigatório só em `relatado`. RLS: só
+gerente (própria filial) e admin leem; nenhum grant de escrita — só o
+selo (`SECURITY DEFINER`) grava.
+
+**O selo, migration `20260915130000`, gerada e provada por
+`scripts/patch-relato-do-retorno.mts` — NÃO aplicada ainda.** Quatro
+funções ganham um parâmetro (`p_relatos`), e por isso as quatro levam
+`drop function` explícito antes do `create` — acrescentar um tipo à lista
+de argumentos cria SOBRECARGA em vez de substituir, e a antiga
+continuaria aceitando chamada de bundle não atualizado:
+
+- `registrar_conflito_retorno` — guarda em `relatos_declarados`, SEM
+  validar (num conflito não se sabe se a diferença existe);
+- `selar_romaneio_retorno_interno` — acumula, dentro do laço de vales que
+  já existe, quais vales tiveram pagamento divergente e quais
+  `(entrega_id, tipo)` ficaram `faltante`; depois do laço, cada relato só
+  passa se apontar pra um desses fatos, senão recusa tudo; só então grava;
+- `selar_romaneio_retorno` e `selar_romaneio_retorno_sincronizado` —
+  só repassam. **`p_relatos` entra ANTES dos parâmetros com default**
+  (`p_geolocalizacao`, e `p_validacao`/`p_motivo`) — Postgres exige que
+  todo parâmetro depois de um com default também tenha, e `p_relatos` não
+  tem, de propósito, pra bundle antigo falhar alto.
+
+**Cliente:** `src/lib/relatoDoRetorno.ts` (novo — `RelatoRetorno`,
+`paraJsonbRelatos`, id sempre novo, nunca reaproveitado). `congelarRetorno`
+ganha um 4º parâmetro opcional e `RetornoCongelado` ganha `relatosJsonb`,
+congelado junto com o resto do pacote (fora do canônico e do hash, mas
+"editar destrói tudo" vale igual). Em `RetornoCorrida.tsx`:
+`chavesQueDivergem` reusa `divergiuDoPrevisto` (o MESMO comparador do
+selo, `formasDePagamento.ts`) pra decidir, a cada render, quais itens
+pedem relato — nunca guardado, sempre recalculado do preenchimento atual,
+o que descarta sozinho um relato cuja diferença sumiu; `montarRelatos()`
+só visita essas chaves. UI: bloco "Relatar" / "Precisa apurar" com
+textarea, ao lado da confirmação do pagamento e de cada documento marcado
+faltante. `sync-romaneio` repassa `corpo.relatosJsonb` como `p_relatos`.
+
+**Medido:** 33 de 33 specs (incluindo um caso novo em
+`congelar-retorno.spec.mts`), `tsc --noEmit`, build e lint sem erro.
+**Não testado:** o fluxo real na tela (preciso de login e de uma corrida
+aberta com vale divergente, que não faço).
+
+**Ordem de aplicação:** primeiro `20260915120000` (tabela), depois
+`20260915130000` (selo) — a segunda referencia `retorno_relatos`. Mesma
+cautela das migrations anteriores desta frente: sem retorno offline
+pendente na fila, abas recarregadas com o código novo.
+
 **Fora desta etapa:** a página e o PDF da saída não mostram a receita (o
 documento a tem, na linha `r`); o Registro de Auditoria e as Notificações ainda
 não leem `documento_faltante`; a aba Documentos continua a de hoje.

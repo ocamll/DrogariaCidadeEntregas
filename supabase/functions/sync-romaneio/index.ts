@@ -477,6 +477,11 @@ Deno.serve(async (req) => {
           p_ocorrido_em_local: corpo.ocorridoEmLocal,
           p_ip: ip,
           p_geolocalizacao: null,
+          // "O que aconteceu?" — 2026-09-15. Congelado junto com o resto do
+          // pacote; a função valida contra o que ESTE retorno apurou
+          // (pagamento divergente, documento faltante), não contra nada
+          // que passe por aqui.
+          p_relatos: corpo.relatosJsonb ?? [],
           // Os dois já conferidos contra o envelope, lá em cima. O SQL
           // confere de novo contra o cartão que de fato autenticou, e
           // confere o gerente contra a filial da SAÍDA.

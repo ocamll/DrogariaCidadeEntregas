@@ -251,6 +251,9 @@ export async function selarRomaneioRetorno(input: {
   documentHash: string
   autorizacaoId: string
   ocorridoEmLocal: string
+  /** "O que aconteceu?" nos itens que divergem — 2026-09-15. Já convertido
+   *  por `paraJsonbRelatos`; vazio quando nada divergiu. */
+  relatosJsonb: unknown[]
 }): Promise<ResultadoSelo> {
   const { data, error } = await supabase.rpc('selar_romaneio_retorno', {
     p_romaneio_id: input.romaneioId,
@@ -261,6 +264,7 @@ export async function selarRomaneioRetorno(input: {
     p_document_hash: input.documentHash,
     p_autorizacao_id: input.autorizacaoId,
     p_ocorrido_em_local: input.ocorridoEmLocal,
+    p_relatos: input.relatosJsonb,
     p_geolocalizacao: null,
   })
   if (error) {
@@ -392,6 +396,9 @@ export type RetornoOfflineInput = {
   retornoJsonb: unknown[]
   /** O que a farmácia confirmou e o motoboy (ou o gerente) validou. */
   documentHash: string
+  /** "O que aconteceu?" — 2026-09-15. Já convertido por `paraJsonbRelatos`,
+   *  congelado junto com o resto: nada aqui se reconverte na sincronização. */
+  relatosJsonb: unknown[]
 
   /**
    * QUEM VALIDOU, e por quê — no lugar dos traços desde o 4B.
@@ -555,6 +562,7 @@ export async function sincronizarRetornoOffline(input: RetornoOfflineInput): Pro
       motivoExcecao: input.motivoExcecao,
       ocorridoEmLocal: input.ocorridoEmLocal,
       envelope: input.envelope,
+      relatosJsonb: input.relatosJsonb,
     },
   })
 

@@ -193,5 +193,30 @@ console.log('\n--- (7) a ordem: valida ANTES de converter ---')
   checa('nenhum romaneioId foi cunhado na recusa', chamou === 0, `chamou ${chamou}x`)
 }
 
+console.log('\n--- (8) relatos: fora do canônico, com id novo a cada congelamento ---')
+{
+  const e = entrada([
+    { entregaId: E1, pagamentoId: '01a09999-4444-7000-8000-000000000001' },
+  ])
+  const relatos = [
+    {
+      entregaId: E1,
+      natureza: 'pagamento' as const,
+      tipoDocumento: null,
+      situacao: 'relatado' as const,
+      relato: 'cliente pagou metade em dinheiro',
+    },
+  ]
+  const congelado = await congelarRetorno(e, PREVISTOS, novoId, relatos)
+  checa('uma linha de relato no jsonb', congelado.relatosJsonb.length === 1)
+  const linha = congelado.relatosJsonb[0] as Record<string, unknown>
+  checa('o id NÃO é o que veio na entrada — foi cunhado aqui', typeof linha.id === 'string' && linha.id !== E1)
+  checa('entrega_id preservado', linha.entrega_id === E1)
+  checa('natureza preservada', linha.natureza === 'pagamento')
+  checa('tipo_documento nulo em pagamento', linha.tipo_documento === null)
+  checa('o canônico NÃO menciona o texto do relato', !congelado.canonico.includes('cliente pagou'))
+  checa('sem relatos, o jsonb fica vazio', (await congelarRetorno(e, PREVISTOS, novoId)).relatosJsonb.length === 0)
+}
+
 console.log(falhas === 0 ? '\ncongelamento ok\n' : `\n${falhas} FALHA(S)\n`)
 process.exit(falhas === 0 ? 0 : 1)

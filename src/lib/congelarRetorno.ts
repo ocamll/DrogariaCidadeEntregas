@@ -50,6 +50,7 @@ import {
   paraJsonbRetorno,
   type EntradaRetorno,
 } from '@/lib/canonicoRetorno'
+import { paraJsonbRelatos, type RelatoRetorno } from '@/lib/relatoDoRetorno'
 import { sha256Hex } from '@/lib/hash'
 
 export type ColisaoDePagamento = {
@@ -138,6 +139,15 @@ export type RetornoCongelado = {
   canonico: string
   /** O que as duas partes assinam. */
   documentHash: string
+  /**
+   * "O que aconteceu?" — 2026-09-15. FORA do canônico e fora do hash: não
+   * entra em `montarCanonicoRetorno`, é declaração do balcão sobre uma
+   * diferença, não fato que o motoboy confirma. Ainda assim nasce e morre
+   * junto com o resto do pacote — id novo a cada congelamento, como
+   * `pagamentoId` — porque "editar destrói tudo" vale pro pacote inteiro,
+   * não só pro que está no hash.
+   */
+  relatosJsonb: unknown[]
 }
 
 /**
@@ -156,7 +166,14 @@ export type RetornoCongelado = {
 export async function congelarRetorno(
   entrada: EntradaRetorno,
   idsPrevistos: Iterable<string>,
-  novoId: () => string
+  novoId: () => string,
+  /**
+   * Os relatos ATUAIS — já filtrados pra só os itens que ainda divergem
+   * (é isso que impede um relato sobreviver depois que a diferença que o
+   * motivou sumiu). Vazio por padrão: retorno sem item divergente não
+   * tem o que relatar.
+   */
+  relatos: ReadonlyArray<RelatoRetorno> = []
 ): Promise<RetornoCongelado> {
   const colisoes = conferirIdsDePagamento(entrada.vales, idsPrevistos)
   if (colisoes.length > 0) throw new RetornoNaoCongelavel(colisoes)
@@ -172,5 +189,6 @@ export async function congelarRetorno(
     retornoJsonb: paraJsonbRetorno(entrada),
     canonico,
     documentHash: await sha256Hex(canonico),
+    relatosJsonb: paraJsonbRelatos(relatos, novoId),
   }
 }

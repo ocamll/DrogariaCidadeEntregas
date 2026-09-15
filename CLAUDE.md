@@ -3748,7 +3748,7 @@ Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
           └ divergências registradas NO RETORNO            decidido 2026-09-13 (versão 2 em 14/09) — sai o "Notificar ocorrência";
                                                            pagamento_alterado só do servidor (NOTAS 111, docs/mudanca-de-escopo-divergencias-no-retorno-2026-09-13.md)
               ├ receita no documento assinado (linha `r`)          ✓ 2026-09-14 aplicada e conferida (72/72, 40 · 40 · 0)
-              ├ relato ou "precisa apurar" nos itens com diferença   não começado — tabela nova, SQL antes
+              ├ relato ou "precisa apurar" nos itens com diferença   construído 2026-09-15 — migrations 20260915120000/130000 NÃO aplicadas
               ├ "Receber documento" no vale, offline pela fila       não começado — tabela nova, SQL antes
               ├ aba Documentos só da gestão; notificações; fechamento não começado
               └ tirar o formulário, drenar a fila, migration de permissões  não começado

@@ -42,6 +42,8 @@ import {
   type TipoDocumentoFisico,
 } from '@/lib/canonicoRetorno'
 import { filtrarCorridasRetornaveis } from '@/lib/corridasBloqueadas'
+import { divergiuDoPrevisto } from '@/lib/formasDePagamento'
+import { type RelatoRetorno, type SituacaoRelato } from '@/lib/relatoDoRetorno'
 import { selarSegredos, calcularOfflineEventHashRetornoV2, envelopeDisponivel } from '@/lib/envelope'
 import {
   MOTIVOS_EXCECAO,
@@ -367,6 +369,9 @@ function linhasDoPrevisto(previstos: ValeDoContexto['pagamentosPrevistos']): Lin
   }))
 }
 
+/** Uma resposta a "o que aconteceu?", ainda sendo digitada. */
+type RelatoPreenchimento = { situacao: SituacaoRelato | null; texto: string }
+
 type Preenchimento = {
   desfecho: 'entregue' | 'insucesso'
   motivo: MotivoInsucesso | null
@@ -381,6 +386,15 @@ type Preenchimento = {
   pagamentoConfirmado: boolean
   /** Sem valor inicial DE PROPÓSITO — ver `documentoPendente`. */
   documentos: Partial<Record<TipoDocumentoFisico, SituacaoDocumento>>
+  /**
+   * "O que aconteceu?" — 2026-09-15, só para itens que DIVERGEM: chave
+   * `'pagamento'` ou o tipo do documento faltante. Fica fora de
+   * `montarEntrada()`: o relato nunca entra no DCRR1, é declaração do
+   * balcão, não fato que o motoboy confirma. `chavesQueDivergem` decide,
+   * a cada render, quais chaves daqui ainda valem — um relato cuja
+   * diferença sumiu fica órfão aqui e nunca chega a `montarRelatos()`.
+   */
+  relatos: Record<string, RelatoPreenchimento>
 }
 
 function preenchimentoInicial(vale: ValeDoContexto): Preenchimento {
@@ -392,7 +406,55 @@ function preenchimentoInicial(vale: ValeDoContexto): Preenchimento {
     pagamentos: linhasDoPrevisto(vale.pagamentosPrevistos),
     pagamentoConfirmado: false,
     documentos: {},
+    relatos: {},
   }
+}
+
+/**
+ * As chaves de relato que ESTE vale, no preenchimento ATUAL, pode
+ * precisar — `'pagamento'` quando o realizado diverge do previsto (a
+ * MESMA comparação `divergiuDoPrevisto` que o selo faz), e um tipo de
+ * documento por papel declarado `faltante`.
+ *
+ * Recalculada a cada chamada a partir do preenchimento corrente, NUNCA
+ * guardada: é isso que impede um relato sobreviver depois que a diferença
+ * que o motivou deixou de existir — o mesmo texto que valia pra "pix
+ * virou dinheiro" não pode ficar pendurado quando o caixa corrige e o
+ * pagamento volta a bater.
+ */
+function chavesQueDivergem(vale: ValeDoContexto, p: Preenchimento): string[] {
+  const chaves: string[] = []
+
+  if (p.desfecho === 'entregue') {
+    const linhasComRealizado = p.pagamentos.map((linha) => ({
+      linha,
+      realizado: realizadoDaLinha(linha),
+    }))
+    // Só compara quando TODA linha resolveu — meio caminho não é fato, e
+    // comparar contra um valor incompleto acusaria divergência que ainda
+    // nem existe.
+    if (linhasComRealizado.length > 0 && linhasComRealizado.every((x) => x.realizado.ok)) {
+      const previstos = vale.pagamentosPrevistos.map((pp) => ({
+        // O previsto vem do servidor com o mesmo domínio de
+        // `pagamentos.forma`; o cast é só pra igualar o tipo largo
+        // (`string`) de `ContextoRetorno` ao `FormaPagamento` que
+        // `divergiuDoPrevisto` espera — nenhum valor novo é aceito aqui.
+        forma: pp.forma as FormaPagamento,
+        valor_cents: pp.valorCents,
+      }))
+      const realizados = linhasComRealizado.map(({ linha, realizado }) => ({
+        forma: linha.forma,
+        valor_cents: realizado.ok ? realizado.valorCents : 0,
+      }))
+      if (divergiuDoPrevisto(previstos, realizados)) chaves.push('pagamento')
+    }
+  }
+
+  for (const tipo of vale.documentosEsperados) {
+    if (p.documentos[tipo] === 'faltante') chaves.push(tipo)
+  }
+
+  return chaves
 }
 
 /**
@@ -562,6 +624,34 @@ function FluxoDeRetorno({
     }
   }
 
+  /**
+   * Os relatos que vão pro selo — só os que AINDA divergem, recomputado do
+   * preenchimento atual via `chavesQueDivergem`. É essa recomputação, e
+   * não uma cópia do que está em `preenchimento[...].relatos`, que
+   * descarta um relato órfão: item que deixou de divergir nunca é
+   * visitado aqui, então o texto que sobrou pra ele não vai a lugar
+   * nenhum. É a mesma defesa que o servidor tem (`relato sem diferença`
+   * recusa o selo inteiro) — aqui ela evita chegar lá.
+   */
+  function montarRelatos(): RelatoRetorno[] {
+    const saida: RelatoRetorno[] = []
+    for (const vale of contexto.vales) {
+      const p = preenchimento[vale.entregaId]
+      for (const chave of chavesQueDivergem(vale, p)) {
+        const r = p.relatos[chave]
+        if (!r?.situacao) continue
+        saida.push({
+          entregaId: vale.entregaId,
+          natureza: chave === 'pagamento' ? 'pagamento' : 'documento',
+          tipoDocumento: chave === 'pagamento' ? null : chave,
+          situacao: r.situacao,
+          relato: r.situacao === 'relatado' ? normalizarParagrafo(r.texto) : null,
+        })
+      }
+    }
+    return saida
+  }
+
   function problemaDoPreenchimento(): string | null {
     for (const vale of contexto.vales) {
       const p = preenchimento[vale.entregaId]
@@ -589,6 +679,20 @@ function FluxoDeRetorno({
           return `Vale ${vale.numeroVale}: diz se ${DOCUMENTO_LABEL[tipo].toLowerCase()} voltou.`
         }
       }
+      // 2026-09-15: relato ou "precisa apurar" nos itens que divergem.
+      // Recalculado do preenchimento ATUAL — nunca do que ficou digitado
+      // antes de a diferença que o motivou deixar de existir.
+      for (const chave of chavesQueDivergem(vale, p)) {
+        const relato = p.relatos[chave]
+        const rotulo =
+          chave === 'pagamento' ? 'o pagamento' : DOCUMENTO_LABEL[chave as TipoDocumentoFisico].toLowerCase()
+        if (!relato?.situacao) {
+          return `Vale ${vale.numeroVale}: diz o que aconteceu com ${rotulo}, ou marca "precisa apurar".`
+        }
+        if (relato.situacao === 'relatado' && !normalizarParagrafo(relato.texto)) {
+          return `Vale ${vale.numeroVale}: escreve o que aconteceu com ${rotulo}, ou marca "precisa apurar".`
+        }
+      }
     }
     return null
   }
@@ -599,7 +703,7 @@ function FluxoDeRetorno({
     setErro(null)
     setOcupado('congelando')
     try {
-      const pacote = await congelarRetorno(montarEntrada(), idsPrevistos, uuidv7)
+      const pacote = await congelarRetorno(montarEntrada(), idsPrevistos, uuidv7, montarRelatos())
       setCongelado(pacote)
       setCustodia(
         custodiaInicial({ romaneioId: pacote.romaneioId, documentHash: pacote.documentHash })
@@ -881,6 +985,7 @@ function FluxoDeRetorno({
           ocorridoEmLocal,
           envelope,
           userId: profile.id,
+          relatosJsonb: congelado.relatosJsonb,
         }
         // `dependeDeChave` e NENHUMA `chave`: ele espera a saída e o
         // fechamento legado saírem da fila, e nada depende dele — chave
@@ -915,6 +1020,7 @@ function FluxoDeRetorno({
         documentHash: congelado.documentHash,
         autorizacaoId,
         ocorridoEmLocal,
+        relatosJsonb: congelado.relatosJsonb,
       })
 
       if (selo.ok) {
@@ -1471,6 +1577,19 @@ function ValeEmConferencia({
             />
             Conferi: o cliente pagou assim.
           </label>
+          {/* O RELATO — só quando o realizado diverge do previsto (a MESMA
+              comparação que o selo faz). Recusar sem isto empurraria a
+              explicação pro WhatsApp; exigir nos itens que batem
+              inventaria trabalho onde não há nada a explicar. */}
+          {chavesQueDivergem(vale, preenchimento).includes('pagamento') && (
+            <BlocoRelato
+              rotulo="O que aconteceu com o pagamento?"
+              relato={preenchimento.relatos.pagamento ?? { situacao: null, texto: '' }}
+              onAlterar={(r) =>
+                onAlterar({ relatos: { ...preenchimento.relatos, pagamento: r } })
+              }
+            />
+          )}
         </div>
       )}
 
@@ -1478,28 +1597,86 @@ function ValeEmConferencia({
         <div className="flex flex-col gap-2">
           <Label className="text-xs">Papel que saiu com o motoboy</Label>
           {vale.documentosEsperados.map((tipo) => (
-            <div key={tipo} className="flex flex-wrap items-center gap-2 text-sm">
-              <span className="min-w-44">{DOCUMENTO_LABEL[tipo]}</span>
-              {/* SEM VALOR INICIAL. `recebido` é presença física, e é uma
-                  afirmação que ninguém pode conferir depois — deixá-la
-                  marcada por inércia faria o documento selado dizer que
-                  o papel voltou porque o caixa não olhou. */}
-              {(['recebido', 'faltante'] as const).map((situacao) => (
-                <Button
-                  key={situacao}
-                  type="button"
-                  size="sm"
-                  variant={preenchimento.documentos[tipo] === situacao ? 'default' : 'outline'}
-                  onClick={() =>
-                    onAlterar({ documentos: { ...preenchimento.documentos, [tipo]: situacao } })
+            <div key={tipo} className="flex flex-col gap-2">
+              <div className="flex flex-wrap items-center gap-2 text-sm">
+                <span className="min-w-44">{DOCUMENTO_LABEL[tipo]}</span>
+                {/* SEM VALOR INICIAL. `recebido` é presença física, e é uma
+                    afirmação que ninguém pode conferir depois — deixá-la
+                    marcada por inércia faria o documento selado dizer que
+                    o papel voltou porque o caixa não olhou. */}
+                {(['recebido', 'faltante'] as const).map((situacao) => (
+                  <Button
+                    key={situacao}
+                    type="button"
+                    size="sm"
+                    variant={preenchimento.documentos[tipo] === situacao ? 'default' : 'outline'}
+                    onClick={() =>
+                      onAlterar({ documentos: { ...preenchimento.documentos, [tipo]: situacao } })
+                    }
+                  >
+                    {situacao === 'recebido' ? 'Voltou' : 'Não voltou'}
+                  </Button>
+                ))}
+              </div>
+              {preenchimento.documentos[tipo] === 'faltante' && (
+                <BlocoRelato
+                  rotulo={`O que aconteceu com ${DOCUMENTO_LABEL[tipo].toLowerCase()}?`}
+                  relato={preenchimento.relatos[tipo] ?? { situacao: null, texto: '' }}
+                  onAlterar={(r) =>
+                    onAlterar({ relatos: { ...preenchimento.relatos, [tipo]: r } })
                   }
-                >
-                  {situacao === 'recebido' ? 'Voltou' : 'Não voltou'}
-                </Button>
-              ))}
+                />
+              )}
             </div>
           ))}
         </div>
+      )}
+    </div>
+  )
+}
+
+/**
+ * "O que aconteceu?" — o bloco compartilhado por pagamento divergente e
+ * documento faltante. Duas respostas possíveis, nunca as duas: marcar
+ * "Precisa apurar" some com o texto (e vice-versa), porque as duas juntas
+ * afirmariam duas coisas diferentes sobre o mesmo item.
+ */
+function BlocoRelato({
+  rotulo,
+  relato,
+  onAlterar,
+}: {
+  rotulo: string
+  relato: RelatoPreenchimento
+  onAlterar: (relato: RelatoPreenchimento) => void
+}) {
+  return (
+    <div className="flex flex-col gap-1.5 rounded-lg border border-amber-300/60 bg-amber-50/60 p-2 dark:border-amber-900/50 dark:bg-amber-950/20">
+      <Label className="text-xs">{rotulo}</Label>
+      <div className="flex gap-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={relato.situacao === 'relatado' ? 'default' : 'outline'}
+          onClick={() => onAlterar({ situacao: 'relatado', texto: relato.texto })}
+        >
+          Relatar
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={relato.situacao === 'precisa_apurar' ? 'default' : 'outline'}
+          onClick={() => onAlterar({ situacao: 'precisa_apurar', texto: '' })}
+        >
+          Precisa apurar
+        </Button>
+      </div>
+      {relato.situacao === 'relatado' && (
+        <Textarea
+          value={relato.texto}
+          onChange={(e) => onAlterar({ situacao: 'relatado', texto: e.target.value })}
+          placeholder="O que aconteceu?"
+        />
       )}
     </div>
   )
