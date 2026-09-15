@@ -11200,6 +11200,19 @@ de documento faltante e o caminho offline, que depende de a `sync-romaneio`
 estar republicada.
 
 **Ordem de aplicação:** primeiro `20260915120000` (tabela), depois
+**Os outros casos, pela tela, depois de republicar a `sync-romaneio`**
+(mesmo dia), lidos de volta com join em `romaneios`:
+
+| romaneio | modo | relato |
+|---|---|---|
+| `R-000056` | online | pagamento · `relatado` |
+| `R-000060` | online | pagamento · `precisa_apurar`, texto nulo |
+| `R-000061` | online | documento `receita` faltante · `relatado` |
+| `R-000062` | `offline_sincronizada` | pagamento · `relatado` |
+
+O `R-000062` prova o caminho inteiro: `relatosJsonb` congelado na fila,
+levado pela Edge Function e gravado pelo selo sincronizado.
+
 `20260915130000` (selo) — a segunda referencia `retorno_relatos`. Mesma
 cautela das migrations anteriores desta frente: sem retorno offline
 pendente na fila, abas recarregadas com o código novo.
