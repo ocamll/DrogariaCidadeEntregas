@@ -139,7 +139,7 @@ end;
 $$;
 
 revoke all on function public.registrar_conflito_retorno(
-  uuid, uuid, uuid, uuid, uuid, text, timestamptz, text, inet, jsonb, jsonb, jsonb, jsonb
+  uuid, uuid, uuid, uuid, uuid, text, timestamptz, text, inet, jsonb, jsonb, jsonb, jsonb, jsonb
 ) from public, anon, authenticated;
 
 
@@ -842,7 +842,7 @@ end;
 $$;
 
 revoke all on function public.selar_romaneio_retorno_interno(
-  uuid, uuid, uuid, text, uuid, jsonb, text, uuid, timestamptz, text, inet, jsonb
+  uuid, uuid, uuid, text, uuid, jsonb, text, uuid, timestamptz, text, inet, jsonb, jsonb
 ) from public, anon, authenticated;
 
 
@@ -891,10 +891,10 @@ end;
 $$;
 
 revoke all on function public.selar_romaneio_retorno(
-  uuid, uuid, text, uuid, jsonb, text, uuid, timestamptz, jsonb
+  uuid, uuid, text, uuid, jsonb, text, uuid, timestamptz, jsonb, jsonb
 ) from public, anon;
 grant execute on function public.selar_romaneio_retorno(
-  uuid, uuid, text, uuid, jsonb, text, uuid, timestamptz, jsonb
+  uuid, uuid, text, uuid, jsonb, text, uuid, timestamptz, jsonb, jsonb
 ) to authenticated;
 
 
@@ -1142,10 +1142,10 @@ end;
 $$;
 
 revoke all on function public.selar_romaneio_retorno_sincronizado(
-  uuid, uuid, uuid, text, uuid, jsonb, text, text, text, timestamptz, inet, jsonb, text, text
+  uuid, uuid, uuid, text, uuid, jsonb, text, text, text, timestamptz, inet, jsonb, jsonb, text, text
 ) from public, anon, authenticated;
 grant execute on function public.selar_romaneio_retorno_sincronizado(
-  uuid, uuid, uuid, text, uuid, jsonb, text, text, text, timestamptz, inet, jsonb, text, text
+  uuid, uuid, uuid, text, uuid, jsonb, text, text, text, timestamptz, inet, jsonb, jsonb, text, text
 ) to service_role;
 
 

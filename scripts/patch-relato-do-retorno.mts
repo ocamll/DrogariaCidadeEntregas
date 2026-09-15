@@ -124,9 +124,17 @@ function paraDropECreate(nome: string, proposta: string, tiposAntigos: string): 
   return `drop function public.${nome}(\n  ${tiposAntigos}\n);\n\n${criacao}`
 }
 
-function grants(nome: string, fonte: string, texto: string) {
-  prova(`${nome}: os grants originais estão na migration de origem, e são reproduzidos iguais`, fonte.includes(texto))
-  return texto
+/** Confere que os grants ANTIGOS estão na migration de origem e devolve os
+ *  mesmos grants com a lista de tipos NOVA. Reproduzi-los com os tipos
+ *  antigos foi o erro da primeira versão desta migration: depois do `drop`,
+ *  a assinatura antiga não existe mais, e o `revoke` levanta 42883. */
+function grants(nome: string, fonte: string, texto: string, tiposAntigos: string, tiposNovos: string) {
+  prova(`${nome}: os grants originais estão na migration de origem`, fonte.includes(texto))
+  prova(`${nome}: a lista nova tem um tipo a mais que a antiga`,
+    tiposNovos.split(',').length === tiposAntigos.split(',').length + 1)
+  const ocorrencias = contar(texto, tiposAntigos)
+  prova(`${nome}: os tipos antigos aparecem em cada grant`, ocorrencias >= 1, `achei ${ocorrencias}`)
+  return texto.split(tiposAntigos).join(tiposNovos)
 }
 
 // ------------------------------------------------ (1) registrar_conflito_retorno
@@ -151,7 +159,7 @@ const GRANTS_CONFLITO = grants('conflito', conflito.fonte, linhas(
   `revoke all on function public.registrar_conflito_retorno(`,
   `  ${TIPOS_CONFLITO}`,
   `) from public, anon, authenticated;`
-))
+), TIPOS_CONFLITO, `${TIPOS_CONFLITO}, jsonb`)
 
 // -------------------------------------------- (2) selar_romaneio_retorno_interno
 // A VIGENTE é a de ONTEM (receita), não a do 4B — a receita reescreveu o
@@ -304,7 +312,7 @@ const GRANTS_INTERNO = grants('interno', interno.fonte, linhas(
   'revoke all on function public.selar_romaneio_retorno_interno(',
   `  ${TIPOS_INTERNO}`,
   ') from public, anon, authenticated;'
-))
+), TIPOS_INTERNO, `${TIPOS_INTERNO}, jsonb`)
 
 // -------------------------------------------------- (3) selar_romaneio_retorno
 const online = vigente('selar_romaneio_retorno', '20260912120000_selo_do_retorno_versao_2.sql')
@@ -333,7 +341,8 @@ const GRANTS_ONLINE = grants('online', online.fonte, linhas(
   'grant execute on function public.selar_romaneio_retorno(',
   `  ${TIPOS_ONLINE}`,
   ') to authenticated;'
-))
+  // p_relatos entra ANTES de p_geolocalizacao — as duas são jsonb.
+), TIPOS_ONLINE, 'uuid, uuid, text, uuid, jsonb, text, uuid, timestamptz, jsonb, jsonb')
 
 // ------------------------------------------ (4) selar_romaneio_retorno_sincronizado
 const sinc = vigente('selar_romaneio_retorno_sincronizado', '20260912120000_selo_do_retorno_versao_2.sql')
@@ -401,7 +410,8 @@ const GRANTS_SINC = grants('sincronizado', sinc.fonte, linhas(
   'grant execute on function public.selar_romaneio_retorno_sincronizado(',
   `  ${TIPOS_SINC}`,
   ') to service_role;'
-))
+  // p_relatos entra depois de p_geolocalizacao e ANTES de p_validacao/p_motivo.
+), TIPOS_SINC, 'uuid, uuid, uuid, text, uuid, jsonb, text, text, text, timestamptz, inet, jsonb, jsonb, text, text')
 
 if (falhas > 0) {
   console.log(`\n${falhas} FALHA(S) — a migration NÃO foi escrita`)
