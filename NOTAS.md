@@ -11193,13 +11193,6 @@ um tipo a mais (commit `a4d0064`). Reaplicada inteira, conferida:
 - **teste real pela tela:** um retorno com pagamento divergente gravou uma
   linha `relatado` em `retorno_relatos`, com autor e os dois relógios.
 
-**Não exercitado:** a recusa "relato sem diferença" — chegar nela exige
-autorização de cartão + PIN, então não roda no SQL Editor; a tela não
-permite produzir o caso. Também não exercitados: `precisa_apurar`, relato
-de documento faltante e o caminho offline, que depende de a `sync-romaneio`
-estar republicada.
-
-**Ordem de aplicação:** primeiro `20260915120000` (tabela), depois
 **Os outros casos, pela tela, depois de republicar a `sync-romaneio`**
 (mesmo dia), lidos de volta com join em `romaneios`:
 
@@ -11220,6 +11213,11 @@ pendente na fila, abas recarregadas com o código novo.
 **Fora desta etapa:** a página e o PDF da saída não mostram a receita (o
 documento a tem, na linha `r`); o Registro de Auditoria e as Notificações ainda
 não leem `documento_faltante`; a aba Documentos continua a de hoje.
+**Não exercitado:** a recusa "relato sem diferença" — chegar nela exige
+autorização de cartão + PIN, então não roda no SQL Editor, e a tela não
+permite produzir o caso.
+
+**Ordem de aplicação:** primeiro `20260915120000` (tabela), depois
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
