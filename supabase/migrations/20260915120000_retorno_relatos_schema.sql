@@ -107,6 +107,6 @@ create policy retorno_relatos_select on public.retorno_relatos
 --
 -- (b) a policy de leitura existe:
 --
---   select polname from pg_policies where tablename = 'retorno_relatos';
+--   select policyname from pg_policies where tablename = 'retorno_relatos';
 --   -- esperado: retorno_relatos_select
 -- =====================================================================

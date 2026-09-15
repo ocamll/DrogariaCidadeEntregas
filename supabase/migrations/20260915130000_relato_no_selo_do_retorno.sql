@@ -1199,21 +1199,11 @@ commit;
 --    order by p.proname;
 --   -- esperado: 4 linhas, cada args contendo "p_relatos jsonb"
 --
--- (b) relato sem diferença é recusado, ANTES de gravar qualquer coisa.
---     Pega uma corrida aberta de verdade (troque os uuids) e chame com um
---     retorno de um vale ENTREGUE sem divergência, mas com relato de
---     pagamento pendurado nele:
---
---   select public.selar_romaneio_retorno(
---     '<romaneio_id novo>', '<saida_romaneio_id selada>', '<saida_document_hash>',
---     '<motoboy_id>',
---     '[{"entrega_id":"<um vale da saida>","desfecho":"entregue","motivo":null,
---        "detalhe":null,"pagamentos_realizados":[],"documentos":[]}]'::jsonb,
---     '<document_hash calculado>', '<autorizacao_id>', now(),
---     '[{"id":"<uuidv7>","entrega_id":"<o mesmo vale>","natureza":"pagamento",
---        "tipo_documento":null,"situacao":"relatado","relato":"teste"}]'::jsonb);
---   -- esperado: ERRO "Relato de pagamento para um vale sem divergência."
---   -- (ou o hash não vai bater primeiro — o que importa é NÃO selar)
+-- (b) relato sem diferença é recusado — NÃO roda no SQL Editor.
+--     Chegar nessa checagem exige uma autorização de uso único emitida
+--     por cartão + PIN e amarrada ao document_hash; sem ela o selo recusa
+--     antes (42501). A recusa fica provada por leitura do código e pela
+--     tela, que não deixa enviar relato em item sem diferença.
 --
 -- (c) o placar, o mesmo de antes de aplicar:
 --

@@ -11138,14 +11138,14 @@ errado.
 | diferença sem relato | a tela, antes de congelar | servidor aceita; ausência de linha em `retorno_relatos` já significa "sem relato" |
 
 **Tabela confirmada pelo usuário e CONSTRUÍDA, migration `20260915120000`,
-NÃO aplicada ainda:** `retorno_relatos` — um relato por (romaneio_retorno_id,
+aplicada em 2026-09-15:** `retorno_relatos` — um relato por (romaneio_retorno_id,
 entrega_id, natureza, tipo_documento), `situacao` em `relatado`/
 `precisa_apurar`, `relato` obrigatório só em `relatado`. RLS: só
 gerente (própria filial) e admin leem; nenhum grant de escrita — só o
 selo (`SECURITY DEFINER`) grava.
 
 **O selo, migration `20260915130000`, gerada e provada por
-`scripts/patch-relato-do-retorno.mts` — NÃO aplicada ainda.** Quatro
+`scripts/patch-relato-do-retorno.mts` — aplicada em 2026-09-15.** Quatro
 funções ganham um parâmetro (`p_relatos`), e por isso as quatro levam
 `drop function` explícito antes do `create` — acrescentar um tipo à lista
 de argumentos cria SOBRECARGA em vez de substituir, e a antiga
@@ -11178,8 +11178,26 @@ faltante. `sync-romaneio` repassa `corpo.relatosJsonb` como `p_relatos`.
 
 **Medido:** 33 de 33 specs (incluindo um caso novo em
 `congelar-retorno.spec.mts`), `tsc --noEmit`, build e lint sem erro.
-**Não testado:** o fluxo real na tela (preciso de login e de uma corrida
-aberta com vale divergente, que não faço).
+
+**Aplicação e conferência, 2026-09-15.** A primeira tentativa da
+`20260915130000` falhou com `42883`: os `revoke`/`grant` depois do
+`create` reproduziam a lista de tipos ANTIGA, que o `drop` já tinha
+tirado do banco. A transação desfez tudo. A prova do gerador conferia
+"grants iguais aos da origem" — ou seja, codificava o próprio erro. Ela
+passou a conferir os grants antigos na origem e a escrever os novos, com
+um tipo a mais (commit `a4d0064`). Reaplicada inteira, conferida:
+
+- tabela: `insert` negado e `select` liberado para `authenticated`;
+- as quatro funções com `p_relatos jsonb` na posição esperada, uma de cada;
+- placar **44 · 44 · 0** (saída 28, retorno 16), 3 conflitos fora;
+- **teste real pela tela:** um retorno com pagamento divergente gravou uma
+  linha `relatado` em `retorno_relatos`, com autor e os dois relógios.
+
+**Não exercitado:** a recusa "relato sem diferença" — chegar nela exige
+autorização de cartão + PIN, então não roda no SQL Editor; a tela não
+permite produzir o caso. Também não exercitados: `precisa_apurar`, relato
+de documento faltante e o caminho offline, que depende de a `sync-romaneio`
+estar republicada.
 
 **Ordem de aplicação:** primeiro `20260915120000` (tabela), depois
 `20260915130000` (selo) — a segunda referencia `retorno_relatos`. Mesma
