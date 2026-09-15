@@ -11206,6 +11206,11 @@ um tipo a mais (commit `a4d0064`). Reaplicada inteira, conferida:
 O `R-000062` prova o caminho inteiro: `relatosJsonb` congelado na fila,
 levado pela Edge Function e gravado pelo selo sincronizado.
 
+**Não exercitado:** a recusa "relato sem diferença" — chegar nela exige
+autorização de cartão + PIN, então não roda no SQL Editor, e a tela não
+permite produzir o caso.
+
+**Ordem de aplicação:** primeiro `20260915120000` (tabela), depois
 `20260915130000` (selo) — a segunda referencia `retorno_relatos`. Mesma
 cautela das migrations anteriores desta frente: sem retorno offline
 pendente na fila, abas recarregadas com o código novo.
@@ -11213,11 +11218,6 @@ pendente na fila, abas recarregadas com o código novo.
 **Fora desta etapa:** a página e o PDF da saída não mostram a receita (o
 documento a tem, na linha `r`); o Registro de Auditoria e as Notificações ainda
 não leem `documento_faltante`; a aba Documentos continua a de hoje.
-**Não exercitado:** a recusa "relato sem diferença" — chegar nela exige
-autorização de cartão + PIN, então não roda no SQL Editor, e a tela não
-permite produzir o caso.
-
-**Ordem de aplicação:** primeiro `20260915120000` (tabela), depois
 
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
