@@ -22,6 +22,7 @@ const ROTULO_POR_TIPO: Record<ItemFilaOperacao['tipo'], string> = {
   romaneio_retorno: 'Retorno do motoboy (romaneio)',
   divergencia: 'Divergência de pagamento',
   falta_receita: 'Ocorrência de documento',
+  receber_documento: 'Recebimento de documento',
 }
 
 export function FilaOfflineIndicador() {

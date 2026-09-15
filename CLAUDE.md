@@ -3749,7 +3749,7 @@ Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
                                                            pagamento_alterado só do servidor (NOTAS 111, docs/mudanca-de-escopo-divergencias-no-retorno-2026-09-13.md)
               ├ receita no documento assinado (linha `r`)          ✓ 2026-09-14 aplicada e conferida (72/72, 40 · 40 · 0)
               ├ relato ou "precisa apurar" nos itens com diferença   ✓ 2026-09-15 aplicado e conferido (44 · 44 · 0; online e offline pela tela, R-000056 a 062)
-              ├ "Receber documento" no vale, offline pela fila       não começado — tabela nova, SQL antes
+              ├ "Receber documento" no vale, offline pela fila       construído 2026-09-15 — migration 20260915140000 NÃO aplicada
               ├ aba Documentos só da gestão; notificações; fechamento não começado
               └ tirar o formulário, drenar a fila, migration de permissões  não começado
 4C. continuidade offline: abrir o app sem rede (Service Worker + Cache API), telas no estado local e E12 — obrigatória antes do piloto — desenho v1 em docs/desenho-4c-2026-09-13.md, começa depois do fechamento do 4B

@@ -2,6 +2,106 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { buscarComTeto, type ListaComTeto } from '@/lib/paginacao'
 import { inserirEventoIdempotente } from '@/data/eventos'
+import { ErroTerminalDeSaida } from '@/data/romaneios'
+import { documentosDoCanonicoRetorno } from '@/lib/documentoDoRetorno'
+import {
+  classificarResultadoDoRecebimento,
+  documentosDoVale,
+  type DocumentoDoVale,
+} from '@/lib/documentosDoVale'
+
+// --- RECEBER DOCUMENTO — a chegada posterior do papel, pelo vale ---------
+//
+// Migration `20260915140000`. Passa pela fila offline (tipo
+// `receber_documento`): o `id` nasce na tela e é a chave de idempotência
+// no servidor, então reenvio não duplica nem troca o primeiro recebedor.
+
+export type ReceberDocumentoInput = {
+  id: string
+  entregaId: string
+  tipoDocumento: string
+  // relógio do dispositivo, capturado no clique (regra 8)
+  ocorridoEmLocal: string
+}
+
+export async function receberDocumento(input: ReceberDocumentoInput): Promise<void> {
+  const { data, error } = await supabase.rpc('receber_documento', {
+    p_id: input.id,
+    p_entrega_id: input.entregaId,
+    p_tipo_documento: input.tipoDocumento,
+    p_ocorrido_em_local: input.ocorridoEmLocal,
+  })
+  if (error) {
+    // Sessão, cargo ou filial: repetir dá o mesmo resultado.
+    if (error.code === '42501') throw new ErroTerminalDeSaida(error.message, { codigo: error.code })
+    throw error
+  }
+  const classificacao = classificarResultadoDoRecebimento(data)
+  if (classificacao.tipo === 'recusa') throw new ErroTerminalDeSaida(classificacao.mensagem, data)
+  if (classificacao.tipo === 'desconhecido') {
+    throw new Error('Resposta inesperada do servidor ao receber documento.')
+  }
+}
+
+export type DocumentosDoValeLidos = {
+  /** Sem retorno selado não há o que receber: o papel pode estar com o motoboy. */
+  retornoSelado: boolean
+  documentos: DocumentoDoVale[]
+}
+
+type RecebimentoRow = {
+  tipo_documento: string
+  registrado_em: string
+  profiles: { nome: string } | null
+}
+
+async function buscarDocumentosDoVale(entregaId: string): Promise<DocumentosDoValeLidos> {
+  const { data: entrega, error: erroEntrega } = await supabase
+    .from('entregas')
+    .select('corrida_id')
+    .eq('id', entregaId)
+    .single()
+  if (erroEntrega) throw erroEntrega
+  if (!entrega.corrida_id) return { retornoSelado: false, documentos: [] }
+
+  const { data: retorno, error: erroRetorno } = await supabase
+    .from('romaneios')
+    .select('canonico')
+    .eq('corrida_id', entrega.corrida_id)
+    .eq('tipo', 'retorno')
+    .eq('status', 'selado')
+    .maybeSingle()
+  if (erroRetorno) throw erroRetorno
+  if (!retorno) return { retornoSelado: false, documentos: [] }
+
+  const { data: recebimentos, error: erroRecebimentos } = await supabase
+    .from('recebimentos_documento')
+    .select('tipo_documento, registrado_em, profiles(nome)')
+    .eq('entrega_id', entregaId)
+  if (erroRecebimentos) throw erroRecebimentos
+
+  const declarados = documentosDoCanonicoRetorno(retorno.canonico).get(entregaId) ?? []
+  return {
+    retornoSelado: true,
+    documentos: documentosDoVale(
+      declarados,
+      (recebimentos as unknown as RecebimentoRow[]).map((r) => ({
+        tipo: r.tipo_documento,
+        recebidoPorNome: r.profiles?.nome ?? null,
+        registradoEm: r.registrado_em,
+      }))
+    ),
+  }
+}
+
+export function useDocumentosDoVale(entregaId: string, habilitado: boolean) {
+  return useQuery({
+    queryKey: ['documentos-do-vale', entregaId],
+    queryFn: () => buscarDocumentosDoVale(entregaId),
+    enabled: habilitado,
+    retry: false,
+  })
+}
 
 // Pendência de papel é a única lista do app que cresce por inércia: ela
 // só encolhe quando alguém marca como recebido. Se a farmácia deixar

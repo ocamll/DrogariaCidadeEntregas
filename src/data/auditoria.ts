@@ -7,6 +7,7 @@ import {
 } from '@/data/pagamentos'
 import { formatBRL } from '@/lib/money'
 import { origemDoPagamentoAlterado } from '@/lib/formasDePagamento'
+import { DOCUMENTO_FISICO_LABEL } from '@/lib/documentoDoRetorno'
 import type { FiltroPeriodo } from '@/data/relatorios'
 
 // Leitura crua de TUDO que já foi gravado em `eventos` — diferente de
@@ -37,6 +38,8 @@ export const TIPO_EVENTO_LABEL: Record<string, string> = {
   falta_documento_convenio: 'Documento de convênio não retornou',
   insucesso_detalhado: 'Insucesso detalhado',
   entrega_cancelada: 'Vale cancelado',
+  // Gravado só pelo servidor, em `receber_documento` (2026-09-15).
+  documento_recebido_depois: 'Documento recebido depois',
   // Credencial física do motoboy. Estes não têm entrega nem corrida, então
   // a policy eventos_select já os deixa só pro admin — que é quem os gera.
   // Nenhum deles carrega PIN, hash de PIN ou token: só o credencial_id.
@@ -174,6 +177,13 @@ function resumoEDetalhe(row: EventoAuditoriaRow): { resumo: string; detalhe: str
       // o rótulo do tipo já diz "Vale cancelado" — aqui vale dizer o que
       // ele acrescenta: em que ponto do ciclo o cancelamento aconteceu.
       return { resumo: 'Cancelado antes de entrar em corrida', detalhe: row.payload.motivo ?? null }
+    case 'documento_recebido_depois': {
+      const tipo = String(row.payload?.tipo_documento ?? '')
+      return {
+        resumo: `${DOCUMENTO_FISICO_LABEL[tipo] ?? (tipo || 'Documento')} chegou depois do retorno`,
+        detalhe: null,
+      }
+    }
     case 'credencial_emitida':
     case 'credencial_revogada':
     case 'credencial_pin_definido':

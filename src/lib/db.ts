@@ -1,10 +1,10 @@
 import Dexie, { type EntityTable } from 'dexie'
 import type { NovaEntrega, NovaTransferencia } from '@/data/entregas'
 import type { MarcarDivergenciaInput } from '@/data/pagamentos'
-import type { NotificarFaltaReceitaInput } from '@/data/documentos'
+import type { NotificarFaltaReceitaInput, ReceberDocumentoInput } from '@/data/documentos'
 import type { SaidaOfflineInput, RetornoOfflineInput } from '@/data/romaneios'
 
-// OS SEIS TIPOS DA V1.
+// OS TIPOS DA V1 — eram seis; `receber_documento` entrou em 2026-09-15.
 //
 // `corrida` e `fechamento_corrida` saíram em 2026-08-25. Eram os fluxos
 // anteriores ao Romaneio de Saída e ao de Retorno, e desde 16/08 e 21/08
@@ -23,6 +23,9 @@ export type TipoOperacaoFila =
   | 'romaneio_retorno'
   | 'divergencia'
   | 'falta_receita'
+  // 2026-09-15: a chegada posterior do papel. Sem `.stores()` novo — a
+  // forma do item não muda, só o valor de `tipo`.
+  | 'receber_documento'
 
 export type PayloadPorTipo = {
   entrega: NovaEntrega
@@ -33,6 +36,7 @@ export type PayloadPorTipo = {
   romaneio_retorno: RetornoOfflineInput
   divergencia: MarcarDivergenciaInput
   falta_receita: NotificarFaltaReceitaInput
+  receber_documento: ReceberDocumentoInput
 }
 
 // `pendente` e `erro` voltam a ser tentados; `bloqueado` e `terminal` não.

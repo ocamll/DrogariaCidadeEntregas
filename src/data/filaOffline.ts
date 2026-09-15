@@ -12,7 +12,7 @@ import { bloqueadoPorDependencia } from '@/lib/dependenciaDaFila'
 import { supabase } from '@/lib/supabase'
 import { criarEntrega, criarTransferencia } from '@/data/entregas'
 import { marcarDivergencia } from '@/data/pagamentos'
-import { notificarFaltaReceita } from '@/data/documentos'
+import { notificarFaltaReceita, receberDocumento } from '@/data/documentos'
 import {
   sincronizarSaidaOffline,
   sincronizarRetornoOffline,
@@ -72,6 +72,16 @@ const QUERY_KEYS_POR_TIPO: Record<TipoOperacaoFila, string[]> = {
     'eventos-auditoria',
   ],
   falta_receita: ['notificacoes-hoje', 'notificacoes-todas', 'eventos-auditoria'],
+  // Muda `status_documental`/`receita_recebida_*` do vale (as listas) e a
+  // leitura do próprio vale no diálogo.
+  receber_documento: [
+    'documentos-do-vale',
+    'entregas-hoje',
+    'entregas-historico',
+    'documentos-convenio-pendentes',
+    'receitas-pendentes',
+    'eventos-auditoria',
+  ],
 }
 
 async function executarOperacao(item: ItemFilaOperacao): Promise<void> {
@@ -93,6 +103,9 @@ async function executarOperacao(item: ItemFilaOperacao): Promise<void> {
       return
     case 'falta_receita':
       await notificarFaltaReceita(item.payload)
+      return
+    case 'receber_documento':
+      await receberDocumento(item.payload)
       return
     default: {
       // A MESMA ARMADILHA, FECHADA PRA O PRÓXIMO TIPO.

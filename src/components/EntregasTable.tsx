@@ -275,6 +275,8 @@ export function EntregasTable({
                   previstos={entrega.formasPrevistas}
                   valorCents={entrega.valorCompraCents}
                   temReceita={entrega.temReceita}
+                  receitaRecebidaEm={entrega.receitaRecebidaEm}
+                  statusDocumental={entrega.statusDocumental}
                   profile={profile}
                 />
               </TableCell>

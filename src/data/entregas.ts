@@ -387,6 +387,8 @@ export type EntregaRecente = {
   situacaoPagamento: SituacaoDoPagamento
   temReceita: boolean
   receitaRecebidaEm: string | null
+  /** Decide, com a receita, se o menu oferece "Receber documento". */
+  statusDocumental: string
   // quem lançou o vale. Cada caixa tem o próprio login, então isso
   // responde "quem fez" direto na lista, sem abrir o Registro de
   // Auditoria. Vem do join, não de snapshot no payload: se a pessoa
@@ -400,7 +402,7 @@ export type EntregaRecente = {
 // devolve PGRST201 por ambiguidade — o mesmo erro que o embed de lojas
 // deu no Registro de Auditoria.
 const ENTREGA_RECENTE_SELECT =
-  'id, numero_vale, tipo, cliente_nome, cliente_endereco, valor_compra_cents, valor_entrega_cents, status_entrega, ocorrido_em_local, tem_receita, receita_recebida_em, criado_por, profiles!entregas_criado_por_fkey(nome), pagamentos(forma, momento, valor_cents, troco_cents)'
+  'id, numero_vale, tipo, cliente_nome, cliente_endereco, valor_compra_cents, valor_entrega_cents, status_entrega, status_documental, ocorrido_em_local, tem_receita, receita_recebida_em, criado_por, profiles!entregas_criado_por_fkey(nome), pagamentos(forma, momento, valor_cents, troco_cents)'
 
 type EntregaRecenteRow = {
   id: string
@@ -411,6 +413,7 @@ type EntregaRecenteRow = {
   valor_compra_cents: number
   valor_entrega_cents: number
   status_entrega: string
+  status_documental: string
   ocorrido_em_local: string
   tem_receita: boolean
   receita_recebida_em: string | null
@@ -450,6 +453,7 @@ function mapEntregaRecente(row: EntregaRecenteRow): EntregaRecente {
     situacaoPagamento: situacaoDoPagamento(formasPrevistas, formasRealizadas),
     temReceita: row.tem_receita,
     receitaRecebidaEm: row.receita_recebida_em,
+    statusDocumental: row.status_documental,
     criadoPorNome: row.profiles?.nome ?? null,
   }
 }

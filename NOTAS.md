@@ -11219,6 +11219,63 @@ pendente na fila, abas recarregadas com o código novo.
 documento a tem, na linha `r`); o Registro de Auditoria e as Notificações ainda
 não leem `documento_faltante`; a aba Documentos continua a de hoje.
 
+### Receber documento — construído em 2026-09-15, migration NÃO aplicada
+
+SQL mostrado e confirmado pelo usuário, com a **Opção A** de leitura: caixa e
+gerente leem os recebimentos da própria filial, admin lê todas. A razão: o
+caixa precisa ver "já recebido por Ana" no vale, senão tenta receber de novo —
+e ele já lê os vales da filial.
+
+**Banco, `20260915140000_receber_documento.sql`:** tabela
+`recebimentos_documento` (uma linha por `(entrega_id, tipo_documento)`, id do
+cliente, `papel_no_momento` caixa/gerente, os dois relógios; RLS, só `select`
+para `authenticated`) e a função `receber_documento(p_id, p_entrega_id,
+p_tipo_documento, p_ocorrido_em_local)`, `SECURITY DEFINER`:
+
+| caso | resposta |
+|---|---|
+| sem sessão, cargo fora de caixa/gerente, vale de outra filial | exceção `42501` |
+| tipo fora de convênio/crediário/receita | `tipo_invalido` |
+| mesmo `id` de novo (reenvio, fila) | `recebido`, `reenvio: true`, nada duplica |
+| outro `id`, documento já recebido | `ja_recebido`, com quem e quando — o primeiro nunca é trocado |
+| sem retorno selado, ou o DCRR1 não diz `d <vale> <tipo> faltante` | `sem_pendencia` |
+| pendente de verdade | grava, atualiza `receita_recebida_*` ou `status_documental` e grava o evento `documento_recebido_depois` com a mesma chave |
+
+A pendência sai **da linha `d` do retorno assinado**, nunca de coluna
+mutável. Convênio/crediário só levam o vale a `status_documental = 'recebido'`
+quando nenhum dos dois ficou faltante sem recebimento; a receita fica fora
+dessa conta, como no selo. `auth.uid()` está certo aqui porque a fila chama
+com a sessão do dono — se um dia passar por Edge Function, o ator vira
+parâmetro (regra do E10.1).
+
+**Cliente:**
+
+- `lib/documentosDoVale.ts` (puro): `documentosDoVale` junta o declarado no
+  retorno com os recebimentos (`recebido_no_retorno` · `pendente` ·
+  `recebido_depois`, e o primeiro nunca vira o terceiro);
+  `tiposQuePodemEstarPendentes` é o palpite pela linha da lista (nada antes
+  do retorno, nada em transferência); `cargoRecebeDocumento` espelha o gate;
+  `classificarResultadoDoRecebimento` traduz a resposta pra fila.
+- `data/documentos.ts`: `receberDocumento` (42501 e recusas viram
+  `ErroTerminalDeSaida`, resposta desconhecida retenta) e
+  `useDocumentosDoVale` (retorno selado + recebimentos).
+- Fila: tipo `receber_documento`, sem `.stores()` novo.
+- Menu "⋮" do vale: **"Receber documento"**, só para caixa e gerente, só
+  com papel que pode estar pendente. O diálogo lista os documentos do retorno
+  com botão "Recebi" nos pendentes, e diz **"aguardando sincronização"** até a
+  fila confirmar — nunca "recebido" antes. Sem rede, a lista vem da linha do
+  vale, e a tela diz que o servidor confere ao sincronizar.
+- `status_documental` entrou no `select` da lista; Registro de Auditoria
+  ganhou o rótulo do evento novo.
+
+**Medido:** `tsc`, lint e build sem erro; **34 de 34 specs** por código de
+saída, incluindo o novo `scripts/documentos-do-vale.spec.mts`. Ele achou um
+defeito antes do commit: a classificação usava `in`, que enxerga o protótipo,
+e `resultado: 'toString'` virava recusa definitiva em vez de retentável.
+
+**Não testado:** nada no banco nem na tela — a migration não foi aplicada, e
+o fluxo exige login.
+
 ## Pendências (nada disso está esquecido, só não teve sessão própria ainda)
 
 A checklist "Dentro" do MVP no CLAUDE.md está 100% marcada agora. Só resta
