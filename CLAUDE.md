@@ -3755,6 +3755,12 @@ Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
 4C. continuidade offline: abrir o app sem rede (Service Worker + Cache API), telas no estado local e E12 — obrigatória antes do piloto — desenho v1 em docs/desenho-4c-2026-09-13.md, começa depois do fechamento do 4B
 5.  conferência diária calculada, com exceções e aprovação versionada
 6.  painel da agência e conciliação por vale, por quinzena
+6b. melhorias PONTUAIS de UI (decidido 2026-09-16): os tokens do tema mais
+      as quatro telas do balcão — lista, cadastro, Nova corrida e Retorno.
+      O redesign visual das 15 telas fica PÓS-PILOTO: o uso real muda tela, e
+      desenhar antes paga duas vezes pelo mesmo trabalho. Nada aqui pode
+      baixar o contraste do anel de foco nem acrescentar passo ao cadastro
+      (os 25 segundos).
 7A. staging e ensaio do corte — inclui HARDENING e Sentry (decidido 2026-09-16):
       revisão de RLS e das funções SECURITY DEFINER, cabeçalhos de segurança
       (CSP) no Pages, limite de tentativas no login, revisão de segredos e
