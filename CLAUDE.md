@@ -3755,7 +3755,13 @@ Vem de `docs/escopo-pre-v1-revisado.md`, revista em 2026-09-11 por
 4C. continuidade offline: abrir o app sem rede (Service Worker + Cache API), telas no estado local e E12 — obrigatória antes do piloto — desenho v1 em docs/desenho-4c-2026-09-13.md, começa depois do fechamento do 4B
 5.  conferência diária calculada, com exceções e aprovação versionada
 6.  painel da agência e conciliação por vale, por quinzena
-7A. staging e ensaio do corte
+7A. staging e ensaio do corte — inclui HARDENING e Sentry (decidido 2026-09-16):
+      revisão de RLS e das funções SECURITY DEFINER, cabeçalhos de segurança
+      (CSP) no Pages, limite de tentativas no login, revisão de segredos e
+      rotação de chaves; Sentry é dependência NOVA e envia dado pra fora —
+      filtrar nome, endereço, PIN e token antes (regra 9 e LGPD). Ficam aqui
+      porque o staging é o primeiro ambiente parecido com produção: cabeçalho
+      e captura de erro não se testam no localhost.
 7B. corte final, produção e piloto em 1 filial, com a agência
 ```
 
