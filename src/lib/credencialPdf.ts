@@ -122,11 +122,21 @@ export async function montarCredencialPdf(
   // Textura: linhas paralelas a 28°, espaçadas 7mm — o mesmo `<pattern>`
   // do SVG. A opacidade final é o produto das duas do desenho
   // (0,16 do traço × 0,38 do retângulo).
+  //
+  // DUAS armadilhas, as duas corrigidas em 2026-09-19 (as linhas saíam
+  // fortes demais no PDF):
+  //   - no jsPDF, `opacity` vira `/ca`, que vale só para PREENCHIMENTO. O
+  //     traço usa `/CA`, que é `stroke-opacity`. Sem ela a linha saía
+  //     branca e opaca;
+  //   - no SVG a linha fica na borda do bloco do padrão (`M0 0V7`), e o
+  //     navegador corta a metade que passa da borda: o traço visível é
+  //     0,16mm, e não os 0,32 escritos no desenho.
+  const opacidadeDaTextura = 0.16 * 0.38
   doc.saveGraphicsState()
   recortarNoCartao()
-  doc.setGState(new GState({ opacity: 0.16 * 0.38 }))
+  doc.setGState(new GState({ opacity: opacidadeDaTextura, 'stroke-opacity': opacidadeDaTextura }))
   doc.setDrawColor(255, 255, 255)
-  doc.setLineWidth(0.32)
+  doc.setLineWidth(0.16)
   const rad = (28 * Math.PI) / 180
   const dx = Math.sin(rad)
   const dy = Math.cos(rad)

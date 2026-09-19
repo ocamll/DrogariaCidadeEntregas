@@ -144,5 +144,13 @@ console.log('\n--- higiene ---')
 checa('sem autor nos metadados', !/\/Author\s*\((?!\))/.test(conteudo))
 checa('token não aparece cru fora do desenho', true) // ele É o desenho; nada a esconder aqui
 
+// A textura do verso: linhas finas e discretas, como no desenho. No jsPDF
+// `opacity` vira `/ca` (só preenchimento); sem `/CA` o traço saía opaco.
+checa('textura: o traço tem transparência própria (/CA 0.06)', /\/CA\s+0?\.06\b/.test(conteudo))
+// 0,16mm = 0,45pt — metade dos 0,32 escritos no SVG, porque lá o bloco do
+// padrão corta a metade da linha que passa da borda.
+checa('textura: linha de 0,16mm (0,4535pt)', /\b0?\.4535\d* w\b/.test(conteudo))
+checa('textura: nenhuma linha de 0,32mm (0,907pt)', !/\b0?\.907\d* w\b/.test(conteudo))
+
 console.log(`\n${falhas === 0 ? 'PDF ok' : falhas + ' FALHA(S)'}\n`)
 process.exit(falhas === 0 ? 0 : 1)
