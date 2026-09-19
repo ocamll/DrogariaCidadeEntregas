@@ -1,5 +1,6 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
+import { valeFoiRealizado } from '@/lib/situacaoDoVale'
 import { buscarComTeto } from '@/lib/paginacao'
 import { situacaoDoPagamento } from '@/lib/formasDePagamento'
 import type {
@@ -191,7 +192,13 @@ async function buscarFechamento(filtro: FiltroFechamento): Promise<Fechamento> {
       // histórico tem `entrega_paga_cliente_cents` maior que zero, e
       // simplificar a conta para `valorEntregaCents` reescreveria o
       // acerto do passado.
-      valorFarmaciaDeveCents += vale.valorEntregaCents - vale.entregaPagaClienteCents
+      //
+      // Só vale REALIZADO (entregue ou insucesso) — a mesma regra do
+      // Relatório, da planilha e do PDF (2026-09-18). Pendente e em rota
+      // ainda não são devidos à agência.
+      if (valeFoiRealizado(vale.statusEntrega)) {
+        valorFarmaciaDeveCents += vale.valorEntregaCents - vale.entregaPagaClienteCents
+      }
 
       if (vale.statusFinanceiro === 'conferido') conferidos += 1
       else if (vale.statusFinanceiro === 'divergente') divergentes += 1

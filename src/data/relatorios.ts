@@ -1,6 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { supabase } from '@/lib/supabase'
 import { buscarPaginado } from '@/lib/paginacao'
+import { valeFoiRealizado, valeEstaPendente } from '@/lib/situacaoDoVale'
 
 export type FiltroPeriodo = { dataInicio: string; dataFim: string }
 
@@ -121,14 +122,10 @@ function entraNoDinheiro(row: EntregaRelatorioRow) {
   return row.status_entrega !== 'cancelada'
 }
 
-const STATUS_REALIZADOS = ['entregue', 'insucesso']
-const STATUS_PENDENTES = ['pendente', 'em_rota']
-
-// Vale realizado = voltou com desfecho, entregue ou com insucesso. Em rota
-// ainda não tem desfecho e conta como pendente (decisão do usuário em
-// 2026-09-18). Cancelado só existe a partir de pendente.
+// Realizado = entregue ou insucesso; em rota conta como pendente. A regra
+// mora em `lib/situacaoDoVale.ts`, a mesma que o Fechamento usa.
 function foiRealizado(row: EntregaRelatorioRow) {
-  return STATUS_REALIZADOS.includes(row.status_entrega)
+  return valeFoiRealizado(row.status_entrega)
 }
 
 function acumularGrupo(mapa: Map<string, RelatorioGrupo>, id: string, nome: string, row: EntregaRelatorioRow) {
@@ -263,7 +260,7 @@ async function buscarRelatorio(filtro: FiltroRelatorio): Promise<Relatorio> {
     // totais em vez de limpá-los, que é o oposto do motivo de o
     // cancelamento existir.
     if (row.status_entrega === 'cancelada') totalCancelados += 1
-    if (STATUS_PENDENTES.includes(row.status_entrega)) totalPendentes += 1
+    if (valeEstaPendente(row.status_entrega)) totalPendentes += 1
     if (entraNoDinheiro(row)) {
       valorCompraCents += row.valor_compra_cents
       valorEntregaCents += row.valor_entrega_cents
