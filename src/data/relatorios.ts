@@ -72,6 +72,12 @@ export type Relatorio = {
   // conta separada porque virou bloco próprio no topo do relatório: é
   // número que a gerência acompanha, não só mais um status na lista.
   totalCancelados: number
+  // Ainda sem corrida: não saíram, então não entram no acerto.
+  totalPendentes: number
+  // Em rota, entregues ou com insucesso — os vales que tiveram corrida. É
+  // sobre eles que a farmácia deve a tarifa à agência (cada tentativa gera
+  // vale cobrável), e é o mesmo conjunto do acerto por agência e motoboy.
+  totalRealizados: number
   valorCompraCents: number
   valorEntregaCents: number
   valorFarmaciaDeveCents: number
@@ -112,6 +118,14 @@ type EntregaRelatorioRow = {
 // geral continuaria certo e ninguém compara os dois níveis.
 function entraNoDinheiro(row: EntregaRelatorioRow) {
   return row.status_entrega !== 'cancelada'
+}
+
+const STATUS_REALIZADOS = ['em_rota', 'entregue', 'insucesso']
+
+// Vale realizado = saiu com o motoboy. Pendente ainda não saiu, e cancelado
+// só existe a partir de pendente (ver "Cancelamento de vale" no CLAUDE.md).
+function foiRealizado(row: EntregaRelatorioRow) {
+  return STATUS_REALIZADOS.includes(row.status_entrega)
 }
 
 function acumularGrupo(mapa: Map<string, RelatorioGrupo>, id: string, nome: string, row: EntregaRelatorioRow) {
@@ -232,6 +246,8 @@ async function buscarRelatorio(filtro: FiltroRelatorio): Promise<Relatorio> {
   let totalClientes = 0
   let totalTransferencias = 0
   let totalCancelados = 0
+  let totalPendentes = 0
+  let totalRealizados = 0
 
   for (const row of rows) {
     porStatus[row.status_entrega] = (porStatus[row.status_entrega] ?? 0) + 1
@@ -244,9 +260,16 @@ async function buscarRelatorio(filtro: FiltroRelatorio): Promise<Relatorio> {
     // totais em vez de limpá-los, que é o oposto do motivo de o
     // cancelamento existir.
     if (row.status_entrega === 'cancelada') totalCancelados += 1
+    if (row.status_entrega === 'pendente') totalPendentes += 1
     if (entraNoDinheiro(row)) {
       valorCompraCents += row.valor_compra_cents
       valorEntregaCents += row.valor_entrega_cents
+    }
+    // "A pagar" só sobre os vales que SAÍRAM — o mesmo conjunto que o
+    // acerto por agência soma. Antes o total do topo incluía a tarifa dos
+    // pendentes, e o topo dizia um valor enquanto o acerto dizia outro.
+    if (foiRealizado(row)) {
+      totalRealizados += 1
       valorFarmaciaDeveCents += row.valor_entrega_cents - row.entrega_paga_cliente_cents
     }
     if (row.tipo === 'cliente') totalClientes += 1
@@ -271,6 +294,8 @@ async function buscarRelatorio(filtro: FiltroRelatorio): Promise<Relatorio> {
     totalClientes,
     totalTransferencias,
     totalCancelados,
+    totalPendentes,
+    totalRealizados,
     valorCompraCents,
     valorEntregaCents,
     valorFarmaciaDeveCents,

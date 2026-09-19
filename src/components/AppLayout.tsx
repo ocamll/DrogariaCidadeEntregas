@@ -35,7 +35,10 @@ export function AppLayout({ children }: { children: ReactNode }) {
       <header className="flex items-center justify-between bg-primary px-4 py-3 text-primary-foreground">
         <div className="flex items-center gap-3">
           <img src={LOGO_URL} alt="Drogaria Cidade" className="h-9 w-auto" />
-          <p className="text-xs opacity-90">
+          {/* Desce 3px: o letreiro da logo fica abaixo do centro da arte
+              (centro em 185,5 de 320 px — medido nos pixels), ou ~3px nos
+              36px exibidos. Centrar pela caixa deixava o texto alto. */}
+          <p className="translate-y-[3px] text-xs opacity-90">
             {profile.nome} · {PAPEL_LABEL[profile.papel]}
             {profile.papel === 'admin'
               ? ' · Todas as filiais'

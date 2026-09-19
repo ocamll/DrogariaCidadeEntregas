@@ -30,6 +30,7 @@ import {
 import { EmAndamento } from '@/components/EmAndamento'
 import { Consulta } from '@/components/Consulta'
 import { derivarEstado } from '@/lib/estadoDeConsulta'
+import { indicadoresDoRelatorio, type TomDoIndicador } from '@/lib/indicadoresDoRelatorio'
 
 // mesmo estilo dos outros selects nativos do app (Fechamento, Histórico)
 const SELECT_CLASSNAME =
@@ -90,6 +91,15 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
   const consulta = useRelatorio(filtro)
   const estado = derivarEstado(consulta)
   const data = estado.estado === 'ready' ? estado.dados : undefined
+  // O arquivo sai do filtro APLICADO. Com o formulário diferente dele, a
+  // tela mostra um filtro e o arquivo sairia com outro — então exportar
+  // espera o "Aplicar".
+  const filtroPendente =
+    form.dataInicio !== filtro.dataInicio ||
+    form.dataFim !== filtro.dataFim ||
+    form.lojaId !== filtro.lojaId ||
+    form.agenciaId !== filtro.agenciaId
+  const exportacaoBloqueada = !data || !!exportando || filtroPendente
 
   // deixa o script do Google baixado de antemão, pra o clique não gastar
   // o gesto do usuário esperando rede (ver prepararDrive)
@@ -122,9 +132,13 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
   function contextoDoAcerto() {
     return {
       emitidoPor: profile.nome,
+      // Caixa e gerente não escolhem filial: a RLS já os prende à própria.
+      // O arquivo tem que dizer qual é, e não "todas".
       filialNome: filtro.lojaId
         ? (lojas?.find((l) => l.id === filtro.lojaId)?.nome ?? null)
-        : null,
+        : podeFiltrarFilial
+          ? null
+          : profile.lojaNome,
       agenciaNome: filtro.agenciaId
         ? (agencias?.find((a) => a.id === filtro.agenciaId)?.nome ?? null)
         : null,
@@ -142,7 +156,7 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
       // import dinâmico lá dentro: a biblioteca só desce quando alguém clica
       if (formato === 'xlsx') {
         const { exportarAcertoXlsx } = await import('@/lib/exportarAcerto')
-        await exportarAcertoXlsx(data, filtro)
+        await exportarAcertoXlsx(data, filtro, contextoDoAcerto())
       } else {
         const { exportarAcertoPdf } = await import('@/lib/exportarAcertoPdf')
         await exportarAcertoPdf(data, filtro, contextoDoAcerto())
@@ -177,7 +191,7 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
         import('@/lib/exportarAcertoPdf'),
       ])
       const arquivos = [
-        await gerarXlsx(data, filtro),
+        await gerarXlsx(data, filtro, contextoDoAcerto()),
         await gerarPdf(data, filtro, contextoDoAcerto()),
       ]
       const enviados = await enviarAoDrive(arquivos, caminhoDoAcerto(filtro))
@@ -282,43 +296,57 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
         {/* Exporta o que está na tela, não uma segunda consulta: o arquivo
             e o relatório precisam contar a mesma história, senão vira duas
             versões do acerto e alguém tem que decidir em qual acreditar. */}
-        <Button variant="outline" onClick={() => exportar('xlsx')} disabled={!data || !!exportando}>
+        <Button variant="outline" onClick={() => exportar('xlsx')} disabled={exportacaoBloqueada}>
           {exportando === 'xlsx' ? <EmAndamento>Gerando</EmAndamento> : 'Exportar .xlsx'}
         </Button>
-        <Button variant="outline" onClick={() => exportar('pdf')} disabled={!data || !!exportando}>
+        <Button variant="outline" onClick={() => exportar('pdf')} disabled={exportacaoBloqueada}>
           {exportando === 'pdf' ? <EmAndamento>Gerando</EmAndamento> : 'Exportar PDF'}
         </Button>
         {/* só aparece se o ambiente tem o Client ID configurado — sem ele
             o botão existiria só pra dar erro ao ser clicado */}
         {driveConfigurado() && (
-          <Button variant="outline" onClick={enviarParaDrive} disabled={!data || !!exportando}>
+          <Button variant="outline" onClick={enviarParaDrive} disabled={exportacaoBloqueada}>
             {exportando === 'drive' ? <EmAndamento>Enviando</EmAndamento> : 'Enviar ao Drive'}
           </Button>
         )}
       </div>
 
+      {filtroPendente && (
+        <p className="text-sm text-amber-700 dark:text-amber-400">
+          Clique em “Aplicar” para ver e exportar com o filtro escolhido.
+        </p>
+      )}
       {erroExport && <p className="text-sm text-destructive">{erroExport}</p>}
       {enviadoAoDrive && <p className="text-sm text-foreground/70">{enviadoAoDrive}</p>}
 
       <Consulta estado={estado} aoRecarregar={() => void consulta.refetch()}>
         {(data) => (
         <>
-          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-5">
-            <StatTile label="Vales no período" valor={String(data.totalVales)} />
-            <StatTile label="Entregas de cliente" valor={String(data.totalClientes)} />
-            <StatTile label="Transferências" valor={String(data.totalTransferencias)} />
-            {/* Promovido de dentro de "Por status" a bloco próprio: é número
-                que a gerência acompanha (cancelamento demais pode ser sinal
-                de treinamento ou de cliente desistindo por demora), e ali
-                embaixo ficava escondido no meio dos outros status. */}
-            <StatTile
-              label="Vales cancelados"
-              valor={String(data.totalCancelados)}
-              alerta={data.totalCancelados > 0}
-            />
-            <StatTile label="Valor de compra" valor={formatBRL(data.valorCompraCents)} />
-            <StatTile label="Valor de entrega" valor={formatBRL(data.valorEntregaCents)} />
-            <StatTile label="A pagar à agência" valor={formatBRL(data.valorFarmaciaDeveCents)} />
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {/* A mesma lista que a planilha e o PDF usam: as contagens nesta
+                linha, os valores na de baixo. */}
+            {indicadoresDoRelatorio(data)
+              .filter((indicador) => !indicador.dinheiro)
+              .map((indicador) => (
+                <StatTile
+                  key={indicador.rotulo}
+                  label={indicador.rotulo}
+                  valor={String(indicador.valor)}
+                  tom={indicador.tom}
+                />
+              ))}
+          </div>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+            {indicadoresDoRelatorio(data)
+              .filter((indicador) => indicador.dinheiro)
+              .map((indicador) => (
+                <StatTile
+                  key={indicador.rotulo}
+                  label={indicador.rotulo}
+                  valor={formatBRL(indicador.valor)}
+                  tom={indicador.tom}
+                />
+              ))}
           </div>
 
           {/* O bloco "Por status" saiu a pedido do usuário (2026-08-12): a
@@ -354,18 +382,34 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
 function StatTile({
   label,
   valor,
-  // destaque só quando o número pede atenção — cancelamento em zero é
-  // notícia boa e não deve gritar na tela.
-  alerta = false,
+  // cor só quando o número é maior que zero: verde para realizado, amarelo
+  // para pendente, vermelho para cancelado.
+  tom = 'normal',
 }: {
   label: string
   valor: string
-  alerta?: boolean
+  tom?: TomDoIndicador
 }) {
   return (
-    <div className={cn('rounded-lg border p-3', alerta && 'border-destructive/40 bg-destructive/5')}>
+    <div
+      className={cn(
+        'rounded-lg border p-3',
+        tom === 'alerta' && 'border-destructive/40 bg-destructive/5',
+        tom === 'aviso' && 'border-amber-500/50 bg-amber-500/10',
+        tom === 'sucesso' && 'border-emerald-500/50 bg-emerald-500/10'
+      )}
+    >
       <p className="text-xs text-muted-foreground">{label}</p>
-      <p className={cn('text-lg font-medium', alerta && 'text-destructive')}>{valor}</p>
+      <p
+        className={cn(
+          'text-lg font-medium',
+          tom === 'alerta' && 'text-destructive',
+          tom === 'aviso' && 'text-amber-700 dark:text-amber-400',
+          tom === 'sucesso' && 'text-emerald-700 dark:text-emerald-400'
+        )}
+      >
+        {valor}
+      </p>
     </div>
   )
 }

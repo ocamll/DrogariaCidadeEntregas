@@ -51,6 +51,38 @@ export function nomeDaSubpasta(dataInicio: string, dataFim: string): string {
   return `Acertos ${br(dataInicio)} a ${br(dataFim)}`
 }
 
+/**
+ * Parte de nome de arquivo: sem acento, minúsculo, só letras, números e
+ * hífen. `Filial São Gabriel` → `filial-sao-gabriel`.
+ */
+export function trechoDoNome(texto: string): string {
+  return texto
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+}
+
+/**
+ * O nome do arquivo do acerto diz o FILTRO, não só o período.
+ *
+ * Com só as datas, a Filial 02 e a Matriz no mesmo período davam o mesmo
+ * nome — e como reenviar ao Drive substitui o arquivo de mesmo nome, o
+ * segundo apagava o primeiro sem aviso.
+ */
+export function nomeDoArquivoDoAcerto(
+  periodo: { dataInicio: string; dataFim: string },
+  filialNome: string | null,
+  agenciaNome: string | null,
+  extensao: 'xlsx' | 'pdf'
+): string {
+  const partes = ['acerto-agencia', filialNome ? trechoDoNome(filialNome) || 'filial' : 'todas-as-filiais']
+  if (agenciaNome) partes.push(trechoDoNome(agenciaNome) || 'agencia')
+  partes.push(`${periodo.dataInicio}-a-${periodo.dataFim}`)
+  return `${partes.join('-')}.${extensao}`
+}
+
 /** O acerto vive na pasta do período, e em mais nada. */
 export function caminhoDoAcerto(periodo: { dataInicio: string; dataFim: string }): string[] {
   return [PASTA_ACERTOS, nomeDaSubpasta(periodo.dataInicio, periodo.dataFim)]

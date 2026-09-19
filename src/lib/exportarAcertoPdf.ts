@@ -1,6 +1,8 @@
 import type { Relatorio, RelatorioAgencia, FiltroPeriodo } from '@/data/relatorios'
 import { formatBRL } from '@/lib/money'
 import { carregarImagemDaMarca, LOGO_DOCUMENTO_URL, LOGO_PROPORCAO, COR_MARCA } from '@/lib/marca'
+import { indicadoresDoRelatorio } from '@/lib/indicadoresDoRelatorio'
+import { nomeDoArquivoDoAcerto } from '@/lib/caminhosNoDrive'
 
 // PDF do acerto com a agência — o documento que acompanha o pagamento da
 // quinzena. Diferente da planilha, ele é feito pra ser impresso, assinado
@@ -27,6 +29,10 @@ const STATUS_LABEL: Record<string, string> = {
 const COR_CABECALHO: [number, number, number] = [243, 244, 246]
 const COR_TOTAL: [number, number, number] = [254, 243, 199]
 const COR_ALERTA: [number, number, number] = [185, 28, 28]
+// âmbar 700, o mesmo amarelo de aviso da tela
+const COR_AVISO: [number, number, number] = [180, 83, 9]
+// esmeralda 700, o mesmo verde de "realizados" da tela
+const COR_SUCESSO: [number, number, number] = [4, 120, 87]
 const COR_SUAVE: [number, number, number] = [107, 114, 128]
 const COR_TEXTO: [number, number, number] = [17, 24, 39]
 
@@ -48,8 +54,8 @@ function formatarData(iso: string): string {
   return new Date(iso).toLocaleDateString('pt-BR')
 }
 
-function nomeDoArquivo(filtro: FiltroPeriodo): string {
-  return `acerto-agencia-${filtro.dataInicio}-a-${filtro.dataFim}.pdf`
+function nomeDoArquivo(filtro: FiltroPeriodo, contexto: ContextoAcerto): string {
+  return nomeDoArquivoDoAcerto(filtro, contexto.filialNome ?? null, contexto.agenciaNome ?? null, 'pdf')
 }
 
 // A logo vem do módulo da marca, que já entrega o PNG como data URL — é a
@@ -159,37 +165,43 @@ export async function montarPdf(
 
   // ----------------------------------------------- destaque do total
   const totalVales = relatorio.porAgencia.reduce((s, a) => s + a.totalVales, 0)
-  const totalEntregues = relatorio.porAgencia.reduce((s, a) => s + a.entregues, 0)
-  const totalInsucessos = relatorio.porAgencia.reduce((s, a) => s + a.insucessos, 0)
   const totalEntrega = relatorio.porAgencia.reduce((s, a) => s + a.valorEntregaCents, 0)
   const totalPagar = relatorio.porAgencia.reduce((s, a) => s + a.valorFarmaciaDeveCents, 0)
 
+  // Os mesmos nove números do topo da tela, na mesma disposição: as seis
+  // contagens numa linha, os três valores na de baixo.
+  const indicadores = indicadoresDoRelatorio(relatorio)
+  const porLinha = 6
+  const alturaLinhaCaixa = 14
+  const linhasCaixa = Math.ceil(indicadores.length / porLinha)
   const yCaixa = alturaFaixa + 7 + linhasContexto.length * 4.4 + 2
-  const alturaCaixa = 16
+  const alturaCaixa = linhasCaixa * alturaLinhaCaixa + 2
   doc.setDrawColor(229, 231, 235)
   doc.setFillColor(249, 250, 251)
   doc.roundedRect(margem, yCaixa, largura - margem * 2, alturaCaixa, 1.5, 1.5, 'FD')
 
-  const indicadores: Array<[string, string]> = [
-    ['Vales', String(totalVales)],
-    ['Entregues', String(totalEntregues)],
-    ['Insucessos', String(totalInsucessos)],
-    ['Valor de entrega', formatBRL(totalEntrega)],
-    ['A PAGAR', formatBRL(totalPagar)],
-  ]
-  const passo = (largura - margem * 2) / indicadores.length
-  indicadores.forEach(([rotulo, valor], i) => {
-    const cx = margem + passo * i + 4
-    doc.setFontSize(7)
+  const passo = (largura - margem * 2) / porLinha
+  indicadores.forEach((indicador, i) => {
+    const cx = margem + passo * (i % porLinha) + 3
+    const cy = yCaixa + Math.floor(i / porLinha) * alturaLinhaCaixa
+    doc.setFontSize(5.8)
     doc.setTextColor(COR_SUAVE[0], COR_SUAVE[1], COR_SUAVE[2])
     doc.setFont('helvetica', 'normal')
-    doc.text(rotulo.toUpperCase(), cx, yCaixa + 6)
-    doc.setFontSize(11)
-    const ultimo = i === indicadores.length - 1
-    if (ultimo) doc.setTextColor(COR_MARCA[0], COR_MARCA[1], COR_MARCA[2])
-    else doc.setTextColor(COR_TEXTO[0], COR_TEXTO[1], COR_TEXTO[2])
+    doc.text(indicador.rotulo.toUpperCase(), cx, cy + 6)
+    doc.setFontSize(10.5)
+    const cor =
+      indicador.tom === 'alerta'
+        ? COR_ALERTA
+        : indicador.tom === 'aviso'
+          ? COR_AVISO
+          : indicador.tom === 'sucesso'
+            ? COR_SUCESSO
+            : i === indicadores.length - 1
+            ? COR_MARCA
+            : COR_TEXTO
+    doc.setTextColor(cor[0], cor[1], cor[2])
     doc.setFont('helvetica', 'bold')
-    doc.text(valor, cx, yCaixa + 12.5)
+    doc.text(indicador.dinheiro ? formatBRL(indicador.valor) : String(indicador.valor), cx, cy + 12)
   })
 
   // --------------------------------------------------------- resumo
@@ -326,7 +338,7 @@ export async function gerarPdf(
   contexto: ContextoAcerto
 ) {
   const doc = await montarPdf(relatorio, filtro, contexto)
-  return { nome: nomeDoArquivo(filtro), blob: doc.output('blob') as Blob }
+  return { nome: nomeDoArquivo(filtro, contexto), blob: doc.output('blob') as Blob }
 }
 
 export async function exportarAcertoPdf(
@@ -335,5 +347,5 @@ export async function exportarAcertoPdf(
   contexto: ContextoAcerto
 ) {
   const doc = await montarPdf(relatorio, filtro, contexto)
-  doc.save(nomeDoArquivo(filtro))
+  doc.save(nomeDoArquivo(filtro, contexto))
 }

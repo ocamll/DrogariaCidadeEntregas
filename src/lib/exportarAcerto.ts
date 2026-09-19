@@ -1,5 +1,8 @@
 import type { Relatorio, RelatorioAgencia, FiltroPeriodo } from '@/data/relatorios'
 import type { Workbook, Worksheet, Row } from 'exceljs'
+import type { ContextoAcerto } from '@/lib/exportarAcertoPdf'
+import { indicadoresDoRelatorio } from '@/lib/indicadoresDoRelatorio'
+import { nomeDoArquivoDoAcerto } from '@/lib/caminhosNoDrive'
 
 // Exportação do acerto com a agência em .xlsx de verdade (ExcelJS), não
 // CSV renomeado: formato de moeda, filtro automático, painel congelado.
@@ -41,6 +44,10 @@ const COR = {
   total: 'FFFEF3C7',
   zebra: 'FFFAFAFA',
   alerta: 'FFB91C1C',
+  // âmbar 700, o mesmo amarelo de aviso da tela
+  aviso: 'FFB45309',
+  // esmeralda 700, o mesmo verde de "realizados" da tela
+  sucesso: 'FF047857',
   textoClaro: 'FFFFFFFF',
 } as const
 
@@ -53,8 +60,8 @@ function formatarDataHora(iso: string): string {
   return new Date(iso).toLocaleDateString('pt-BR')
 }
 
-function nomeDoArquivo(filtro: FiltroPeriodo): string {
-  return `acerto-agencia-${filtro.dataInicio}-a-${filtro.dataFim}.xlsx`
+function nomeDoArquivo(filtro: FiltroPeriodo, contexto: ContextoAcerto): string {
+  return nomeDoArquivoDoAcerto(filtro, contexto.filialNome ?? null, contexto.agenciaNome ?? null, 'xlsx')
 }
 
 // --- estilos -----------------------------------------------------------
@@ -146,7 +153,12 @@ function achatarVales(agencias: RelatorioAgencia[], comAgencia: boolean): LinhaV
 
 // --- montagem ----------------------------------------------------------
 
-function montarPagina(workbook: Workbook, relatorio: Relatorio, filtro: FiltroPeriodo) {
+function montarPagina(
+  workbook: Workbook,
+  relatorio: Relatorio,
+  filtro: FiltroPeriodo,
+  contexto: ContextoAcerto
+) {
   const variasAgencias = relatorio.porAgencia.length > 1
   const planilha = workbook.addWorksheet('Acerto')
 
@@ -165,6 +177,41 @@ function montarPagina(workbook: Workbook, relatorio: Relatorio, filtro: FiltroPe
     `Período de ${formatarDataBr(filtro.dataInicio)} a ${formatarDataBr(filtro.dataFim)}`,
     largura
   )
+  // O filtro no próprio arquivo: aberto depois, a planilha diz sozinha de
+  // qual filial e agência são os números.
+  const filtroAplicado = planilha.addRow([
+    `Filial: ${contexto.filialNome ?? 'todas'}   ·   Agência: ${contexto.agenciaNome ?? 'todas'}`,
+  ])
+  planilha.mergeCells(filtroAplicado.number, 1, filtroAplicado.number, largura)
+  filtroAplicado.getCell(1).font = { color: { argb: 'FF64748B' } }
+  planilha.addRow([])
+
+  // ---- resumo do período: os mesmos números do topo da tela
+  const tituloIndicadores = planilha.addRow(['Resumo do período'])
+  tituloIndicadores.getCell(1).font = { bold: true, size: 12 }
+  const cabIndicadores = planilha.addRow(['Indicador', 'Valor'])
+  estilizarCabecalho(cabIndicadores, 2)
+  for (const [i, indicador] of indicadoresDoRelatorio(relatorio).entries()) {
+    const linha = planilha.addRow([
+      indicador.rotulo,
+      indicador.dinheiro ? reais(indicador.valor) : indicador.valor,
+    ])
+    zebrar(linha, i, 2)
+    if (indicador.dinheiro) moeda(linha, 2)
+    if (indicador.tom !== 'normal') {
+      linha.getCell(2).font = {
+        bold: true,
+        color: {
+          argb:
+            indicador.tom === 'alerta'
+              ? COR.alerta
+              : indicador.tom === 'aviso'
+                ? COR.aviso
+                : COR.sucesso,
+        },
+      }
+    }
+  }
   planilha.addRow([])
 
   // ---- resumo: é o que se confere na hora de pagar
@@ -294,8 +341,15 @@ function montarPagina(workbook: Workbook, relatorio: Relatorio, filtro: FiltroPe
 // Montagem separada do download de propósito: assim dá pra gerar o
 // workbook e conferir o conteúdo (inclusive lendo o arquivo de volta) sem
 // depender de um efeito colateral de navegador.
-export async function montarWorkbook(relatorio: Relatorio, filtro: FiltroPeriodo) {
-  const ExcelJS = await import('exceljs')
+export async function montarWorkbook(
+  relatorio: Relatorio,
+  filtro: FiltroPeriodo,
+  contexto: ContextoAcerto
+) {
+  // No navegador (Vite) o módulo chega com `Workbook` direto; no Node, que
+  // é onde o spec roda, o pacote CommonJS chega embrulhado em `default`.
+  const modulo = await import('exceljs')
+  const ExcelJS = (modulo as unknown as { default?: typeof modulo }).default ?? modulo
   const workbook = new ExcelJS.Workbook()
   workbook.creator = 'Drogaria Cidade — Tele-entrega'
   workbook.created = new Date()
@@ -303,7 +357,7 @@ export async function montarWorkbook(relatorio: Relatorio, filtro: FiltroPeriodo
   // sozinho a que período se refere, sem depender do nome do arquivo.
   workbook.description = `Acerto com a agência — período de ${filtro.dataInicio} a ${filtro.dataFim}`
 
-  montarPagina(workbook, relatorio, filtro)
+  montarPagina(workbook, relatorio, filtro, contexto)
   return workbook
 }
 
@@ -312,14 +366,22 @@ const TIPO_XLSX = 'application/vnd.openxmlformats-officedocument.spreadsheetml.s
 // O arquivo em memória, com o nome. Quem baixa e quem manda pro Drive
 // usam esta mesma função — o que vai pra nuvem é byte a byte o que o
 // usuário baixaria, sem uma segunda geração que pudesse divergir.
-export async function gerarXlsx(relatorio: Relatorio, filtro: FiltroPeriodo) {
-  const workbook = await montarWorkbook(relatorio, filtro)
+export async function gerarXlsx(
+  relatorio: Relatorio,
+  filtro: FiltroPeriodo,
+  contexto: ContextoAcerto
+) {
+  const workbook = await montarWorkbook(relatorio, filtro, contexto)
   const buffer = await workbook.xlsx.writeBuffer()
-  return { nome: nomeDoArquivo(filtro), blob: new Blob([buffer], { type: TIPO_XLSX }) }
+  return { nome: nomeDoArquivo(filtro, contexto), blob: new Blob([buffer], { type: TIPO_XLSX }) }
 }
 
-export async function exportarAcertoXlsx(relatorio: Relatorio, filtro: FiltroPeriodo) {
-  const { nome, blob } = await gerarXlsx(relatorio, filtro)
+export async function exportarAcertoXlsx(
+  relatorio: Relatorio,
+  filtro: FiltroPeriodo,
+  contexto: ContextoAcerto
+) {
+  const { nome, blob } = await gerarXlsx(relatorio, filtro, contexto)
   baixar(blob, nome)
 }
 

@@ -9,6 +9,8 @@
 // caber neste teste.
 import {
   caminhoDoAcerto,
+  nomeDoArquivoDoAcerto,
+  trechoDoNome,
   caminhoDoRomaneio,
   nomeDaSubpasta,
   PASTA_ACERTOS,
@@ -185,6 +187,41 @@ checa(
 checa(
   'acento no nome da filial é preservado',
   caminhoDoRomaneio('Filial São Gabriel', local(2026, 8, 18), 'farmacia')[1] === 'Filial São Gabriel'
+)
+
+console.log('\n--- o nome do arquivo do acerto ---')
+const periodo = { dataInicio: '2026-09-01', dataFim: '2026-09-18' }
+checa(
+  'filial e período no nome',
+  nomeDoArquivoDoAcerto(periodo, 'Filial 02', null, 'xlsx') ===
+    'acerto-agencia-filial-02-2026-09-01-a-2026-09-18.xlsx'
+)
+checa(
+  'sem filial: todas',
+  nomeDoArquivoDoAcerto(periodo, null, null, 'pdf') ===
+    'acerto-agencia-todas-as-filiais-2026-09-01-a-2026-09-18.pdf'
+)
+checa(
+  'agência entra quando filtrada',
+  nomeDoArquivoDoAcerto(periodo, 'Matriz', 'Gabrielense', 'pdf') ===
+    'acerto-agencia-matriz-gabrielense-2026-09-01-a-2026-09-18.pdf'
+)
+// O motivo do nome novo: duas filiais no mesmo período não podem colidir,
+// porque reenviar ao Drive substitui o arquivo de mesmo nome.
+checa(
+  'filiais diferentes, nomes diferentes',
+  nomeDoArquivoDoAcerto(periodo, 'Filial 02', null, 'xlsx') !==
+    nomeDoArquivoDoAcerto(periodo, 'Matriz', null, 'xlsx')
+)
+checa(
+  'filtro de agência não colide com o sem agência',
+  nomeDoArquivoDoAcerto(periodo, 'Matriz', 'Gabrielense', 'xlsx') !==
+    nomeDoArquivoDoAcerto(periodo, 'Matriz', null, 'xlsx')
+)
+checa('acento e espaço viram trecho limpo', trechoDoNome('Filial São Gabriel') === 'filial-sao-gabriel')
+checa(
+  'nome só de símbolos não some',
+  nomeDoArquivoDoAcerto(periodo, '***', null, 'pdf').startsWith('acerto-agencia-filial-')
 )
 
 console.log(`\n${falhas === 0 ? 'caminhos no Drive ok' : falhas + ' FALHA(S)'}\n`)
