@@ -24,7 +24,6 @@ import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card'
 import { StatusDeGravacao, type Gravacao } from '@/components/StatusDeGravacao'
-import { EmAndamento } from '@/components/EmAndamento'
 import { normalizarNome, normalizarEndereco } from '@/lib/texto'
 
 const SELECT_CLASSNAME =
@@ -195,8 +194,6 @@ function CadastroEntregaForm({
   const formaRef = useRef<HTMLSelectElement>(null)
   // O "Troco para" entra na cadeia de Enter quando há parcela em dinheiro.
   const trocoParaRef = useRef<HTMLInputElement>(null)
-
-  const hoje = new Date().toLocaleDateString('pt-BR')
 
   function advanceOnEnter<T extends HTMLInputElement | HTMLSelectElement>(nextRef: React.RefObject<T | null>) {
     return (e: KeyboardEvent<HTMLInputElement | HTMLSelectElement>) => {
@@ -390,7 +387,6 @@ function CadastroEntregaForm({
       <Card>
         <CardHeader>
           <CardTitle>Cadastro de entrega</CardTitle>
-          <p className="text-sm text-muted-foreground">{hoje}</p>
         </CardHeader>
         <CardContent>
           <div className="flex flex-col gap-4">
@@ -425,19 +421,10 @@ function CadastroEntregaForm({
                 onKeyDown={advanceOnEnter(formaRef)}
               />
             </div>
-            {/* A ENTREGA É EXIBIDA, NÃO ESCOLHIDA — passo 1.
-
-                O seletor de 1/2 vales saiu, e com ele um Enter da cadeia.
-                A linha continua na tela por um motivo operacional, não
-                decorativo: sem ela o vale sai com R$ 9,00 anexado sem que
-                o caixa veja, e a falha de carregamento da tarifa só
-                apareceria como erro no submit. Custa zero tecla. */}
-            <div className="flex items-center justify-between text-sm">
-              <span className="text-foreground/70">Entrega</span>
-              <span>
-                {tarifaCents !== null ? formatBRL(tarifaCents) : <EmAndamento>Carregando</EmAndamento>}
-              </span>
-            </div>
+            {/* A tarifa não aparece na tela (pedido do usuário em
+                2026-09-18, por visual mais limpo). Ela continua sendo
+                anexada ao vale, e falha de carregamento vira erro no
+                salvar — ver `tarifaCents === null` em handleSalvar. */}
             <div className="flex flex-col gap-2">
               <div className="flex items-center justify-between">
                 <Label htmlFor="forma-pagamento">

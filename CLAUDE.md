@@ -1056,9 +1056,15 @@ baixaria.
   conteúdo, sem depender do efeito colateral de download do navegador.
   Foi assim que as exportações foram testadas — a planilha lendo o zip
   (`xl/worksheets/sheetN.xml`) e o PDF pelos bytes.
-- Só entram vales **com corrida atribuída** — é o que compõe o acerto com
-  a agência. Vale pendente sem corrida aparece no resumo da tela, não no
-  arquivo.
+- O acerto (por agência, por motoboy e "A pagar à agência") leva só os
+  vales **realizados: entregues ou com insucesso**. Pendente e **em rota**
+  contam como pendentes e não são cobrados — decisão do usuário em
+  2026-09-18. Eles aparecem só no resumo do período, na tela e nos arquivos.
+- Tela, planilha e PDF mostram os mesmos nove números, de
+  `lib/indicadoresDoRelatorio.ts`, e os arquivos saem do filtro APLICADO:
+  exportar fica travado enquanto o formulário difere dele. O nome do arquivo
+  leva filial e agência, senão duas filiais no mesmo período se
+  substituíam no Drive (`nomeDoArquivoDoAcerto`, em `caminhosNoDrive.ts`).
 
 ### Google Drive — a única integração externa
 

@@ -72,11 +72,12 @@ export type Relatorio = {
   // conta separada porque virou bloco próprio no topo do relatório: é
   // número que a gerência acompanha, não só mais um status na lista.
   totalCancelados: number
-  // Ainda sem corrida: não saíram, então não entram no acerto.
+  // Sem desfecho ainda: `pendente` (não saiu) e `em_rota` (saiu e não
+  // voltou). Decisão do usuário em 2026-09-18: em rota conta como pendente.
   totalPendentes: number
-  // Em rota, entregues ou com insucesso — os vales que tiveram corrida. É
-  // sobre eles que a farmácia deve a tarifa à agência (cada tentativa gera
-  // vale cobrável), e é o mesmo conjunto do acerto por agência e motoboy.
+  // Entregues ou com insucesso — os vales que voltaram. É sobre eles que a
+  // farmácia deve a tarifa à agência (cada tentativa gera vale cobrável), e
+  // é o mesmo conjunto do acerto por agência e motoboy.
   totalRealizados: number
   valorCompraCents: number
   valorEntregaCents: number
@@ -120,10 +121,12 @@ function entraNoDinheiro(row: EntregaRelatorioRow) {
   return row.status_entrega !== 'cancelada'
 }
 
-const STATUS_REALIZADOS = ['em_rota', 'entregue', 'insucesso']
+const STATUS_REALIZADOS = ['entregue', 'insucesso']
+const STATUS_PENDENTES = ['pendente', 'em_rota']
 
-// Vale realizado = saiu com o motoboy. Pendente ainda não saiu, e cancelado
-// só existe a partir de pendente (ver "Cancelamento de vale" no CLAUDE.md).
+// Vale realizado = voltou com desfecho, entregue ou com insucesso. Em rota
+// ainda não tem desfecho e conta como pendente (decisão do usuário em
+// 2026-09-18). Cancelado só existe a partir de pendente.
 function foiRealizado(row: EntregaRelatorioRow) {
   return STATUS_REALIZADOS.includes(row.status_entrega)
 }
@@ -203,8 +206,8 @@ function acumularAgencia(
 }
 
 // Agregação client-side (sem view/RPC nova) — volume do MVP não justifica
-// isso ainda. Entregas sem corrida (ainda pendentes) não entram nos
-// agrupamentos por motoboy/agência, só no resumo geral.
+// isso ainda. Vales pendentes e em rota não entram nos agrupamentos por
+// motoboy/agência, só no resumo geral.
 async function buscarRelatorio(filtro: FiltroRelatorio): Promise<Relatorio> {
   const inicio = new Date(`${filtro.dataInicio}T00:00:00`)
   const fim = new Date(`${filtro.dataFim}T00:00:00`)
@@ -260,14 +263,13 @@ async function buscarRelatorio(filtro: FiltroRelatorio): Promise<Relatorio> {
     // totais em vez de limpá-los, que é o oposto do motivo de o
     // cancelamento existir.
     if (row.status_entrega === 'cancelada') totalCancelados += 1
-    if (row.status_entrega === 'pendente') totalPendentes += 1
+    if (STATUS_PENDENTES.includes(row.status_entrega)) totalPendentes += 1
     if (entraNoDinheiro(row)) {
       valorCompraCents += row.valor_compra_cents
       valorEntregaCents += row.valor_entrega_cents
     }
-    // "A pagar" só sobre os vales que SAÍRAM — o mesmo conjunto que o
-    // acerto por agência soma. Antes o total do topo incluía a tarifa dos
-    // pendentes, e o topo dizia um valor enquanto o acerto dizia outro.
+    // "A pagar" só sobre os vales que VOLTARAM — o mesmo conjunto que o
+    // acerto por agência soma, logo abaixo.
     if (foiRealizado(row)) {
       totalRealizados += 1
       valorFarmaciaDeveCents += row.valor_entrega_cents - row.entrega_paga_cliente_cents
@@ -275,7 +277,10 @@ async function buscarRelatorio(filtro: FiltroRelatorio): Promise<Relatorio> {
     if (row.tipo === 'cliente') totalClientes += 1
     else totalTransferencias += 1
 
-    if (row.corridas?.mototaxista_id) {
+    // O acerto por agência e motoboy leva só os realizados: vale em rota
+    // ainda não tem desfecho e não é cobrado (2026-09-18). Assim o total do
+    // acerto fecha com o "A pagar" do topo.
+    if (foiRealizado(row) && row.corridas?.mototaxista_id) {
       const agenciaId = row.corridas.agencia_id ?? SEM_AGENCIA_CHAVE
       const agenciaNome = row.corridas.agencia_id ? (row.corridas.agencias?.nome ?? '—') : SEM_AGENCIA_NOME
       acumularAgencia(
