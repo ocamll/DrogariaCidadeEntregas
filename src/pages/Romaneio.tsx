@@ -197,7 +197,7 @@ function RomaneioCarregado({
           `${ateODia.join(' › ')}, um em cada via${observacao}.`
       )
     } catch (e) {
-      setErroPdf(`Não consegui enviar ao Drive: ${e instanceof Error ? e.message : String(e)}`)
+      setErroPdf(`Não foi possível enviar ao Drive: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setOcupado(null)
     }
@@ -389,7 +389,7 @@ function DocumentoSaida({ romaneio, farmacia, motoboy }: PropsDoDocumento) {
           <SecaoConflito
             romaneio={romaneio}
             titulo="Esta saída não pôde ser selada."
-            texto="Os vales já pertenciam a outra corrida quando a sincronização chegou. A retirada física aconteceu, então a validação apresentada ficou guardada neste registro — mas os vales continuam com a corrida que selou primeiro. Resolver isso é decisão de gestão."
+            texto="Os vales já estavam em outra corrida quando esta saída sincronizou. O registro foi guardado, e os vales continuam na corrida que foi selada primeiro. A gestão precisa resolver."
           />
         ) : (
           <SecaoCustodia farmacia={farmacia} motoboy={motoboy} />
@@ -531,7 +531,7 @@ function DocumentoRetorno({ romaneio, farmacia, motoboy }: PropsDoDocumento) {
           <SecaoConflito
             romaneio={romaneio}
             titulo="Este retorno não pôde ser selado."
-            texto="O que foi declarado no balcão e a validação apresentada ficaram guardados neste registro, e a corrida continua aberta. Nada do que está acima foi aplicado aos vales. Resolver isso é decisão de gestão."
+            texto="O registro foi guardado, e a corrida continua aberta. Nada acima foi aplicado aos vales. A gestão precisa resolver."
           />
         ) : (
           <SecaoCustodia farmacia={farmacia} motoboy={motoboy} />

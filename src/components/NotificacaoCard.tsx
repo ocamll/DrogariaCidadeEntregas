@@ -23,8 +23,7 @@ export function NotificacaoCard({
           do texto. */}
       {notificacao.origem === 'calculada_no_retorno' ? (
         <p className="mt-1 text-foreground/70">
-          Calculada pelo sistema ao selar o retorno: o que o balcão confirmou não bateu com o
-          previsto.
+          Registrada no retorno: o pagamento confirmado não bate com o previsto.
         </p>
       ) : (
         <p className="mt-1 text-muted-foreground">Justificativa: "{notificacao.justificativa}"</p>

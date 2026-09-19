@@ -59,7 +59,7 @@ export function UsuariosCadastro({ profile }: { profile: AuthProfile }) {
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between gap-3">
         <p className="text-sm text-muted-foreground">
-          Trocar senha de alguém não é feito por aqui — isso é direto no Supabase.
+          A troca de senha é feita pelo suporte do sistema.
         </p>
         <Button onClick={abrirNovo}>Novo usuário</Button>
       </div>
@@ -212,8 +212,8 @@ function UsuarioFormDialog({
     if (exigeFilial && !lojaId) {
       setErro(
         papel === 'caixa'
-          ? 'Caixa precisa de uma filial — sem ela não consegue lançar entrega.'
-          : 'Gerente precisa de uma filial — ele enxerga só a própria, e sem ela não veria nada.'
+          ? 'Caixa precisa de uma filial.'
+          : 'Gerente precisa de uma filial.'
       )
       return
     }
@@ -257,8 +257,8 @@ function UsuarioFormDialog({
           <DialogTitle>{editando ? 'Editar usuário' : 'Novo usuário'}</DialogTitle>
           <DialogDescription>
             {editando
-              ? 'Usuário e senha não mudam por aqui — isso é feito direto no Supabase.'
-              : 'O usuário é o que a pessoa digita pra entrar. O endereço técnico que o Auth guarda é derivado dele — ninguém digita e-mail.'}
+              ? 'Usuário e senha não são alterados aqui. Peça ao suporte do sistema.'
+              : 'O usuário é o nome que a pessoa digita para entrar.'}
           </DialogDescription>
         </DialogHeader>
 
@@ -374,7 +374,7 @@ function UsuarioFormDialog({
             <div className="flex flex-col gap-2">
               <Label>Filial</Label>
               <p className="text-sm text-muted-foreground">
-                Todas as filiais — o administrador acompanha a rede inteira, sem filial fixa.
+                Todas as filiais.
               </p>
             </div>
           )}

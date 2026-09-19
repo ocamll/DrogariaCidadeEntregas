@@ -149,7 +149,7 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
       }
     } catch (e) {
       const nome = formato === 'xlsx' ? 'a planilha' : 'o PDF'
-      setErroExport(`Não consegui gerar ${nome}: ${e instanceof Error ? e.message : String(e)}`)
+      setErroExport(`Não foi possível gerar ${nome}: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setExportando(null)
     }
@@ -186,7 +186,7 @@ export function Relatorios({ profile }: { profile: AuthProfile }) {
         `${enviados.length} arquivos enviados para ${NOME_DA_PASTA} › ${subpasta}.`
       )
     } catch (e) {
-      setErroExport(`Não consegui enviar ao Drive: ${e instanceof Error ? e.message : String(e)}`)
+      setErroExport(`Não foi possível enviar ao Drive: ${e instanceof Error ? e.message : String(e)}`)
     } finally {
       setExportando(null)
     }

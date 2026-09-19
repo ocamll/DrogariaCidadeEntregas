@@ -256,7 +256,7 @@ function DivergenciaPagamentoForm({
       valor_cents: valoresCents[i],
     }))
     if (!divergiuDoPrevisto(previstosParaComparar, realizados)) {
-      setErro('Isso bate com o que já era esperado — não é divergência.')
+      setErro('Igual ao previsto: não há divergência.')
       return
     }
     if (!justificativa.trim()) {
@@ -307,14 +307,14 @@ function DivergenciaPagamentoForm({
     <>
       <DialogDescription>
         {semPrevisto
-          ? 'Essa entrega não tem forma de pagamento registrada ainda — informa a esperada e como foi pago de verdade.'
+          ? 'Esta entrega não tem forma de pagamento prevista. Informe a prevista e como foi pago.'
           : // `textoDoPagamentoAlterado` é o MESMO formatador que o
             // Registro de Auditoria e as Ocorrências usam pro `de` do
             // evento. Aqui ele mostra "Pix (R$ 50,00) + Dinheiro
             // (R$ 73,90)" — o valor por forma importa nesta tela, ao
             // contrário da coluna da lista, porque é contra ele que o
             // caixa confere o que recebeu.
-            `Era: ${textoDoPagamentoAlterado(previstos)}. Registra como foi pago de verdade — pode ser em mais de uma forma.`}
+            `Previsto: ${textoDoPagamentoAlterado(previstos)}. Informe como foi pago; pode ser em mais de uma forma.`}
       </DialogDescription>
 
       {semPrevisto && (

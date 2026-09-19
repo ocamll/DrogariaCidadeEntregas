@@ -106,7 +106,7 @@ export function StatusDeGravacao({
   if (situacao === 'erro') {
     return (
       <p className="text-sm text-destructive">
-        {gravacao.texto}, mas ainda não subiu — vou tentar de novo sozinho.
+        {gravacao.texto}, mas ainda não foi enviada. Nova tentativa automática em seguida.
       </p>
     )
   }

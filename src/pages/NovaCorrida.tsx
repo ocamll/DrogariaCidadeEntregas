@@ -60,8 +60,7 @@ export function NovaCorrida({ profile, onVoltar }: { profile: AuthProfile; onVol
   if (!profile.lojaId) {
     return (
       <div className="mx-auto max-w-sm py-12 text-center text-muted-foreground">
-        Sua conta não tem uma loja associada — corrida precisa de uma loja. Fale com o
-        administrador.
+        Sua conta não tem filial. Fale com o administrador.
       </div>
     )
   }
@@ -632,7 +631,7 @@ function NovaCorridaFluxo({
       // Sem a chave pública não há como proteger o PIN se isto precisar
       // cair na fila. Preferimos barrar a selar sem rede de segurança.
       return setErro(
-        'Chave de segurança da saída não configurada neste ambiente (VITE_ROMANEIO_KEY_ID). Fale com o administrador.'
+        'A configuração de segurança da saída está incompleta. Fale com o administrador.'
       )
     }
 
@@ -667,7 +666,7 @@ function NovaCorridaFluxo({
           setResultado({
             kind: 'erro',
             texto:
-              'O documento calculado aqui não bate com o do servidor. Não dá pra assinar assim — avise o desenvolvedor.',
+              'O documento não confere com o do servidor, e a saída não pode ser confirmada. Avise o suporte do sistema.',
           })
           setOcupado(null)
           return
@@ -879,9 +878,8 @@ function NovaCorridaFluxo({
                 gerado pelo banco e entra no documento assinado. */}
             {criadosNaFila > 0 && (
               <p className="text-xs text-amber-700 dark:text-amber-400">
-                {criadosNaFila} vale(s) lançado(s) sem internet ainda não aparecem aqui. O número do
-                vale é gerado pelo servidor e faz parte do documento assinado, então eles só podem
-                sair depois de sincronizar.
+                {criadosNaFila} vale(s) lançado(s) sem internet só aparecem aqui depois de
+                sincronizar.
               </p>
             )}
           </Secao>

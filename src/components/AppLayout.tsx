@@ -104,9 +104,9 @@ function BotaoSair({ profile }: { profile: AuthProfile }) {
           </DialogHeader>
 
           <p className="text-sm">
-            Elas ficam gravadas neste computador e só sobem quando <strong>{profile.nome}</strong>{' '}
-            entrar de novo aqui — outra conta não sincroniza por você. Nada se perde, mas até lá
-            esses lançamentos não existem para as outras filiais.
+            Elas ficam gravadas neste computador e só são enviadas quando{' '}
+            <strong>{profile.nome}</strong> entrar de novo aqui. Nada é perdido, mas até lá elas
+            não aparecem para as outras filiais.
           </p>
 
           <DialogFooter>

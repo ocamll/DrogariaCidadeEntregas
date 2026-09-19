@@ -108,25 +108,18 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
         </Button>
       </div>
 
-      {/* O sistema só conhece tele. Dizer isso na tela evita alguém somar
-          esses números achando que é o caixa inteiro. */}
-      <p className="text-sm text-muted-foreground">
-        Só o lado da tele-entrega. Venda de balcão não passa por aqui — o total do caixa continua
-        vindo do Trier. O que esta tela responde é <strong>o que, da tele, explica uma diferença</strong>.
-      </p>
-
       <Consulta estado={estado} aoRecarregar={() => void consulta.refetch()}>
         {(fechamento) => (
         <>
           {fechamento.truncado && (
             <p className="text-sm text-destructive">
-              Esse dia tem mais vales do que cabe na tela — filtra por filial pra ver tudo.
+              Há mais vales neste dia do que a tela mostra. Filtre por filial para ver todos.
             </p>
           )}
 
           <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4">
             <Tile label="Vales de cliente" valor={String(fechamento.totalVales)} />
-            <Tile label="Valor de compra" valor={formatBRL(fechamento.valorCompraCents)} />
+            <Tile label="Compras das tele-entregas" valor={formatBRL(fechamento.valorCompraCents)} />
             <Tile label="A pagar à agência" valor={formatBRL(fechamento.valorFarmaciaDeveCents)} />
           </div>
 
@@ -190,11 +183,8 @@ export function Fechamento({ profile }: { profile: AuthProfile }) {
               )}
 
               <p className="text-xs text-muted-foreground">
-                Marcar o dia conferido mexe só nos que estão "a conferir". O divergente continua
-                divergente de propósito: o dia inteiro vai pra administração de qualquer jeito,
-                mas é essa marca que diz <strong>quais precisam de solução lá</strong> — o gestor
-                não resolve divergência sozinho. Apagar a marca aqui faria o problema chegar na
-                administração sem sinalização nenhuma.
+                Marca como conferidos só os vales “a conferir”. Os divergentes continuam
+                divergentes.
               </p>
 
               <div className="flex items-center gap-3">

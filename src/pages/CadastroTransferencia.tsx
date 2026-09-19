@@ -25,8 +25,7 @@ export function CadastroTransferencia({
   if (!profile.lojaId) {
     return (
       <div className="mx-auto max-w-sm py-12 text-center text-muted-foreground">
-        Sua conta não tem uma loja associada — transferência precisa de uma loja de origem. Fale
-        com o administrador.
+        Sua conta não tem filial. Fale com o administrador.
       </div>
     )
   }
@@ -81,7 +80,7 @@ function CadastroTransferenciaForm({
     // mandava escolher — inclusive quando ele já tinha escolhido.
     if (!fornecedoras) {
       setErroValidacao(
-        'Ainda não sei quais são as outras filiais, então não dá pra registrar a transferência. Assim que a lista carregar, o campo libera.'
+        'A lista de filiais ainda não carregou. Aguarde e tente de novo.'
       )
       return
     }
@@ -94,7 +93,7 @@ function CadastroTransferenciaForm({
     // notaria — a transferência some do acerto com a agência em silêncio.
     // Melhor barrar e pedir pra tentar de novo.
     if (tarifaCents === null) {
-      setErroValidacao('Ainda não carreguei a tarifa da sua filial. Tenta de novo em um instante.')
+      setErroValidacao('A tarifa da filial ainda não carregou. Tente de novo em instantes.')
       return
     }
     setErroValidacao(null)
@@ -162,7 +161,7 @@ function CadastroTransferenciaForm({
                 estaVazio={(todas) => todas.filter((l) => l.id !== lojaId).length === 0}
                 vazio={
                   <p className="text-sm text-muted-foreground">
-                    Nenhuma outra filial cadastrada — transferência precisa de duas.
+                    Não há outra filial cadastrada.
                   </p>
                 }
                 aoRecarregar={() => void consultaLojas.refetch()}
@@ -190,7 +189,7 @@ function CadastroTransferenciaForm({
                 )}
               </CampoDependente>
               <p className="text-xs text-foreground/70">
-                O motoboy passa nela pra pegar o produto e entrega aqui.
+                O motoboy retira o produto nesta filial e entrega aqui.
               </p>
             </div>
 

@@ -203,7 +203,7 @@ function AgenciaFormDialog({
               rotulo="Cidades"
               vazio={
                 <p className="text-sm text-muted-foreground">
-                  Nenhuma cidade cadastrada — criar cidade é manual, via SQL.
+                  Nenhuma cidade cadastrada. Peça ao suporte do sistema para cadastrar.
                 </p>
               }
               aoRecarregar={() => void consultaCidades.refetch()}

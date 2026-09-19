@@ -109,8 +109,7 @@ export function FilaOfflineIndicador() {
                   <div className="mt-2 flex flex-col gap-2">
                     <ConflitoDetalhado detalhe={item.detalhe} />
                     <p className="text-xs text-foreground/70">
-                      A tentativa está registrada no sistema, com as duas assinaturas — dispensar
-                      aqui só limpa este aviso.
+                      A tentativa está registrada no sistema. Dispensar só limpa este aviso.
                     </p>
                     <div>
                       <Button

@@ -29,8 +29,7 @@ export function ListaTransferencias({ profile }: { profile: AuthProfile }) {
       {/* Fora do `<Consulta>` de propósito: isto explica o que a ABA é, e
           continua verdadeiro mesmo sem resposta do servidor. */}
       <p className="text-sm text-muted-foreground">
-        Vales de transferência entre filiais. A filial que pede é quem recebe o produto, assina
-        o vale e paga a tele — a filial da rota é a que fornece.
+        A filial do vale pediu o produto e paga a tele. A rota começa na filial que forneceu.
       </p>
 
       <Consulta estado={estado} aoRecarregar={() => void consulta.refetch()}>

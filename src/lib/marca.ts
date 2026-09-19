@@ -83,7 +83,7 @@ export function carregarImagemDaMarca(url: string): Promise<string> {
 
   const promessa = (async () => {
     const resposta = await fetch(url)
-    if (!resposta.ok) throw new Error(`Não consegui carregar ${url} (${resposta.status}).`)
+    if (!resposta.ok) throw new Error(`Não foi possível carregar ${url} (${resposta.status}).`)
     if (url.endsWith('.png')) return await pngComoDataUri(resposta)
     const fonte = await resposta.text()
     const achado = fonte.match(/href="(data:image\/png;base64,[^"]+)"/)

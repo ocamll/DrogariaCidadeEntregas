@@ -58,8 +58,7 @@ export function CadastroEntrega({
   if (!profile.lojaId) {
     return (
       <div className="mx-auto max-w-sm py-12 text-center text-muted-foreground">
-        Sua conta não tem uma loja associada — cadastro de entrega precisa de uma loja. Fale com
-        o administrador.
+        Sua conta não tem filial. Fale com o administrador.
       </div>
     )
   }
@@ -279,7 +278,7 @@ function CadastroEntregaForm({
     const enderecoTrim = normalizarEndereco(endereco)
 
     if (!nomeTrim || !enderecoTrim || valorCompraCents <= 0) {
-      setErroValidacao('Preenche nome, endereço e valor da compra antes de salvar.')
+      setErroValidacao('Preencha nome, endereço e valor da compra.')
       return
     }
     // A VALIDAÇÃO DAS FORMAS ACONTECE AQUI, ANTES DE ENFILEIRAR — nunca
@@ -305,7 +304,7 @@ function CadastroEntregaForm({
     // Sem tarifa carregada não dá pra montar o valor da entrega — melhor
     // barrar que gravar entrega com valor zero em silêncio.
     if (tarifaCents === null) {
-      setErroValidacao('Não consegui carregar a tarifa da filial. Recarrega a página.')
+      setErroValidacao('Não foi possível carregar a tarifa da filial. Recarregue a página.')
       return
     }
     setErroValidacao(null)

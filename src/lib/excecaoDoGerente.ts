@@ -68,6 +68,6 @@ export function mensagemDaAutorizacao(
     case 'motivo_sem_excecao':
       return 'Com o cartão do próprio motoboy não há exceção a registrar.'
     default:
-      return porGerente ? 'Não consegui autenticar o gerente.' : 'Não consegui autenticar o motoboy.'
+      return porGerente ? 'Não foi possível autenticar o gerente.' : 'Não foi possível autenticar o motoboy.'
   }
 }

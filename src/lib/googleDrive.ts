@@ -84,7 +84,7 @@ function carregarGoogleIdentity(): Promise<void> {
     script.onload = () => resolve()
     script.onerror = () => {
       scriptCarregado = null
-      reject(new Error('Não consegui carregar o login do Google. Verifica a conexão.'))
+      reject(new Error('Não foi possível carregar o login do Google. Verifique a conexão.'))
     }
     document.head.appendChild(script)
   })
@@ -127,7 +127,7 @@ async function obterToken(): Promise<string> {
             'O navegador bloqueou a janela do Google. Libera o pop-up para este site e tenta de novo.',
           unknown: 'O Google recusou a autorização. Confere se sua conta está em "Usuários de teste" no console.',
         }
-        reject(new Error(mensagens[tipo] ?? `Não consegui autorizar no Google (${tipo}).`))
+        reject(new Error(mensagens[tipo] ?? `Não foi possível autorizar no Google (${tipo}).`))
       },
     })
     cliente.requestAccessToken({ prompt: '' })

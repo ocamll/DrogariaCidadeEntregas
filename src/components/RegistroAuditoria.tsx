@@ -84,8 +84,7 @@ export function RegistroAuditoria({ profile }: { profile: AuthProfile }) {
         <DialogHeader>
           <DialogTitle>Registro de auditoria</DialogTitle>
           <DialogDescription>
-            Tudo que já foi gravado no sistema — o que aconteceu, quem fez, quando. Separado por
-            filial pra não misturar.
+            O que aconteceu, quem fez e quando.
           </DialogDescription>
         </DialogHeader>
 

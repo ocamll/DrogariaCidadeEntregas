@@ -37,8 +37,7 @@ function AvisoTemMais({ mostrar }: { mostrar: boolean }) {
   if (!mostrar) return null
   return (
     <p className="text-sm text-destructive">
-      Há mais pendências do que cabe nesta lista — vai limpando as mais antigas (que aparecem
-      primeiro) que o resto aparece.
+      Há mais pendências do que esta lista mostra. As mais antigas aparecem primeiro.
     </p>
   )
 }
@@ -74,7 +73,7 @@ function NaoVoltouDialog({
   function confirmar() {
     const texto = normalizarParagrafo(justificativa)
     if (!texto) {
-      setErro('Escreve o que aconteceu — é o que a gestão vai ler.')
+      setErro('Descreva o que aconteceu.')
       return
     }
     setErro(null)
@@ -265,7 +264,7 @@ function DocumentosConvenio({ profile }: { profile: AuthProfile }) {
         salvando={naoVoltou.salvando}
         onConfirmar={naoVoltou.confirmar}
         titulo="Documento de convênio não voltou"
-        descricao="Registra a ocorrência pra gestão. O vale continua na lista de pendências — se o documento aparecer depois, é só marcar como recebido."
+        descricao="O vale continua pendente até o documento ser marcado como recebido."
       />
     </>
       )}
@@ -315,7 +314,7 @@ function ReceitasPendentes({ profile }: { profile: AuthProfile }) {
         salvando={naoVoltou.salvando}
         onConfirmar={naoVoltou.confirmar}
         titulo="Receita não voltou"
-        descricao="Registra a ocorrência pra gestão. O vale continua na lista de pendências — se a receita aparecer depois, é só marcar como devolvida."
+        descricao="O vale continua pendente até a receita ser marcada como devolvida."
       />
     </>
       )}

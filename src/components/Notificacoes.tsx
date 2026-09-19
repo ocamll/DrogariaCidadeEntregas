@@ -51,8 +51,7 @@ export function Notificacoes({ profile }: { profile: AuthProfile }) {
         <DialogHeader>
           <DialogTitle>Notificações de hoje</DialogTitle>
           <DialogDescription>
-            Só o aviso de hoje — o histórico completo com justificativa fica na aba
-            "Ocorrências".
+            O histórico completo fica na aba “Ocorrências”.
           </DialogDescription>
         </DialogHeader>
         <div className="flex max-h-96 flex-col gap-3 overflow-y-auto">

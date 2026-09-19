@@ -305,9 +305,7 @@ function RetornoDaCorrida({
           />
           {estado.estado === 'unavailable' && (
             <p className="text-xs text-foreground/70">
-              O retorno é montado a partir do que o motoboy assinou ao sair, e isso não pode ser
-              reconstruído aqui. Abra esta tela com internet uma vez — depois disso ela funciona
-              offline.
+              Abra esta corrida com internet uma vez. Depois disso, ela funciona sem internet.
             </p>
           )}
         </div>
@@ -715,7 +713,7 @@ function FluxoDeRetorno({
         // previsto. Se aparecer, é defeito daqui, e o texto tem que dizer
         // isso em vez de culpar o caixa.
         setErro(
-          `${e.message} Isso é um defeito do sistema, não do preenchimento — avise o desenvolvedor.`
+          `${e.message} Não é erro de preenchimento. Avise o suporte do sistema.`
         )
         return
       }
@@ -839,7 +837,7 @@ function FluxoDeRetorno({
       console.error('identificar credencial falhou:', e)
       despachar({
         tipo: 'FALHA_NA_CONSULTA',
-        mensagem: 'Não consegui consultar a credencial agora.',
+        mensagem: 'Não foi possível consultar a credencial agora.',
       })
     } finally {
       setOcupado(null)
@@ -865,7 +863,7 @@ function FluxoDeRetorno({
     if (!navigator.onLine) {
       if (!envelopeDisponivel()) {
         return setErro(
-          'Chave de segurança não configurada neste ambiente (VITE_ROMANEIO_KEY_ID). Sem ela não dá pra proteger o PIN até a rede voltar. Fale com o administrador.'
+          'A configuração de segurança está incompleta, e o retorno não pode ser feito sem internet. Fale com o administrador.'
         )
       }
       segredosRef.current = { pin, credentialToken: token }
@@ -907,7 +905,7 @@ function FluxoDeRetorno({
       console.error('autorizar retorno falhou:', e)
       despachar({
         tipo: 'FALHA_NA_CONSULTA',
-        mensagem: 'Não consegui conferir o PIN agora.',
+        mensagem: 'Não foi possível conferir o PIN agora.',
       })
     } finally {
       if (pinRef.current) pinRef.current.value = ''
@@ -1128,7 +1126,7 @@ function FluxoDeRetorno({
             <p className="text-xs text-foreground/70">
               Documento da saída lido do que estava guardado neste computador
               {procedencia === 'cache_apos_falha'
-                ? ' — não consegui falar com o servidor agora.'
+                ? ' — o servidor não respondeu.'
                 : ' — sem internet no momento.'}
             </p>
           )}
@@ -1225,8 +1223,7 @@ function FluxoDeRetorno({
               )}
               <p className="text-xs text-foreground/70">
                 Ao tocar em “Confirmar retorno”, <strong>{profile.nome}</strong>
-                {cargo ? ` (${cargo})` : ''} confirma, pela farmácia, o retorno conferido acima. Estar
-                logado não basta: a confirmação é esse toque.
+                {cargo ? ` (${cargo})` : ''} confirma, pela farmácia, o retorno conferido acima.
               </p>
             </div>
           </Secao>
@@ -1885,9 +1882,8 @@ function CustodiaDoMotoboy({
             )}
             {!online && (
               <p className="text-xs text-amber-700 dark:text-amber-400">
-                Sem internet o PIN não pode ser conferido — o HMAC e o bcrypt vivem no servidor. Ele
-                fica guardado só na memória desta tela até o retorno ser registrado, e é validado na
-                sincronização.
+                Sem internet, o PIN não pode ser conferido agora. Ele é conferido quando o retorno
+                sincronizar.
               </p>
             )}
           </div>

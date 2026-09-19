@@ -264,8 +264,8 @@ export function CustodiaDoValeDetalhe({ custodia }: { custodia: CustodiaDoValeCo
 
       {custodia.status === 'conflito' ? (
         <p className="text-sm text-destructive">
-          Esta saída não pôde ser selada — algum vale já estava em outra corrida. As assinaturas
-          ficaram guardadas no registro do conflito, para a gestão resolver.
+          Esta saída não pôde ser selada: algum vale já estava em outra corrida. O registro foi
+          guardado para a gestão resolver.
         </p>
       ) : (
         <div className="grid gap-6 sm:grid-cols-2">

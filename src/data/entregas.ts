@@ -316,7 +316,7 @@ export async function cancelarEntrega(input: CancelarEntregaInput): Promise<void
   // caixa acharia que deu certo.
   if (!data || data.length === 0) {
     throw new Error(
-      'Não consegui cancelar: o vale já saiu de pendente ou ainda não sincronizou. Recarrega a lista e confere.'
+      'Não foi possível cancelar: o vale já saiu de pendente ou ainda não sincronizou. Recarregue a lista e confira.'
     )
   }
 

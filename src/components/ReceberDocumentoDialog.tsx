@@ -139,8 +139,8 @@ export function ReceberDocumentoDialog({
     corpo = (
       <>
         <p className="text-sm text-foreground/70">
-          Não deu pra ler o retorno deste vale agora (sem conexão?). A lista abaixo vem do próprio
-          vale: o servidor confere ao sincronizar e recusa o que não estiver pendente.
+          Não foi possível ler o retorno deste vale agora. Os documentos abaixo podem estar
+          pendentes; o recebimento é conferido ao sincronizar.
         </p>
         <ul className="flex flex-col gap-3">
           {candidatos.map((tipo) => linhaPendente(tipo, 'Pode estar pendente'))}
@@ -165,8 +165,8 @@ export function ReceberDocumentoDialog({
         <DialogHeader>
           <DialogTitle>Receber documento — {numeroVale}</DialogTitle>
           <DialogDescription>
-            Registre só o papel que está na sua mão agora. O retorno de {clienteNome} não muda: ele
-            continua dizendo o que voltou naquele dia.
+            Registre só o documento que está em mãos agora. O retorno de {clienteNome} não é
+            alterado.
           </DialogDescription>
         </DialogHeader>
 

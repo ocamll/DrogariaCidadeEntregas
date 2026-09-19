@@ -116,8 +116,7 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
   return (
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted-foreground">
-        O cartão identifica o motoboy; o PIN prova que é ele. O PIN é criado pelo próprio motoboy no
-        primeiro uso do cartão — ninguém aqui escolhe nem consegue ver.
+        O motoboy cria o PIN no primeiro uso do cartão. Ninguém mais vê o PIN.
       </p>
 
       {/* A COLUNA "CARTÃO" DEPENDE DE OUTRA CONSULTA, e quando ela não
@@ -298,14 +297,8 @@ export function CredenciaisCadastro({ profile: _profile }: { profile: AuthProfil
         <div>
           <h3 className="text-sm font-medium">Cartões de autorização — gerentes</h3>
           <p className="text-sm text-muted-foreground">
-            O gerente usa o cartão e o PIN dele para autorizar uma saída ou um retorno quando o
-            motoboy perdeu o cartão ou esqueceu o PIN. Ele nunca substitui o motoboy no documento:
-            o vale continua sendo de quem faz a entrega.
-          </p>
-          <p className="mt-1 text-xs text-amber-700 dark:text-amber-400">
-            A autorização pelo cartão do gerente <strong>ainda não está no fluxo da saída e do
-            retorno</strong>. O que já funciona é emitir o cartão e o gerente criar o PIN dele —
-            e é isso que precisa estar pronto antes, porque criar PIN exige internet.
+            O cartão do gerente autoriza uma saída ou um retorno quando o motoboy perdeu o cartão
+            ou esqueceu o PIN. Os vales continuam no nome do motoboy.
           </p>
         </div>
 
@@ -598,20 +591,18 @@ function CredencialEmitidaDialog({
         <div className="flex flex-col gap-4">
           <div className="rounded-lg border border-destructive/40 bg-destructive/5 p-3">
             <p className="text-sm">
-              <strong>Salva ou imprime agora.</strong> O sistema guarda só uma impressão digital do
-              cartão — este código não aparece de novo em lugar nenhum. Se fechar sem salvar, o
-              caminho é emitir outra credencial.
+              <strong>Salve ou imprima agora.</strong> Este código não aparece de novo. Se fechar
+              sem salvar, será preciso emitir outra credencial.
             </p>
           </div>
 
           {/* O que está na tela é byte a byte o que os arquivos contêm. */}
           {erro ? (
             <div className="text-xs text-red-700">
-              <p>Não consegui gerar a credencial.</p>
+              <p>Não foi possível gerar a credencial.</p>
               {erro.includes('dynamically imported module') ? (
                 <p className="mt-1">
-                  Recarrega a página (Ctrl+Shift+R) e emite de novo — o navegador está com uma
-                  versão vencida de um arquivo.
+                  Recarregue a página (Ctrl+Shift+R) e emita de novo.
                 </p>
               ) : (
                 <p className="mt-1">{erro}</p>
@@ -634,18 +625,15 @@ function CredencialEmitidaDialog({
 
           <div className="flex flex-col gap-1 text-sm">
             <p>
-              Cartão <strong>85,6 × 54mm</strong> (CR80), com o código de barras em 75 × 15,767mm —
-              0,426mm por módulo, mais que o dobro do que um leitor laser comum exige.
+              Cartão <strong>85,6 × 54 mm</strong> (CR80).
             </p>
             <p className="text-xs text-foreground/70">
-              Pra gráfica, use o <strong>PDF</strong>: nele as fontes são as padrão do formato, não
-              dependem de a máquina deles ter Consolas ou Arial, e o preto das barras vai como 100%
-              K. Peça pra imprimir <strong>a 100%, sem redimensionar</strong>. Diga também qual
-              vermelho vocês querem (Pantone ou CMYK) — o arquivo leva o da tela, em RGB.
+              Para a gráfica, envie o <strong>PDF</strong> e peça impressão <strong>a 100%, sem
+              redimensionar</strong>. Informe também o vermelho desejado (Pantone ou CMYK).
             </p>
             <p className="text-xs text-amber-700 dark:text-amber-400">
-              Os arquivos contêm o código do cartão — quem tiver eles imprime uma cópia que
-              funciona. Apaga depois de imprimir.
+              Os arquivos contêm o código do cartão e permitem imprimir uma cópia que funciona.
+              Apague depois de imprimir.
             </p>
           </div>
         </div>

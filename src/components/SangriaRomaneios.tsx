@@ -118,15 +118,15 @@ export function SangriaRomaneios({ data, lojaId }: { data: string; lojaId: strin
       // servidor soube dele, e arquivado no dia em que aconteceu no balcão.
       const nota =
         emOutroDia > 0
-          ? ` ${emOutroDia} deles foi arquivado na pasta de outro dia — é um romaneio registrado offline, que pertence ao dia em que aconteceu no balcão.`
+          ? ` ${emOutroDia} foi arquivado na pasta do dia em que a saída aconteceu (registrada sem internet).`
           : ''
       setResultado(
         `${romaneios.length} romaneio(s), ${arquivos} arquivos em ${NOME_DA_PASTA_ROMANEIOS}.${nota}`
       )
     } catch (e) {
       setErro(
-        `Não consegui completar o envio: ${e instanceof Error ? e.message : String(e)} — ` +
-          'o que já subiu está lá; clicar de novo continua de onde parou.'
+        `Não foi possível completar o envio: ${e instanceof Error ? e.message : String(e)}. ` +
+          'O que já foi enviado continua lá; clique de novo para continuar.'
       )
     } finally {
       setEnviando(false)
@@ -142,8 +142,8 @@ export function SangriaRomaneios({ data, lojaId }: { data: string; lojaId: strin
       <CardContent className="flex flex-col gap-3">
         <p className="text-sm text-foreground/70">
           Arquiva no Google Drive os romaneios desta data, nas duas vias, em{' '}
-          <span className="whitespace-nowrap">Romaneios › Filial › mês › dia › via</span>. Repetir
-          não duplica: um arquivo que já está lá é substituído.
+          <span className="whitespace-nowrap">Romaneios › Filial › mês › dia › via</span>. Enviar de
+          novo substitui os arquivos, sem duplicar.
         </p>
 
         <Consulta
